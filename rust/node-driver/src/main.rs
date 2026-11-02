@@ -1054,6 +1054,38 @@ impl RuntimeService for RuntimeApi {
             vpn_key: refreshed.vpn_key,
         }))
     }
+
+    async fn apply_admission_policy(
+        &self,
+        request: Request<driver::v1::ApplyAdmissionPolicyRequest>,
+    ) -> Result<Response<driver::v1::ApplyAdmissionPolicyResponse>, Status> {
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::unavailable("node agent is unavailable"))?;
+        // The agent validates the snapshot; the driver only forwards it.
+        let applied = agent_transport::AgentTransport::new(target)
+            .apply_admission_policy(agent::v1::ApplyAdmissionPolicyRequest {
+                revision: req.revision,
+                clients: req
+                    .clients
+                    .into_iter()
+                    .map(|client| agent::v1::AdmissionClientPolicy {
+                        email: client.email,
+                        max_sources: client.max_sources,
+                        mode: client.mode,
+                        window_seconds: client.window_seconds,
+                        cooldown_seconds: client.cooldown_seconds,
+                    })
+                    .collect(),
+            })
+            .await?;
+        Ok(Response::new(driver::v1::ApplyAdmissionPolicyResponse {
+            node_key: req.node_key,
+            revision: applied.revision,
+        }))
+    }
 }
 
 #[tonic::async_trait]

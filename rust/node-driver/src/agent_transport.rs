@@ -6,7 +6,8 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
-    AgentEmpty, ApplyBackendNodeSettingsRequest, DecommissionRequest, InstallDockerRequest,
+    AgentEmpty, ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse,
+    ApplyBackendNodeSettingsRequest, DecommissionRequest, InstallDockerRequest,
     InstallDockerResponse, LocalHealth, PathExistsRequest, RefreshAwgConfigRequest,
     RefreshAwgConfigResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncRuntimeFilesRequest,
@@ -239,6 +240,16 @@ impl AgentTransport {
         });
         request.set_timeout(Duration::from_secs(30));
         Ok(client.refresh_awg_config(request).await?.into_inner())
+    }
+
+    pub async fn apply_admission_policy(
+        &self,
+        request: ApplyAdmissionPolicyRequest,
+    ) -> Result<ApplyAdmissionPolicyResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(request);
+        request.set_timeout(Duration::from_secs(30));
+        Ok(client.apply_admission_policy(request).await?.into_inner())
     }
 
     pub async fn path_exists(&self, path: &str) -> Result<bool, tonic::Status> {

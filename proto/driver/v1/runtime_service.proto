@@ -17,6 +17,7 @@ service RuntimeService {
   rpc ResolveBackendNodeSettings(ApplyBackendNodeSettingsRequest) returns (BackendNodeSettingsResult);
   rpc GetBackendXrayPublic(GetBackendXrayPublicRequest) returns (BackendXrayPublicResult);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
+  rpc ApplyAdmissionPolicy(ApplyAdmissionPolicyRequest) returns (ApplyAdmissionPolicyResponse);
 }
 
 message BackendNodeActionRequest {
@@ -80,4 +81,27 @@ message ForceRecoveryRequest {
   string operation_kind = 4;
   string intent_json = 5;
   string phase = 6;
+}
+
+// Concurrent source limits for the node's VLESS clients (VPN plan, section 5).
+// A full snapshot: clients absent from it have no limit. Revisions only grow;
+// an older snapshot is ignored and the stored revision is returned.
+message AdmissionClientPolicy {
+  string email = 1;
+  uint32 max_sources = 2;
+  // "observe" or "enforce".
+  string mode = 3;
+  uint64 window_seconds = 4;
+  uint64 cooldown_seconds = 5;
+}
+
+message ApplyAdmissionPolicyRequest {
+  uint64 revision = 1;
+  repeated AdmissionClientPolicy clients = 2;
+  string node_key = 3;
+}
+
+message ApplyAdmissionPolicyResponse {
+  string node_key = 1;
+  uint64 revision = 2;
 }

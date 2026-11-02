@@ -109,7 +109,7 @@ impl Options {
     }
 }
 
-fn valid_email(value: &str) -> bool {
+pub(crate) fn valid_email(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value

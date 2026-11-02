@@ -183,6 +183,17 @@ class GrpcIntentDriver:
             raise ValueError('driver returned an invalid AWG config')
         return {'wg_conf': response.wg_conf, 'vpn_key': response.vpn_key}
 
+    def apply_admission_policy(self, node_key, revision, clients):
+        """Send the node's full source-limit snapshot; returns the revision in force."""
+        from driver.v1 import runtime_service_pb2
+        response = self.runtime.ApplyAdmissionPolicy(runtime_service_pb2.ApplyAdmissionPolicyRequest(
+            node_key=node_key, revision=revision,
+            clients=[runtime_service_pb2.AdmissionClientPolicy(**client) for client in clients]),
+            timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        return response.revision
+
     @staticmethod
     def node_settings_request(intent):
         from driver.v1 import runtime_service_pb2

@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::AgentConfig;
 use crate::host::metrics as host_metrics;
+use crate::protocols::xray::admission;
 
 #[derive(Clone)]
 pub(crate) struct AgentState {
@@ -15,11 +16,13 @@ pub(crate) struct AgentState {
     pub(crate) last_seen_at: Arc<Mutex<String>>,
     pub(crate) instance_id: String,
     pub(crate) cpu: Arc<Mutex<host_metrics::CpuSampler>>,
+    pub(crate) admission: Arc<admission::Service>,
 }
 
 impl AgentState {
     pub(crate) fn new(config: AgentConfig) -> Self {
         Self {
+            admission: admission::Service::open(&config.state_dir),
             config,
             cpu: Arc::new(Mutex::new(host_metrics::CpuSampler::default())),
             last_seen_at: Arc::new(Mutex::new(Utc::now().to_rfc3339())),

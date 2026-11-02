@@ -209,6 +209,15 @@ impl NodeAgentService for NodeAgentApi {
         ))
     }
 
+    async fn apply_admission_policy(
+        &self,
+        request: Request<agent::v1::ApplyAdmissionPolicyRequest>,
+    ) -> Result<Response<agent::v1::ApplyAdmissionPolicyResponse>, Status> {
+        Ok(Response::new(
+            self.state.apply_admission_policy(request.into_inner())?,
+        ))
+    }
+
     async fn install_docker(
         &self,
         _request: Request<InstallDockerRequest>,

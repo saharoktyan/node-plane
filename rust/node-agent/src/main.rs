@@ -6,8 +6,6 @@ mod api;
 mod config;
 mod fencing;
 mod host;
-// Used by enforcement modules once they are wired (VPN plan, item 7).
-#[allow(dead_code)]
 mod journal;
 mod lifecycle;
 mod profiles;
@@ -56,6 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let addr: SocketAddr = config.listen_addr.parse()?;
     print_startup(&config);
+
+    tokio::spawn(state.admission.clone().run());
 
     let sampler = state.cpu.clone();
     tokio::spawn(async move {

@@ -8,10 +8,18 @@
 //! an Xray restart (detected by its uptime going back).
 use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tonic::Status;
 
-use super::api::{RouteRule, SourceNet, XrayApi, XrayApiError};
+use super::api::cli::valid_email;
+use super::api::{DEFAULT_ADDRESS, RouteRule, SourceNet, XrayApi, XrayApiError};
+use crate::agent::v1::{ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse};
+use crate::journal::Journal;
+use crate::state::AgentState;
 
 /// Outbound that drops traffic; created with node settings.
 const BLOCKED_OUTBOUND: &str = "node-plane-blocked";
@@ -255,6 +263,149 @@ pub(crate) async fn step(
     Ok(events)
 }
 
+/// The controller's latest snapshot; journaled so limits keep working
+/// while the controller is unreachable.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Snapshot {
+    pub(crate) revision: u64,
+    pub(crate) clients: BTreeMap<String, Policy>,
+}
+
+const POLL: Duration = Duration::from_secs(5);
+const MAX_WINDOW_SECONDS: u64 = 3600;
+const MAX_COOLDOWN_SECONDS: u64 = 86_400;
+
+/// Agent-owned limit service: snapshot and enforcement state, both journaled.
+pub(crate) struct Service {
+    snapshot: Mutex<Snapshot>,
+    snapshot_journal: Journal,
+    state_journal: Journal,
+}
+
+impl Service {
+    pub(crate) fn open(state_dir: &str) -> Arc<Self> {
+        let dir = Path::new(state_dir);
+        let snapshot_journal = Journal::new(dir.join("admission-policy.json"));
+        let snapshot = snapshot_journal.load().unwrap_or_else(|err| {
+            // Keep the damaged file for inspection; the next snapshot replaces it.
+            eprintln!("admission policy journal unreadable: {err}");
+            Snapshot::default()
+        });
+        Arc::new(Self {
+            snapshot: Mutex::new(snapshot),
+            snapshot_journal,
+            state_journal: Journal::new(dir.join("admission-state.json")),
+        })
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        self.snapshot
+            .lock()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_default()
+    }
+
+    /// Stores a newer snapshot and returns the revision now in force.
+    pub(crate) fn apply(&self, request: ApplyAdmissionPolicyRequest) -> Result<u64, Status> {
+        let mut clients = BTreeMap::new();
+        for client in request.clients {
+            let mode = match client.mode.as_str() {
+                "observe" => Mode::Observe,
+                "enforce" => Mode::Enforce,
+                _ => return Err(Status::invalid_argument("unknown admission mode")),
+            };
+            if !valid_email(&client.email)
+                || client.max_sources == 0
+                || !(1..=MAX_WINDOW_SECONDS).contains(&client.window_seconds)
+                || client.cooldown_seconds > MAX_COOLDOWN_SECONDS
+            {
+                return Err(Status::invalid_argument("invalid admission policy"));
+            }
+            let policy = Policy {
+                max_sources: client.max_sources,
+                mode,
+                window_seconds: client.window_seconds,
+                cooldown_seconds: client.cooldown_seconds,
+            };
+            if clients.insert(client.email, policy).is_some() {
+                return Err(Status::invalid_argument("duplicate admission client"));
+            }
+        }
+        let mut current = self
+            .snapshot
+            .lock()
+            .map_err(|_| Status::internal("admission state unavailable"))?;
+        if request.revision <= current.revision {
+            return Ok(current.revision);
+        }
+        let next = Snapshot {
+            revision: request.revision,
+            clients,
+        };
+        self.snapshot_journal
+            .save(&next)
+            .map_err(|_| Status::unavailable("admission policy could not be stored"))?;
+        *current = next;
+        Ok(current.revision)
+    }
+
+    /// One enforcement pass. Without limits and blocks it does not touch Xray.
+    async fn tick(&self, address: &str) -> Result<Vec<Event>, String> {
+        let policies = self.snapshot().clients;
+        let mut state: State = self.state_journal.load().map_err(|err| err.to_string())?;
+        if policies.is_empty() && state.clients.is_empty() {
+            return Ok(Vec::new());
+        }
+        let now = chrono::Utc::now().timestamp().max(0).unsigned_abs();
+        let result = match XrayApi::connect(address).await {
+            Ok(api) => step(&api, &mut state, &policies, now).await,
+            Err(err) => Err(err),
+        };
+        // Journal even after a failure midway: blocks already added are recorded.
+        self.state_journal
+            .save(&state)
+            .map_err(|err| err.to_string())?;
+        result.map_err(|err| err.to_string())
+    }
+
+    /// Runs for the life of the agent.
+    pub(crate) async fn run(self: Arc<Self>) {
+        let address =
+            std::env::var("NODE_PLANE_XRAY_API").unwrap_or_else(|_| DEFAULT_ADDRESS.into());
+        let mut ticker = tokio::time::interval(POLL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_error = None;
+        loop {
+            ticker.tick().await;
+            match self.tick(&address).await {
+                Ok(events) => {
+                    last_error = None;
+                    for event in events {
+                        println!("admission {event:?}");
+                    }
+                }
+                // Report a failure once, not every poll.
+                Err(err) if last_error.as_ref() != Some(&err) => {
+                    eprintln!("admission step failed: {err}");
+                    last_error = Some(err);
+                }
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+impl AgentState {
+    pub(crate) fn apply_admission_policy(
+        &self,
+        request: ApplyAdmissionPolicyRequest,
+    ) -> Result<ApplyAdmissionPolicyResponse, Status> {
+        Ok(ApplyAdmissionPolicyResponse {
+            revision: self.admission.apply(request)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +635,86 @@ mod tests {
             .unwrap();
         assert!(tags(api.list_rules().await.unwrap()).is_empty());
         assert_eq!(state.blocks().count(), 0);
+    }
+
+    fn request(revision: u64, clients: &[(&str, &str)]) -> ApplyAdmissionPolicyRequest {
+        ApplyAdmissionPolicyRequest {
+            revision,
+            clients: clients
+                .iter()
+                .map(|(email, mode)| crate::agent::v1::AdmissionClientPolicy {
+                    email: email.to_string(),
+                    max_sources: 1,
+                    mode: mode.to_string(),
+                    window_seconds: 120,
+                    cooldown_seconds: 300,
+                })
+                .collect(),
+        }
+    }
+
+    fn state_dir(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("np-admission-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn snapshots_only_move_forward_and_survive_a_restart() {
+        let dir = state_dir("forward");
+        let service = Service::open(&dir);
+        assert_eq!(
+            service.apply(request(2, &[("phone", "enforce")])).unwrap(),
+            2
+        );
+        // An older or repeated snapshot changes nothing.
+        assert_eq!(service.apply(request(1, &[])).unwrap(), 2);
+        assert_eq!(service.apply(request(2, &[])).unwrap(), 2);
+        assert_eq!(service.snapshot().clients.len(), 1);
+        let restarted = Service::open(&dir);
+        assert_eq!(restarted.snapshot(), service.snapshot());
+        assert_eq!(restarted.apply(request(3, &[])).unwrap(), 3);
+        assert!(Service::open(&dir).snapshot().clients.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_snapshots_are_refused_whole() {
+        let dir = state_dir("invalid");
+        let service = Service::open(&dir);
+        for bad in [
+            request(1, &[("phone", "off")]),
+            request(1, &[("bad email", "enforce")]),
+            request(1, &[("phone", "enforce"), ("phone", "observe")]),
+            ApplyAdmissionPolicyRequest {
+                revision: 1,
+                clients: vec![crate::agent::v1::AdmissionClientPolicy {
+                    email: "phone".into(),
+                    max_sources: 0,
+                    mode: "enforce".into(),
+                    window_seconds: 120,
+                    cooldown_seconds: 300,
+                }],
+            },
+        ] {
+            assert_eq!(
+                service.apply(bad).unwrap_err().code(),
+                tonic::Code::InvalidArgument
+            );
+        }
+        assert_eq!(service.snapshot(), Snapshot::default());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn without_limits_the_loop_never_dials_xray() {
+        let dir = state_dir("idle");
+        let service = Service::open(&dir);
+        // Port 1 refuses connections; an idle tick must not try it.
+        assert!(service.tick("127.0.0.1:1").await.unwrap().is_empty());
+        service.apply(request(1, &[("phone", "enforce")])).unwrap();
+        assert!(service.tick("127.0.0.1:1").await.is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

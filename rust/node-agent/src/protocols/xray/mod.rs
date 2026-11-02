@@ -1,6 +1,4 @@
 //! Xray (VLESS) on this node.
-// Wired to the agent with the ApplyAdmissionPolicy RPC (VPN plan, item 7).
-#[allow(dead_code)]
 pub(crate) mod admission;
 pub(crate) mod api;
 pub(crate) mod runtime;
