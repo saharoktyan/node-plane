@@ -93,7 +93,8 @@ async def admin_settings_cb(query: CallbackQuery, bot: Bot,
         Section(tr(locale, 'settings.rich.monitoring'), rows=(tuple(rows[1]),)),
         Section(tr(locale, 'settings.rich.vpn'), rows=((InlineKeyboardButton(
             text=tr(locale, 'bittorrent.title'), callback_data='bittorrent'), InlineKeyboardButton(
-            text=tr(locale, 'devlimit.title'), callback_data='devlimit')),)),
+            text=tr(locale, 'devlimit.title'), callback_data='devlimit')),
+            (InlineKeyboardButton(text=tr(locale, 'connlimit.title'), callback_data='connlimit'),))),
         Section(tr(locale, 'settings.rich.maintenance'), rows=(tuple(rows[2]),
             (InlineKeyboardButton(text=tr(locale, 'recovery.title'), callback_data=RecoveryPage().pack()),),
             (InlineKeyboardButton(text=tr(locale, 'defaults.title'), callback_data='idefault:open'),))),

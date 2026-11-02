@@ -463,6 +463,24 @@ impl App {
                 }
                 None
             }
+            Control::ControllerPolicyToggle(
+                choice @ ("connections.mode" | "connections.max_sources"),
+            ) => {
+                if let Some(policy) = self
+                    .controller
+                    .policies
+                    .as_ref()
+                    .and_then(|value| vpn_policy(value, choice))
+                {
+                    self.controller_command(crate::controller::Command::VpnPolicySave(
+                        serde_json::json!({"changes":[{"key":choice,
+                            "value":next_connection_limit(choice, policy),
+                            "revision":policy["revision"]}]}),
+                        uuid::Uuid::new_v4(),
+                    ));
+                }
+                None
+            }
             Control::ControllerPolicyToggle(choice) => {
                 if let Some(value) = &self.controller.policies {
                     let (kind, patch) = match choice {
@@ -1763,6 +1781,25 @@ impl App {
                             Control::ControllerPolicyToggle("devices"),
                         ));
                     }
+                    if let Some(policy) = vpn_policy(value, "connections.mode") {
+                        items.push((
+                            format!(
+                                "Simultaneous networks: {}",
+                                match policy["effective"].as_str() {
+                                    Some("observe") => "Observe",
+                                    Some("enforce") => "Enforce",
+                                    _ => "Off",
+                                }
+                            ),
+                            Control::ControllerPolicyToggle("connections.mode"),
+                        ));
+                    }
+                    if let Some(policy) = vpn_policy(value, "connections.max_sources") {
+                        items.push((
+                            format!("Networks per VLESS device: {}", policy["effective"]),
+                            Control::ControllerPolicyToggle("connections.max_sources"),
+                        ));
+                    }
                 } else {
                     items.push((
                         "Please wait".into(),
@@ -1851,6 +1888,26 @@ fn vpn_policy<'a>(policies: &'a serde_json::Value, key: &str) -> Option<&'a serd
         .as_array()?
         .iter()
         .find(|item| item["key"] == key)
+}
+
+/// The next preset of a `connections.*` policy, as in the Telegram bot. It
+/// wraps around, and a value set elsewhere moves to the first preset. The
+/// default is stored as no value.
+fn next_connection_limit(key: &str, policy: &serde_json::Value) -> serde_json::Value {
+    let presets = if key == "connections.mode" {
+        serde_json::json!(["off", "observe", "enforce"])
+    } else {
+        serde_json::json!([1, 2, 3, 5])
+    };
+    let presets = presets.as_array().cloned().unwrap_or_default();
+    let next = presets
+        .iter()
+        .position(|preset| *preset == policy["effective"])
+        .map_or(0, |index| (index + 1) % presets.len());
+    match presets.get(next) {
+        Some(value) if *value != policy["default"] => value.clone(),
+        _ => serde_json::Value::Null,
+    }
 }
 
 /// Presets for `devices.max`, the same as in the Telegram bot.

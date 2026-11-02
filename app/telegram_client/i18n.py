@@ -3477,3 +3477,24 @@ CATALOG['ru'].update({
     'devlimit.inherit': 'Как в установке ({value})',
     'devlimit.current': 'Текущий лимит: {value}.',
 })
+
+CATALOG['en'].update({
+    'connlimit.title': 'Simultaneous networks', 'connlimit.configure': 'Configure',
+    'connlimit.mode': 'Mode', 'connlimit.sources': 'Networks per VLESS device',
+    'connlimit.mode.off': 'Off', 'connlimit.mode.observe': 'Observe', 'connlimit.mode.enforce': 'Enforce',
+    'connlimit.summary': '{mode}, up to {sources} per device',
+    'connlimit.inherit': 'As installation ({value})',
+    'connlimit.hint': 'Limits from how many networks one VLESS device connects at once. A new network disconnects the oldest one for a while, so a shared link stops working for everyone at the same time. Observe only reports what would be disconnected. Nodes receive changes within a minute and keep enforcing them without the controller.',
+    'connlimit.profile_hint': 'Overrides the installation setting for every VLESS device of this profile.',
+    'connlimit.timing': 'A network counts while it opened a connection in the last {window} s; a disconnected network is blocked for {cooldown} s.',
+})
+CATALOG['ru'].update({
+    'connlimit.title': 'Одновременные сети', 'connlimit.configure': 'Настроить',
+    'connlimit.mode': 'Режим', 'connlimit.sources': 'Сетей на VLESS-устройство',
+    'connlimit.mode.off': 'Выключено', 'connlimit.mode.observe': 'Наблюдение', 'connlimit.mode.enforce': 'Ограничивать',
+    'connlimit.summary': '{mode}, до {sources} на устройство',
+    'connlimit.inherit': 'Как в установке ({value})',
+    'connlimit.hint': 'Ограничивает, из скольких сетей одно VLESS-устройство подключается одновременно. Новая сеть на время отключает самую старую, поэтому ссылкой, которую раздали другим, нельзя пользоваться одновременно. В режиме наблюдения бот только сообщает, кто был бы отключён. Ноды получают изменения в течение минуты и соблюдают их без контроллера.',
+    'connlimit.profile_hint': 'Заменяет настройку установки для всех VLESS-устройств этого профиля.',
+    'connlimit.timing': 'Сеть учитывается, если за последние {window} с открыла соединение; отключённая сеть блокируется на {cooldown} с.',
+})

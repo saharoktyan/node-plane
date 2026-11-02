@@ -27,7 +27,7 @@ class AdminSettingsRichTests(IsolatedAsyncioTestCase):
             from telegram_client.routers.admin_recovery import RecoveryDiagnostics
             self.assertNotIn(RecoveryDiagnostics().pack(), [b.callback_data for row in screen.fallback_rows(rows) for b in row])
             callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
-            for value in ('bot_title_settings', 'alerts', 'traffic', 'bittorrent', 'devlimit', 'system_cleanup', 'admin_menu'):
+            for value in ('bot_title_settings', 'alerts', 'traffic', 'bittorrent', 'devlimit', 'connlimit', 'system_cleanup', 'admin_menu'):
                 self.assertIn(value, callbacks)
             self.assertNotIn('backups', callbacks)
             self.assertNotIn('updates', callbacks)

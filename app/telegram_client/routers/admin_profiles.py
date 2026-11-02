@@ -1104,20 +1104,35 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         *((Section(tr(locale, 'profile.admin.status_title'),
             rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()),
-        *_device_limit_section(locale, profile_id, await _device_limit_policy(backend, user_id, profile_id)))
+        *_policy_sections(locale, profile_id, await _vpn_policies(backend, user_id, profile_id)))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=AdminProfileCallback(profile_id=profile_id).pack())]], state, message_id)
 
 
-async def _device_limit_policy(backend, user_id, profile_id):
+async def _vpn_policies(backend, user_id, profile_id):
     try:
-        policy = await backend.request('GET', f'/api/v1/profiles/{profile_id}/vpn-policies',
-                                       telegram_user_id=user_id)
+        return await backend.request('GET', f'/api/v1/profiles/{profile_id}/vpn-policies', telegram_user_id=user_id)
     except BackendError:
         return None
+
+
+async def _device_limit_policy(backend, user_id, profile_id):
+    policy = await _vpn_policies(backend, user_id, profile_id)
+    return None if policy is None else _device_limit_key(policy)
+
+
+def _device_limit_key(policy):
     return next((item for item in policy.get('keys', ()) if item['key'] == 'devices.max'), None)
+
+
+def _policy_sections(locale, profile_id, policy):
+    from .admin_connection_limits import profile_section
+    if policy is None:
+        return ()
+    return (*_device_limit_section(locale, profile_id, _device_limit_key(policy)),
+            *profile_section(locale, profile_id, policy))
 
 
 def _device_limit_text(locale, current):

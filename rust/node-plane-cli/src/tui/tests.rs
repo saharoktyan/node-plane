@@ -3150,6 +3150,75 @@ fn device_limit_toggle_cycles_presets_and_stores_no_limit_as_no_value() {
 }
 
 #[test]
+fn connection_limit_toggles_cycle_presets_and_store_defaults_as_no_value() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.activate(Control::ControllerSection(ControllerSection::Policies));
+    app.nodes_requested.take();
+    let policy = |key: &str, value: serde_json::Value, default: serde_json::Value| {
+        serde_json::json!({"traffic":{"enabled":false},"requests":{"enabled":true},
+        "vpn":{"keys":[{"key":key,"value":null,"revision":4,"default":default,"effective":value}]}})
+    };
+    for (key, current, default, next) in [
+        (
+            "connections.mode",
+            serde_json::json!("off"),
+            serde_json::json!("off"),
+            serde_json::json!("observe"),
+        ),
+        (
+            "connections.mode",
+            serde_json::json!("observe"),
+            serde_json::json!("off"),
+            serde_json::json!("enforce"),
+        ),
+        (
+            "connections.mode",
+            serde_json::json!("enforce"),
+            serde_json::json!("off"),
+            serde_json::Value::Null,
+        ),
+        (
+            "connections.max_sources",
+            serde_json::json!(1),
+            serde_json::json!(1),
+            serde_json::json!(2),
+        ),
+        (
+            "connections.max_sources",
+            serde_json::json!(5),
+            serde_json::json!(1),
+            serde_json::Value::Null,
+        ),
+        (
+            "connections.max_sources",
+            serde_json::json!(7),
+            serde_json::json!(1),
+            serde_json::Value::Null,
+        ),
+    ] {
+        app.controller.apply(
+            crate::controller::Command::Policies,
+            policy(key, current.clone(), default),
+        );
+        let control = if key == "connections.mode" {
+            Control::ControllerPolicyToggle("connections.mode")
+        } else {
+            Control::ControllerPolicyToggle("connections.max_sources")
+        };
+        assert!(app.controller_controls().contains(&control));
+        app.activate(control);
+        let requested = app.nodes_requested.take();
+        assert!(
+            matches!(&requested, Some(crate::nodes::Command::Controller(_,
+            crate::controller::Command::VpnPolicySave(value, _))) if value["changes"][0]["key"] == key
+                && value["changes"][0]["value"] == next && value["changes"][0]["revision"] == 4),
+            "{key}: {current} -> {next}"
+        );
+    }
+}
+
+#[test]
 fn open_sidebar_label_keeps_accent_after_wheel_scroll() {
     let mut app = test_profile_app();
     app.activate(Control::Action(Action::Install));

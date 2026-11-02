@@ -15,6 +15,7 @@ from .routers import admin_alerts, admin_recovery
 from .routers.common import BackendMiddleware, LocaleMiddleware, NotificationStateMiddleware, shutdown_refreshes
 from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_settings, admin_node_tools, admin_updates, admin_backups
 from .routers import user_devices
+from .routers import admin_connection_limits
 from .routers import admin_installation_defaults
 from .routers import navigation
 from .routers import quick_start
@@ -59,6 +60,7 @@ async def main() -> None:
             dispatcher.include_router(admin_node_tools.router)
             dispatcher.include_router(admin_nodes.router)
             dispatcher.include_router(admin_settings.router)
+            dispatcher.include_router(admin_connection_limits.router)
             dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)
             dispatcher.include_router(admin_backups.router)
