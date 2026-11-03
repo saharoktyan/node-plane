@@ -299,6 +299,22 @@ class VpnPolicies:
                 raise AccessDenied('invalid_policy_value', 422) from None
         return spec.name, node_key, protocol, value, revision
 
+    def _own_device(self, actor, profile_id, device_id):
+        """A device's policies are reached through its profile; the pair must match."""
+        self._authorize(actor, 'device')
+        with self.db.connect() as conn:
+            if not conn.execute('SELECT 1 FROM backend_devices WHERE id=? AND profile_id=?',
+                                (device_id, profile_id)).fetchone():
+                raise AccessDenied('resource_not_found', 404)
+
+    def get_device(self, actor, profile_id, device_id):
+        self._own_device(actor, profile_id, device_id)
+        return self.get(actor, 'device', device_id)
+
+    def set_device(self, actor, command_key, profile_id, device_id, changes):
+        self._own_device(actor, profile_id, device_id)
+        return self.set(actor, command_key, 'device', device_id, changes)
+
     def set(self, actor, command_key, subject_kind, subject_id, changes):
         """Apply changes atomically; a None value removes the subject's own value."""
         try:

@@ -3623,3 +3623,20 @@ CATALOG['ru'].update({
     'speed.node.failed': '{node}, {protocol}: ограничение не применилось ({detail})',
     'speed.node.unsupported': '{node}, {protocol}: сервер не умеет ограничивать скорость ({detail})',
 })
+
+CATALOG['en'].update({
+    'override.device_title': 'Device limits',
+    'override.device_hint': 'Overrides the profile\'s simultaneous networks and speed for this device only.',
+    'override.node_title': 'Limits on this node',
+    'override.node_hint': 'Overrides the installation\'s simultaneous networks and speed on this node. Profile and device values still apply on top.',
+    'override.inherited': 'As installation',
+    'override.inherit_profile': 'As profile ({value})',
+})
+CATALOG['ru'].update({
+    'override.device_title': 'Ограничения устройства',
+    'override.device_hint': 'Заменяет настройки профиля (одновременные сети и скорость) только для этого устройства.',
+    'override.node_title': 'Ограничения на этой ноде',
+    'override.node_hint': 'Заменяет настройки установки (одновременные сети и скорость) на этой ноде. Значения профиля и устройства действуют поверх.',
+    'override.inherited': 'Как в установке',
+    'override.inherit_profile': 'Как в профиле ({value})',
+})

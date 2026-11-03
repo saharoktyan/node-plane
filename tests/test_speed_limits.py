@@ -1,5 +1,4 @@
 """Speed limits: per-node snapshots, overrides and delivery outcomes."""
-import json
 import unittest
 from uuid import uuid4
 
@@ -35,11 +34,7 @@ class SpeedLimitTests(fixture.Fixture, unittest.TestCase):
                                           (device['id'],)).fetchone()[0]
 
     def device_value(self, device, key, value):
-        # Device values have no HTTP route yet; resolution is what matters here.
-        self.db.connection.execute(
-            "INSERT INTO backend_vpn_policies (id,subject_kind,profile_id,device_id,node_key,protocol,key,"
-            "value_json,revision,updated_at) VALUES (?,'device',NULL,?,NULL,NULL,?,?,1,'2026-11-03T00:00:00+00:00')",
-            (str(uuid4()), device['id'], key, json.dumps(value)))
+        self.set_policy(f"/api/v1/profiles/{self.profile}/devices/{device['id']}/vpn-policies", key, value)
 
     def shaping(self):
         return self.db.connection.execute("SELECT * FROM backend_node_shaping WHERE node_key='node'").fetchone()
@@ -118,3 +113,15 @@ class SpeedLimitTests(fixture.Fixture, unittest.TestCase):
             response = self.client.patch('/api/v1/vpn-policies/installation', headers=self.headers_for(),
                 json={'changes': [{'key': 'speed.up_kbit', 'value': bad, 'revision': revision}]})
             self.assertEqual(response.status_code, 422, bad)
+
+    def test_device_policies_are_reached_only_through_their_profile(self):
+        path = f"/api/v1/profiles/{self.profile}/devices/{self.phone['id']}/vpn-policies"
+        listed = self.client.get(path, headers=self.headers_for())
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertIn('speed.up_kbit', {item['key'] for item in listed.json()['keys']})
+        self.assertNotIn('quota.bytes', {item['key'] for item in listed.json()['keys']})
+        other = f"/api/v1/profiles/{uuid4()}/devices/{self.phone['id']}/vpn-policies"
+        self.assertEqual(self.client.get(other, headers=self.headers_for()).status_code, 404)
+        response = self.client.patch(other, headers=self.headers_for(), json={
+            'changes': [{'key': 'speed.up_kbit', 'value': 1000, 'revision': 0}]})
+        self.assertEqual(response.status_code, 404)

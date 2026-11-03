@@ -90,6 +90,14 @@ async def get_device(backend, user_id, profile_id, device_id):
     return item
 
 
+async def is_admin(backend, user_id):
+    try:
+        account = await backend.request('GET', '/api/v1/me', telegram_user_id=user_id)
+    except BackendError:
+        return False
+    return account.get('role') == 'admin' and account.get('status') == 'approved'
+
+
 async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, backend, state):
     locale = await locale_for(state)
     item = await get_device(backend, user_id, profile_id, device_id)
@@ -98,6 +106,9 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
         rows.append([user.button(user_id, tr(locale, 'devices.rename'), 'device_rename', profile_id, device_id)])
         rows.append([user.button(user_id, tr(locale, 'devices.rotate'), 'device_rotate', profile_id, device_id),
             user.button(user_id, tr(locale, 'devices.rotate_awg'), 'device_rotate', profile_id, device_id, 'awg')])
+        if await is_admin(backend, user_id):
+            rows.append([user.button(user_id, tr(locale, 'override.device_title'), 'device_policy',
+                                     profile_id, device_id)])
         rows.append([user.button(user_id, tr(locale, 'devices.delete'), 'device_delete', profile_id, device_id)
             .model_copy(update={'style': 'danger'})])
     elif item['status'] == 'deleting':
@@ -276,6 +287,10 @@ async def handle_action(action, query, bot, backend, state):
     elif action.name == 'device_pick':
         await select_device(chat_id, owner, message_id, *args[:3], bot, backend, state,
             target=tuple(args[3:5]) or AWG)
+    elif action.name == 'device_policy':
+        from .admin_policy_overrides import show_device
+        await show_device(chat_id, owner, message_id, args[0], args[1], *(tuple(args[2:4]) or ('', '')),
+                          bot, backend, state)
     elif action.name == 'device_rotate':
         # An optional third argument names the protocol; VLESS by default.
         protocol = args[2] if len(args) > 2 else 'xray'

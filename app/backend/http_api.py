@@ -1333,6 +1333,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from .speed_limits import SpeedLimits
         return SpeedLimits(db).delivery(current)
 
+    @app.get('/api/v1/profiles/{profile_id}/devices/{device_id}/vpn-policies')
+    def device_vpn_policies(profile_id: UUID, device_id: UUID, current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).get_device(current, str(profile_id), str(device_id))
+
+    @app.patch('/api/v1/profiles/{profile_id}/devices/{device_id}/vpn-policies')
+    def update_device_vpn_policies(profile_id: UUID, device_id: UUID, body: VpnPolicyInput, request: Request,
+                                   current=Depends(actor)):
+        from .vpn_policies import VpnPolicies
+        return VpnPolicies(db).set_device(current, header(request, 'Idempotency-Key'), str(profile_id),
+                                          str(device_id), [change.model_dump() for change in body.changes])
+
     @app.get('/api/v1/profiles/{profile_id}/vpn-policies')
     def profile_vpn_policies(profile_id: UUID, current=Depends(actor)):
         from .vpn_policies import VpnPolicies
