@@ -193,6 +193,7 @@ pub fn run(mut request: Request) -> Result<()> {
         });
         if selected != nodes_profile {
             nodes_worker.reset();
+            crate::backend::ask_registration_again();
             nodes_profile = selected;
             app.confirmed_installation = None;
             app.ignore_nodes_updates = app.nodes_busy;

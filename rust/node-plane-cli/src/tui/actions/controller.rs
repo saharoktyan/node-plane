@@ -1487,6 +1487,7 @@ impl App {
         self.controller_command(crate::controller::Command::ScopedPolicies(scope));
     }
     pub(in crate::tui) fn open_controller(&mut self) {
+        crate::backend::ask_registration_again();
         self.controller_navigation_revision = self.controller_navigation_revision.wrapping_add(1);
         self.controller_return_form = false;
         if !self.actions_enabled() {

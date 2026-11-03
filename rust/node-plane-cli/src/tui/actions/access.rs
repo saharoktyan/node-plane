@@ -600,6 +600,7 @@ impl App {
         self.nodes_requested = Some(crate::nodes::Command::Access(command));
     }
     pub(in crate::tui) fn open_access(&mut self) {
+        crate::backend::ask_registration_again();
         if !self.controller_ready() {
             return;
         }

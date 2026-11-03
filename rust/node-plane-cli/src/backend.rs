@@ -232,6 +232,18 @@ pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value>
     Ok(value)
 }
 
+/// Controllers, by endpoint and workstation key, where the administrator
+/// choice was cancelled in this run. Background refreshes then fail without
+/// asking again every few seconds; opening a screen or another connection
+/// profile asks again.
+static DECLINED: std::sync::Mutex<std::collections::BTreeSet<(String, String)>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// The next request may ask for the workstation administrator again.
+pub fn ask_registration_again() {
+    DECLINED.lock().unwrap().clear();
+}
+
 pub async fn authenticate(
     session: &mut SshSession,
     id: Uuid,
@@ -273,26 +285,44 @@ pub async fn authenticate(
                 !selection.0.is_empty(),
                 "No approved administrators available"
             );
-            let index = if selection.0.len() == 1 {
-                0
-            } else {
-                crate::events::select_administrator(tx, selection.0.clone())?
-            };
-            let (account_id, label) = selection
-                .0
-                .get(index)
-                .context("Invalid administrator selection")?;
-            ensure!(
-                crate::events::confirm(
-                    tx,
-                    "Register workstation access",
-                    format!(
-                        "Bind this workstation key to {label}?\nAccount: {account_id}\nKey: {}\n\nThis is privileged SSH registration, not Telegram identity verification. Future sessions use this account. Cancel leaves this key unregistered.",
-                        session.workstation_fingerprint
-                    ),
-                )?,
-                "Workstation registration cancelled"
+            let declined = (
+                session.endpoint.clone(),
+                session.workstation_fingerprint.clone(),
             );
+            ensure!(
+                !DECLINED.lock().unwrap().contains(&declined),
+                "Workstation registration cancelled. Open a section again to register this workstation."
+            );
+            let chosen = (|| -> Result<String> {
+                let index = if selection.0.len() == 1 {
+                    0
+                } else {
+                    crate::events::select_administrator(tx, selection.0.clone())?
+                };
+                let (account_id, label) = selection
+                    .0
+                    .get(index)
+                    .context("Invalid administrator selection")?;
+                ensure!(
+                    crate::events::confirm(
+                        tx,
+                        "Register workstation access",
+                        format!(
+                            "Bind this workstation key to {label}?\nAccount: {account_id}\nKey: {}\n\nThis is privileged SSH registration, not Telegram identity verification. Future sessions use this account. Cancel leaves this key unregistered.",
+                            session.workstation_fingerprint
+                        ),
+                    )?,
+                    "Workstation registration cancelled"
+                );
+                Ok(account_id.clone())
+            })();
+            let account_id = match chosen {
+                Ok(account_id) => account_id,
+                Err(error) => {
+                    DECLINED.lock().unwrap().insert(declined);
+                    return Err(error);
+                }
+            };
             input["account_id"] = json!(account_id);
             helper(session, input).await?
         }

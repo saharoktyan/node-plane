@@ -469,6 +469,7 @@ impl App {
         }
     }
     pub(in crate::tui) fn open_nodes(&mut self) {
+        crate::backend::ask_registration_again();
         self.nodes_updates_origin = false;
         let profile_id = self.form.saved.as_ref().map(|p| p.id);
         if self.nodes.profile_id != profile_id {
