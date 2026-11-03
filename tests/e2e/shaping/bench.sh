@@ -28,8 +28,8 @@ xray run -c /bench/server.json >/tmp/server.log 2>&1 &
 xray run -c /bench/client.json >/tmp/client.log 2>&1 &
 sleep 1.5
 
-pass() { # $1 revision, $2 clients JSON
-  NP_TEST_SHAPING="{\"state_dir\":\"/state\",\"revision\":$1,\"clients\":$2,\"xray_config\":\"/bench/server.json\",\"awg_config\":\"/state/awg0.conf\"}" \
+pass() { # $1 revision, $2 clients JSON, $3 uplinks JSON
+  NP_TEST_SHAPING="{\"state_dir\":\"/state\",\"revision\":$1,\"clients\":$2,\"uplinks\":${3:-[]},\"xray_config\":\"/bench/server.json\",\"awg_config\":\"/state/awg0.conf\"}" \
     "$TEST" --ignored --exact shaping::e2e::shaping_pass --nocapture 2>&1 | sed -n 's/^NP_SHAPING_RESULT //p'
 }
 mbit() { jq '(.end.sum_received.bits_per_second // 0) / 1000000 | . * 10 | floor / 10'; }
@@ -57,21 +57,32 @@ check "awg phone upload" "$(awg_rate 10.8.1.2)" 3 5
 check "awg phone download" "$(awg_rate 10.8.1.2 -R)" 6 8
 check "awg tablet download" "$(awg_rate 10.8.1.3 -R)" $FREE 1000000
 check "same snapshot again" "$(pass 1 '[["xray","alice",5000,8000],["awg","phone",5000,8000]]')" "$APPLIED"
+# Changed limits are applied to the classes in place: the ifb devices stay.
+ifindex() { cat /sys/class/net/np-xup/ifindex /sys/class/net/np-xdown/ifindex /sys/class/net/np-aup/ifindex | tr '\n' ' '; }
+BEFORE="$(ifindex)"
+CHANGED='[["xray","alice",2000,8000],["awg","phone",0,3000],["awg","tablet",3000,1000]]'
+check "in-place pass" "$(pass 2 "$CHANGED" '["veth0"]')" "$APPLIED"
+check "ifb devices kept" "$(ifindex)" "$BEFORE"
+check "xray alice new upload" "$(xray_rate 2101)" 1 2.2
+check "awg phone upload now free" "$(awg_rate 10.8.1.2)" $FREE 1000000
+check "awg phone new download" "$(awg_rate 10.8.1.2 -R)" 2 3.2
+check "awg tablet upload" "$(awg_rate 10.8.1.3)" 2 3.2
+check "awg tablet download" "$(awg_rate 10.8.1.3 -R)" 0.5 1.1
 # An eviction rule added after the rate rule must still block alice.
 /state/agent-cli add-rule --rule-tag=np-evict-1 --outbound=node-plane-blocked --user=alice --source=127.0.0.1 >/dev/null
 check "eviction appended last" "$(rules | jq -c 'map(select(. != "static"))')" '["np-rate-1","np-evict-1"]'
-pass 2 '[["xray","alice",5000,8000],["awg","phone",5000,8000]]' >/dev/null
+pass 3 "$CHANGED" >/dev/null
 check "rate rule moved behind it" "$(rules | jq -c 'map(select(. != "static"))')" '["np-evict-1","np-rate-1"]'
 check "evicted alice is blocked" "$(xray_rate 2101 -R 2>/dev/null)" 0 0
 /state/agent-cli remove-rule --rule-tag=np-evict-1 >/dev/null
 # A lost tree (reboot) is rebuilt; changed limits take effect.
 ip link del np-xup
-check "rebuild pass" "$(pass 3 '[["xray","alice",2000,0],["awg","phone",0,2000]]')" "$APPLIED"
-check "xray alice new upload" "$(xray_rate 2101)" 1 2.2
+check "rebuild pass" "$(pass 4 '[["xray","alice",2000,0],["awg","phone",0,2000]]')" "$APPLIED"
+check "xray alice upload after rebuild" "$(xray_rate 2101)" 1 2.2
 check "xray alice download now free" "$(xray_rate 2101 -R)" $FREE 1000000
-check "awg phone new download" "$(awg_rate 10.8.1.2 -R)" 1 2.2
-check "awg phone upload now free" "$(awg_rate 10.8.1.2)" $FREE 1000000
-check "lift pass" "$(pass 4 '[]')" "$APPLIED"
+check "awg phone download after rebuild" "$(awg_rate 10.8.1.2 -R)" 1 2.2
+check "awg phone upload free after rebuild" "$(awg_rate 10.8.1.2)" $FREE 1000000
+check "lift pass" "$(pass 5 '[]')" "$APPLIED"
 check "no rate rules left" "$(rules | jq -c 'map(select(. != "static"))')" '[]'
 check "no rate outbounds left" "$(xray api lso --server=127.0.0.1:10085 | jq '[.outbounds[] | select(.tag | startswith("np-rate"))] | length')" 0
 check "no devices, tables or qdiscs left" "$(ip -o link show | grep -c np- || true)$(nft list tables | grep -c node_plane || true)$(tc qdisc show dev awg0 | grep -c htb || true)" 000

@@ -73,6 +73,24 @@ class SpeedLimitTests(fixture.Fixture, unittest.TestCase):
         self.speed.sync()
         self.assertNotIn(self.email(laptop), {c['name'] for c in self.driver.calls[-1][2]})
 
+    def test_a_reissued_awg_peer_keeps_the_limits_until_it_is_removed(self):
+        from backend.device_credentials import rotate_awg
+        self.db.connection.execute('''UPDATE backend_nodes SET protocols_json='["awg"]' WHERE key='node' ''')
+        granted = self.grants(self.profile, self.revision(), [{'node_key': 'node', 'protocol': 'awg'}])
+        self.assertEqual(granted.status_code, 200, granted.text)
+        self.installation('speed.up_kbit', 1000)
+        old = self.awg_name(self.phone)
+        device = self.db.connection.execute('SELECT * FROM backend_devices WHERE id=?',
+                                            (self.phone['id'],)).fetchone()
+        rotate_awg(self.db.connection, device)
+        self.speed.sync()
+        names = [client['name'] for client in self.driver.calls[-1][2]]
+        self.assertEqual(sorted(names), sorted([old, self.awg_name(self.phone)]))
+        # Once every node removed the old peer it is forgotten and leaves the snapshot.
+        self.db.connection.execute('DELETE FROM backend_retired_peers')
+        self.speed.sync()
+        self.assertEqual([c['name'] for c in self.driver.calls[-1][2]], [self.awg_name(self.phone)])
+
     def test_node_values_suspended_profiles_and_lifting(self):
         self.installation('speed.up_kbit', 1000)
         self.speed.sync()

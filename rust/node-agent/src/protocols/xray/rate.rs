@@ -65,25 +65,8 @@ impl State {
         &mut self,
         clients: &BTreeMap<String, Rate>,
     ) -> Result<BTreeSet<String>, ShapeError> {
-        self.marks.retain(|email, _| clients.contains_key(email));
-        let mut used: BTreeSet<u16> = self.marks.values().copied().collect();
-        let mut fresh = BTreeSet::new();
-        let mut next = 1;
-        for email in clients.keys() {
-            if self.marks.contains_key(email) {
-                continue;
-            }
-            while used.contains(&next) {
-                next += 1;
-            }
-            if next > tc::MAX_CLASS {
-                return Err(ShapeError::Failed("too many limited clients".into()));
-            }
-            used.insert(next);
-            self.marks.insert(email.clone(), next);
-            fresh.insert(tag(next));
-        }
-        Ok(fresh)
+        let fresh = tc::allocate(&mut self.marks, clients.keys())?;
+        Ok(fresh.iter().map(|email| tag(self.marks[email])).collect())
     }
 
     fn kernel_for(&self, clients: &BTreeMap<String, Rate>, uplinks: Vec<String>) -> Kernel {
@@ -195,8 +178,28 @@ async fn routing(
     Ok(())
 }
 
-/// Interfaces of the default routes, IPv4 and IPv6.
-fn uplinks() -> Result<Vec<String>, ShapeError> {
+/// The configured uplinks, or the interfaces of the default routes, IPv4
+/// and IPv6.
+fn uplinks(configured: &[String]) -> Result<Vec<String>, ShapeError> {
+    if !configured.is_empty() {
+        for name in configured {
+            let valid = name.len() <= 15
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@'));
+            if !valid || !std::path::Path::new(&format!("/sys/class/net/{name}")).exists() {
+                return Err(ShapeError::Failed(format!(
+                    "uplink {name} from SHAPING_UPLINKS does not exist"
+                )));
+            }
+        }
+        return Ok(configured
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect());
+    }
     let mut devices = BTreeSet::new();
     for family in ["-4", "-6"] {
         let raw = tc::run(None, "ip", &["-j", family, "route", "show", "default"], "")?;
@@ -298,10 +301,24 @@ fn intact() -> bool {
         && tc::run(None, "nft", &["list", "table", "inet", NFT_TABLE], "").is_ok()
 }
 
-/// Rebuilds the kernel side when it differs from `wanted` or is gone.
+/// Brings the kernel side in line with `wanted`: changed limits are
+/// applied to the classes in place; the tree is rebuilt when it is gone,
+/// the uplinks changed or an in-place change failed.
 fn kernel(state: &mut State, wanted: Option<Kernel>) -> Result<(), ShapeError> {
     if state.kernel == wanted && (wanted.is_none() || intact()) {
         return Ok(());
+    }
+    if let (Some(old), Some(new)) = (&state.kernel, &wanted)
+        && old.complete
+        && old.uplinks == new.uplinks
+        && intact()
+    {
+        let mut lines = tc::htb_changes(UP_IFB, &old.up, &new.up);
+        lines.extend(tc::htb_changes(DOWN_IFB, &old.down, &new.down));
+        if tc::batch(None, "tc", &lines, false).is_ok() {
+            state.kernel = wanted;
+            return Ok(());
+        }
     }
     let mut old: BTreeSet<String> = state
         .kernel
@@ -354,11 +371,12 @@ pub(crate) async fn step(
     }
     let mut taken = state.clone();
     let clients = clients.clone();
+    let configured = host.uplinks.clone();
     let (taken, kernel_result) = tokio::task::spawn_blocking(move || {
         let wanted = if clients.is_empty() {
             Ok(None)
         } else {
-            uplinks().map(|uplinks| Some(taken.kernel_for(&clients, uplinks)))
+            uplinks(&configured).map(|uplinks| Some(taken.kernel_for(&clients, uplinks)))
         };
         let result = wanted.and_then(|wanted| kernel(&mut taken, wanted));
         (taken, result)
@@ -423,6 +441,20 @@ mod tests {
         );
         assert_eq!(kernel.down[0].minor, 2);
         assert_eq!(kernel.down[0].kbit, 8000);
+    }
+
+    #[test]
+    fn configured_uplinks_must_exist() {
+        assert_eq!(
+            uplinks(&["lo".into(), "lo".into()]).unwrap(),
+            vec!["lo".to_string()]
+        );
+        for bad in ["np-no-such-dev", "../lo", "an-overlong-device-name"] {
+            assert!(matches!(
+                uplinks(&[bad.into()]),
+                Err(ShapeError::Failed(detail)) if detail.contains("SHAPING_UPLINKS")
+            ));
+        }
     }
 
     #[test]

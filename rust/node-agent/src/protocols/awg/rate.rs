@@ -4,7 +4,9 @@
 //! agent enters it with `nsenter`. Download is shaped by an HTB root on the
 //! tunnel interface (by the peer's tunnel address as destination), upload by
 //! redirecting the peer's packets on ingress to ifb `np-aup` with its own
-//! HTB. A new container has a new namespace, so a changed PID rebuilds.
+//! HTB. Each peer keeps its class number while limited, so changed limits
+//! are applied to its classes in place. A new container has a new
+//! namespace, so a changed PID rebuilds.
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,9 @@ pub(crate) struct Kernel {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct State {
+    /// Peer name -> class number; stable while the peer stays limited.
+    #[serde(default)]
+    minors: BTreeMap<String, u16>,
     kernel: Option<Kernel>,
 }
 
@@ -77,6 +82,7 @@ fn wanted(
     pid: u32,
     interface: &str,
     clients: &BTreeMap<String, Rate>,
+    minors: &BTreeMap<String, u16>,
     peers: &BTreeMap<String, Vec<String>>,
     node_key: &str,
 ) -> Kernel {
@@ -86,13 +92,12 @@ fn wanted(
         complete: true,
         ..Kernel::default()
     };
-    let mut minor = 0;
     for (name, rate) in clients {
         let Some(addresses) = addresses(peers, node_key, name) else {
             // Not added on this node yet; the next pass picks it up.
             continue;
         };
-        minor += 1;
+        let minor = minors[name];
         let class = |kbit, to: fn(String) -> Match| Class {
             minor,
             kbit,
@@ -113,12 +118,7 @@ fn build_lines(kernel: &Kernel) -> Vec<String> {
     let mut lines = tc::htb(dev, &kernel.down);
     if !kernel.up.is_empty() {
         lines.push(format!("qdisc add dev {dev} clsact"));
-        let sources: Vec<Match> = kernel
-            .up
-            .iter()
-            .flat_map(|class| class.matches.iter().cloned())
-            .collect();
-        lines.extend(tc::redirect_ingress(dev, UP_IFB, &sources));
+        lines.extend(tc::redirect_ingress(dev, UP_IFB, &kernel.up));
         lines.extend(tc::htb(UP_IFB, &kernel.up));
     }
     lines
@@ -191,18 +191,36 @@ pub(crate) fn step(
             Err(ShapeError::Failed("AWG container is not running".into()))
         };
     };
+    tc::allocate(&mut state.minors, clients.keys())?;
     let wanted = (!clients.is_empty()).then(|| {
         let config = std::fs::read_to_string(&host.awg_config).unwrap_or_default();
         wanted(
             pid,
             &host.awg_interface(),
             clients,
+            &state.minors,
             &peers(&config),
             &host.node_key,
         )
     });
     if state.kernel == wanted && wanted.as_ref().is_none_or(intact) {
         return Ok(());
+    }
+    if let (Some(old), Some(new)) = (&state.kernel, &wanted)
+        && old.complete
+        && (old.pid, &old.interface) == (new.pid, &new.interface)
+        // The ifb device and clsact exist only with upload limits.
+        && old.up.is_empty() == new.up.is_empty()
+        && intact(old)
+    {
+        let dev = &new.interface;
+        let mut lines = tc::htb_changes(dev, &old.down, &new.down);
+        lines.extend(tc::redirect_changes(dev, UP_IFB, &old.up, &new.up));
+        lines.extend(tc::htb_changes(UP_IFB, &old.up, &new.up));
+        if tc::batch(Some(pid), "tc", &lines, false).is_ok() {
+            state.kernel = wanted;
+            return Ok(());
+        }
     }
     if let Some(old) = &state.kernel
         && old.pid == pid
@@ -266,15 +284,16 @@ mod tests {
                 },
             ),
         ]);
-        let kernel = wanted(42, "wg0", &clients, &peers(CONFIG), "srv");
+        let minors = BTreeMap::from([("phone".to_string(), 1), ("tablet".to_string(), 2)]);
+        let kernel = wanted(42, "wg0", &clients, &minors, &peers(CONFIG), "srv");
         assert_eq!(kernel.down[0].matches.len(), 2);
         let lines = build_lines(&kernel);
         assert!(lines.contains(
-            &"filter add dev wg0 parent 1: protocol ipv6 prio 2 flower dst_ip fd42:6e70:6177:1::2/128 classid 1:1".to_string()
+            &"filter add dev wg0 parent 1: protocol ipv6 prio 2 handle 0x102 flower dst_ip fd42:6e70:6177:1::2/128 classid 1:1".to_string()
         ));
         assert!(lines.contains(&"qdisc add dev wg0 clsact".to_string()));
         assert!(lines.contains(
-            &"filter add dev wg0 ingress protocol ip prio 1 flower src_ip 10.8.1.2/32 action mirred egress redirect dev np-aup".to_string()
+            &"filter add dev wg0 ingress protocol ip prio 1 handle 0x101 flower src_ip 10.8.1.2/32 action mirred egress redirect dev np-aup".to_string()
         ));
         assert!(
             lines.contains(
@@ -290,7 +309,7 @@ mod tests {
                 down_kbit: 8000,
             },
         )]);
-        let lines = build_lines(&wanted(42, "wg0", &clients, &peers(CONFIG), "srv"));
+        let lines = build_lines(&wanted(42, "wg0", &clients, &minors, &peers(CONFIG), "srv"));
         assert!(
             !lines
                 .iter()

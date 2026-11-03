@@ -987,6 +987,25 @@ for srv in servers:
 PY
 }
 
+# Speed limits shape with tc and nft and enter the AWG container with
+# nsenter. Installed when missing; without them a node only reports that
+# it cannot limit speed, so a failure here does not stop the agent install.
+SHAPING_TOOLS_SCRIPT='missing=""
+command -v tc >/dev/null 2>&1 || missing="$missing iproute2"
+command -v nft >/dev/null 2>&1 || missing="$missing nftables"
+command -v nsenter >/dev/null 2>&1 || missing="$missing util-linux"
+if [ -n "$missing" ]; then
+  if command -v apt-get >/dev/null 2>&1 \
+    && { sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing >/dev/null 2>&1 \
+      || { sudo apt-get update >/dev/null 2>&1 \
+        && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y $missing >/dev/null 2>&1; }; }; then
+    echo "Installed for speed limits:$missing"
+  else
+    echo "Speed limits need these packages on the node:$missing" >&2
+  fi
+fi
+'
+
 install_local_agent() {
   local server_key="$1" expected_sum="$2" current_sum="" changed=0
   local config_tmp unit_tmp
@@ -1004,6 +1023,7 @@ install_local_agent() {
   prepare_node_tls "$server_key" "127.0.0.1" || return 1
 
   set_step "install node-agent on local node ${server_key}"
+  bash -c "$SHAPING_TOOLS_SCRIPT" || true
   if sudo test -x /usr/local/bin/node-plane-agent; then
     current_sum="$(sudo sha256sum /usr/local/bin/node-plane-agent | awk '{print $1}')"
   fi
@@ -1384,6 +1404,7 @@ TLSSETUP
 set -euo pipefail
 sudo install -m 0755 /tmp/node-plane-agent /usr/local/bin/node-plane-agent
 sudo rm -f /tmp/node-plane-agent
+( ${SHAPING_TOOLS_SCRIPT} ) || true
 sudo mkdir -p /etc/node-plane
 sudo tee /etc/node-plane/agent.toml >/dev/null <<'AGENTCFG'
 node_key = "${server_key}"

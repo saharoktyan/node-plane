@@ -41,6 +41,17 @@ if ! command -v python3 >/dev/null 2>&1; then
   apt_run install -y python3
 fi
 
+# Speed limits shape with tc and nft and enter the AWG container with
+# nsenter. Without them a node only reports that it cannot limit speed.
+shaping=""
+command -v tc >/dev/null 2>&1 || shaping="$shaping iproute2"
+command -v nft >/dev/null 2>&1 || shaping="$shaping nftables"
+command -v nsenter >/dev/null 2>&1 || shaping="$shaping util-linux"
+if [ -n "$shaping" ]; then
+  { apt_run update && apt_run install -y $shaping; } \
+    || echo "Speed limits need these packages:$shaping" >&2
+fi
+
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "DOCKER_INSTALL_STATUS|ok|available"
   exit 0

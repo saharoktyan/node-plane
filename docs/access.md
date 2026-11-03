@@ -60,7 +60,9 @@ Xray needs its online statistics and routing API for this. Applying node setting
 
 - `speed.up_kbit` and `speed.down_kbit`: kbit/s per device, no limit by default. A profile can choose **No limit** to be exempt from the installation limit. Each direction is set on its own.
 
-Each node receives its limits within a minute and keeps enforcing them without the controller; the settings screen names nodes that do not have the current limits or cannot apply them. Nodes shape traffic with `tc` and `nft` and enter the AWG container with `nsenter`, so the host needs `iproute2`, `nftables` and `util-linux` and the `ifb` kernel module. A node without them reports that it cannot limit speed; other traffic is unaffected. Limits apply per device, not per profile: two devices of one profile each get the full limit.
+Each node receives its limits within a minute and keeps enforcing them without the controller; the settings screen names nodes that do not have the current limits or cannot apply them. Nodes shape traffic with `tc` and `nft` and enter the AWG container with `nsenter`, so the host needs `iproute2`, `nftables` and `util-linux` and the `ifb` kernel module. Node preparation and agent installation or update install the missing packages on Debian and Ubuntu. A node without them reports that it cannot limit speed; other traffic is unaffected. Limits apply per device, not per profile: two devices of one profile each get the full limit. After **New AWG key**, the old peer keeps the device's limits until every node removed it.
+
+VLESS traffic is shaped on the interfaces of the default routes. When it leaves through another interface, name it in `/etc/node-plane/node.env` on the node, for example `SHAPING_UPLINKS=eth1` (several separated by commas); applying node settings keeps this line.
 
 ## Device and node values
 

@@ -1,7 +1,8 @@
 """Speed limits per device: resolve them per node and keep agents current.
 
 The controller resolves `speed.*` for every active Xray client and AWG peer
-on a node and sends the node's snapshot every minute (delivery:
+on a node, and for AWG peers retired by a key reissue until every node
+removed them, and sends the node's snapshot every minute (delivery:
 backend.node_snapshots). While a profile with `quota.on_exhausted =
 throttle` has used up its quota, `quota.throttle_kbit` caps its devices.
 The agent journals the snapshot and shapes on its own, so limits keep
@@ -40,8 +41,15 @@ def node_snapshot(conn, node_key, protocols, now=None):
             if limit := throttled[row['profile_id']]:
                 # A used-up quota caps both directions; a lower own limit stays.
                 up, down = min(up or limit, limit), min(down or limit, limit)
-            if up or down:
-                clients.append({'protocol': protocol, 'name': row['name'], 'up_kbit': up, 'down_kbit': down})
+            if not up and not down:
+                continue
+            names = [row['name']]
+            if protocol == 'awg':
+                # An old peer keeps working until every node removed it; it keeps the device's limits.
+                names += [peer['runtime_name'] for peer in conn.execute('''SELECT runtime_name
+                    FROM backend_retired_peers WHERE device_id=? AND protocol='awg' ORDER BY runtime_name''',
+                    (row['device_id'],)).fetchall()]
+            clients += [{'protocol': protocol, 'name': name, 'up_kbit': up, 'down_kbit': down} for name in names]
     return clients
 
 

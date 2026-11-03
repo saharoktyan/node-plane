@@ -89,6 +89,10 @@ pub(crate) struct Host {
     pub(crate) xray_config: String,
     pub(crate) awg_container: String,
     pub(crate) awg_config: String,
+    /// `SHAPING_UPLINKS` in node.env: interfaces Xray traffic leaves
+    /// through, for hosts where the default route does not name them.
+    /// Empty uses the interfaces of the default routes.
+    pub(crate) uplinks: Vec<String>,
 }
 
 impl Host {
@@ -100,6 +104,12 @@ impl Host {
             xray_config: state.node_env_value("XRAY_CONFIG", &state.config.xray_config_path),
             awg_container: state.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg"),
             awg_config: state.node_env_value("AWG_CONFIG", &state.config.awg_config_path),
+            uplinks: state
+                .node_env_value("SHAPING_UPLINKS", "")
+                .split([',', ' '])
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .collect(),
         }
     }
 
@@ -414,6 +424,7 @@ mod tests {
             xray_config: "/nonexistent".into(),
             awg_container: "np-no-such-container".into(),
             awg_config: "/nonexistent/wg0.conf".into(),
+            uplinks: Vec::new(),
         };
         service.tick(&host).await.unwrap();
         assert!(service.statuses().is_empty());
@@ -463,6 +474,15 @@ mod e2e {
             xray_config: input["xray_config"].as_str().unwrap().into(),
             awg_container: "amnezia-awg".into(),
             awg_config: input["awg_config"].as_str().unwrap().into(),
+            uplinks: input["uplinks"]
+                .as_array()
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(|name| name.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
         service.tick(&host).await.unwrap();
         let statuses: Vec<_> = service
