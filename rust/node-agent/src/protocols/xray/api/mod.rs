@@ -14,10 +14,10 @@ use std::time::Duration;
 use prost::Message;
 use tonic::transport::{Channel, Endpoint};
 
-use proto::VlessAccount;
 use proto::xray::app::proxyman::command::handler_service_client::HandlerServiceClient;
 use proto::xray::app::proxyman::command::{
-    AddUserOperation, AlterInboundRequest, GetInboundUserRequest, RemoveUserOperation,
+    AddOutboundRequest, AddUserOperation, AlterInboundRequest, GetInboundUserRequest,
+    ListOutboundsRequest, RemoveOutboundRequest, RemoveUserOperation,
 };
 use proto::xray::app::router::command::routing_service_client::RoutingServiceClient;
 use proto::xray::app::router::command::{AddRuleRequest, ListRuleRequest, RemoveRuleRequest};
@@ -27,6 +27,8 @@ use proto::xray::app::stats::command::{GetStatsRequest, QueryStatsRequest, SysSt
 use proto::xray::common::geodata::{Cidr, CidrRule, IpRule, ip_rule};
 use proto::xray::common::protocol::User;
 use proto::xray::common::serial::TypedMessage;
+use proto::xray::core::OutboundHandlerConfig;
+use proto::{FreedomConfig, SenderConfig, SocketConfig, StreamConfig, VlessAccount};
 
 /// The API inbound every Node Plane Xray config declares.
 pub(crate) const DEFAULT_ADDRESS: &str = "127.0.0.1:10085";
@@ -354,6 +356,60 @@ impl XrayApi {
             })
             .await?;
         Ok(())
+    }
+
+    /// Adds a freedom outbound whose sockets carry `mark` (SO_MARK), so the
+    /// kernel can tell its traffic apart. `domain_strategy` is the
+    /// `xray.transport.internet.DomainStrategy` value.
+    pub(crate) async fn add_marked_outbound(
+        &self,
+        tag: &str,
+        mark: u32,
+        domain_strategy: i32,
+    ) -> Result<(), XrayApiError> {
+        let mark = i32::from_ne_bytes(mark.to_ne_bytes());
+        let sender = SenderConfig {
+            stream_settings: Some(StreamConfig {
+                socket_settings: Some(SocketConfig { mark }),
+            }),
+        };
+        self.handler()
+            .add_outbound(AddOutboundRequest {
+                outbound: Some(OutboundHandlerConfig {
+                    tag: tag.to_string(),
+                    sender_settings: Some(typed("xray.app.proxyman.SenderConfig", &sender)),
+                    proxy_settings: Some(typed(
+                        "xray.proxy.freedom.Config",
+                        &FreedomConfig { domain_strategy },
+                    )),
+                    expire: 0,
+                    comment: String::new(),
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn remove_outbound(&self, tag: &str) -> Result<(), XrayApiError> {
+        self.handler()
+            .remove_outbound(RemoveOutboundRequest {
+                tag: tag.to_string(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Tags of every outbound, static and added at runtime.
+    pub(crate) async fn outbound_tags(&self) -> Result<Vec<String>, XrayApiError> {
+        Ok(self
+            .handler()
+            .list_outbounds(ListOutboundsRequest {})
+            .await?
+            .into_inner()
+            .outbounds
+            .into_iter()
+            .map(|outbound| outbound.tag)
+            .collect())
     }
 
     /// `(rule_tag, outbound_tag)` in routing order.

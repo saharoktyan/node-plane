@@ -227,6 +227,15 @@ impl NodeAgentService for NodeAgentApi {
         ))
     }
 
+    async fn apply_rate_policy(
+        &self,
+        request: Request<agent::v1::ApplyRatePolicyRequest>,
+    ) -> Result<Response<agent::v1::ApplyRatePolicyResponse>, Status> {
+        Ok(Response::new(
+            self.state.apply_rate_policy(request.into_inner())?,
+        ))
+    }
+
     async fn install_docker(
         &self,
         _request: Request<InstallDockerRequest>,

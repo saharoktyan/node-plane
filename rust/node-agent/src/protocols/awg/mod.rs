@@ -1,4 +1,5 @@
 //! AmneziaWG on this node.
+pub(crate) mod rate;
 pub(crate) mod runtime;
 pub(crate) mod users;
 

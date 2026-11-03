@@ -194,6 +194,20 @@ class GrpcIntentDriver:
             raise ValueError('driver returned a different node identity')
         return response.revision
 
+    def apply_rate_policy(self, node_key, revision, clients):
+        """Send the node's full speed-limit snapshot; returns the revision in
+        force and the outcome of the agent's latest pass per protocol."""
+        from driver.v1 import runtime_service_pb2
+        response = self.runtime.ApplyRatePolicy(runtime_service_pb2.ApplyRatePolicyRequest(
+            node_key=node_key, revision=revision,
+            clients=[runtime_service_pb2.RateClientPolicy(**client) for client in clients]),
+            timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        return {'revision': response.revision,
+                'protocols': [{'protocol': p.protocol, 'state': p.state, 'detail': p.detail}
+                              for p in response.protocols]}
+
     def observe_sessions(self, node_key, boot_id, after_sequence):
         """Eviction events after the cursor and source counts of limited clients."""
         from driver.v1 import runtime_service_pb2

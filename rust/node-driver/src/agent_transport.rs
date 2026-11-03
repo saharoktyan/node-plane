@@ -7,11 +7,12 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity
 use crate::agent::v1::node_agent_service_client::NodeAgentServiceClient;
 use crate::agent::v1::{
     AgentEmpty, ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse,
-    ApplyBackendNodeSettingsRequest, DecommissionRequest, InstallDockerRequest,
-    InstallDockerResponse, LocalHealth, ObserveSessionsRequest, ObserveSessionsResponse,
-    PathExistsRequest, RefreshAwgConfigRequest, RefreshAwgConfigResponse, RunDiagnosticsRequest,
-    RunDiagnosticsResponse, RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec,
-    SyncRuntimeFilesRequest, SyncRuntimeFilesResponse,
+    ApplyBackendNodeSettingsRequest, ApplyRatePolicyRequest, ApplyRatePolicyResponse,
+    DecommissionRequest, InstallDockerRequest, InstallDockerResponse, LocalHealth,
+    ObserveSessionsRequest, ObserveSessionsResponse, PathExistsRequest, RefreshAwgConfigRequest,
+    RefreshAwgConfigResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
+    RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncRuntimeFilesRequest,
+    SyncRuntimeFilesResponse,
 };
 
 pub struct AgentTransport {
@@ -250,6 +251,16 @@ impl AgentTransport {
         let mut request = tonic::Request::new(request);
         request.set_timeout(Duration::from_secs(30));
         Ok(client.apply_admission_policy(request).await?.into_inner())
+    }
+
+    pub async fn apply_rate_policy(
+        &self,
+        request: ApplyRatePolicyRequest,
+    ) -> Result<ApplyRatePolicyResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(request);
+        request.set_timeout(Duration::from_secs(30));
+        Ok(client.apply_rate_policy(request).await?.into_inner())
     }
 
     pub async fn observe_sessions(

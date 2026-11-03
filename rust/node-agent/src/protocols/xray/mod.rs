@@ -1,6 +1,7 @@
 //! Xray (VLESS) on this node.
 pub(crate) mod admission;
 pub(crate) mod api;
+pub(crate) mod rate;
 pub(crate) mod runtime;
 pub(crate) mod users;
 

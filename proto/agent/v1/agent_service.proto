@@ -29,6 +29,7 @@ service NodeAgentService {
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc ApplyAdmissionPolicy(ApplyAdmissionPolicyRequest) returns (ApplyAdmissionPolicyResponse);
   rpc ObserveSessions(ObserveSessionsRequest) returns (ObserveSessionsResponse);
+  rpc ApplyRatePolicy(ApplyRatePolicyRequest) returns (ApplyRatePolicyResponse);
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
   rpc UninstallAgent(AgentEmpty) returns (RuntimeCommandResponse);
@@ -308,4 +309,33 @@ message ObserveSessionsResponse {
   repeated SessionObservation sessions = 3;
   // Events after `after_sequence` were dropped from the bounded buffer.
   bool truncated = 4;
+}
+
+// Speed limits per client (VPN plan, section 11d). The node's full snapshot;
+// a revision not newer than the agent's own is ignored. Rates in kbit/s,
+// 0 = no limit in that direction.
+message RateClientPolicy {
+  // "xray" (the Xray email) or "awg" (the peer name).
+  string protocol = 1;
+  string name = 2;
+  uint64 up_kbit = 3;
+  uint64 down_kbit = 4;
+}
+
+message ApplyRatePolicyRequest {
+  uint64 revision = 1;
+  repeated RateClientPolicy clients = 2;
+}
+
+// Outcome of the latest enforcement pass for one protocol.
+message RateProtocolStatus {
+  string protocol = 1;
+  // "applied", "pending", "failed" or "unsupported".
+  string state = 2;
+  string detail = 3;
+}
+
+message ApplyRatePolicyResponse {
+  uint64 revision = 1;
+  repeated RateProtocolStatus protocols = 2;
 }

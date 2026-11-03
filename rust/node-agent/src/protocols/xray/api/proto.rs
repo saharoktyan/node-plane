@@ -53,3 +53,33 @@ pub(crate) struct VlessAccount {
     #[prost(string, tag = "3")]
     pub(crate) encryption: String,
 }
+
+/// `xray.proxy.freedom.Config`, only the domain strategy. Field numbers
+/// match upstream `proxy/freedom/config.proto`.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct FreedomConfig {
+    /// `xray.transport.internet.DomainStrategy`.
+    #[prost(int32, tag = "1")]
+    pub(crate) domain_strategy: i32,
+}
+
+/// `xray.app.proxyman.SenderConfig`, only the stream settings.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct SenderConfig {
+    #[prost(message, optional, tag = "2")]
+    pub(crate) stream_settings: Option<StreamConfig>,
+}
+
+/// `xray.transport.internet.StreamConfig`, only the socket settings.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct StreamConfig {
+    #[prost(message, optional, tag = "6")]
+    pub(crate) socket_settings: Option<SocketConfig>,
+}
+
+/// `xray.transport.internet.SocketConfig`, only `mark` (SO_MARK).
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct SocketConfig {
+    #[prost(int32, tag = "1")]
+    pub(crate) mark: i32,
+}

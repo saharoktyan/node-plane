@@ -13,13 +13,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tonic::Status;
 
 use super::api::cli::valid_email;
-use super::api::{DEFAULT_ADDRESS, RouteRule, SourceNet, XrayApi, XrayApiError};
+use super::api::{RouteRule, SourceNet, XrayApi, XrayApiError};
 use crate::agent::v1::{
     AdmissionEvent, ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse,
     ObserveSessionsRequest, ObserveSessionsResponse, SessionObservation,
@@ -364,7 +363,6 @@ impl Outbox {
     }
 }
 
-const POLL: Duration = Duration::from_secs(5);
 const MAX_WINDOW_SECONDS: u64 = 3600;
 const MAX_COOLDOWN_SECONDS: u64 = 86_400;
 
@@ -502,32 +500,6 @@ impl Service {
             sessions,
             truncated,
         })
-    }
-
-    /// Runs for the life of the agent.
-    pub(crate) async fn run(self: Arc<Self>) {
-        let address =
-            std::env::var("NODE_PLANE_XRAY_API").unwrap_or_else(|_| DEFAULT_ADDRESS.into());
-        let mut ticker = tokio::time::interval(POLL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut last_error = None;
-        loop {
-            ticker.tick().await;
-            match self.tick(&address).await {
-                Ok(events) => {
-                    last_error = None;
-                    for event in events {
-                        println!("admission {event:?}");
-                    }
-                }
-                // Report a failure once, not every poll.
-                Err(err) if last_error.as_ref() != Some(&err) => {
-                    eprintln!("admission step failed: {err}");
-                    last_error = Some(err);
-                }
-                Err(_) => {}
-            }
-        }
     }
 }
 

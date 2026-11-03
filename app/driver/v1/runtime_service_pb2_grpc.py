@@ -90,6 +90,11 @@ class RuntimeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsResponse.FromString,
                 _registered_method=True)
+        self.ApplyRatePolicy = channel.unary_unary(
+                '/nodeplane.driver.v1.RuntimeService/ApplyRatePolicy',
+                request_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyResponse.FromString,
+                _registered_method=True)
 
 
 class RuntimeServiceServicer(object):
@@ -164,6 +169,12 @@ class RuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ApplyRatePolicy(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -221,6 +232,11 @@ def add_RuntimeServiceServicer_to_server(servicer, server):
                     servicer.ObserveSessions,
                     request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsRequest.FromString,
                     response_serializer=driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsResponse.SerializeToString,
+            ),
+            'ApplyRatePolicy': grpc.unary_unary_rpc_method_handler(
+                    servicer.ApplyRatePolicy,
+                    request_deserializer=driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -520,6 +536,33 @@ class RuntimeService(object):
             '/nodeplane.driver.v1.RuntimeService/ObserveSessions',
             driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsRequest.SerializeToString,
             driver_dot_v1_dot_runtime__service__pb2.ObserveSessionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ApplyRatePolicy(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.RuntimeService/ApplyRatePolicy',
+            driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyRequest.SerializeToString,
+            driver_dot_v1_dot_runtime__service__pb2.ApplyRatePolicyResponse.FromString,
             options,
             channel_credentials,
             insecure,

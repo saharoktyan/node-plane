@@ -1087,6 +1087,46 @@ impl RuntimeService for RuntimeApi {
         }))
     }
 
+    async fn apply_rate_policy(
+        &self,
+        request: Request<driver::v1::ApplyRatePolicyRequest>,
+    ) -> Result<Response<driver::v1::ApplyRatePolicyResponse>, Status> {
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::unavailable("node agent is unavailable"))?;
+        // The agent validates the snapshot; the driver only forwards it.
+        let applied = agent_transport::AgentTransport::new(target)
+            .apply_rate_policy(agent::v1::ApplyRatePolicyRequest {
+                revision: req.revision,
+                clients: req
+                    .clients
+                    .into_iter()
+                    .map(|client| agent::v1::RateClientPolicy {
+                        protocol: client.protocol,
+                        name: client.name,
+                        up_kbit: client.up_kbit,
+                        down_kbit: client.down_kbit,
+                    })
+                    .collect(),
+            })
+            .await?;
+        Ok(Response::new(driver::v1::ApplyRatePolicyResponse {
+            node_key: req.node_key,
+            revision: applied.revision,
+            protocols: applied
+                .protocols
+                .into_iter()
+                .map(|status| driver::v1::RateProtocolStatus {
+                    protocol: status.protocol,
+                    state: status.state,
+                    detail: status.detail,
+                })
+                .collect(),
+        }))
+    }
+
     async fn observe_sessions(
         &self,
         request: Request<driver::v1::ObserveSessionsRequest>,

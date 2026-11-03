@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 mod api;
 mod config;
+mod enforcement;
 mod fencing;
 mod host;
 mod journal;
@@ -11,6 +12,7 @@ mod lifecycle;
 mod profiles;
 mod protocols;
 mod runtime;
+mod shaping;
 mod state;
 
 use chrono::Utc;
@@ -55,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = config.listen_addr.parse()?;
     print_startup(&config);
 
-    tokio::spawn(state.admission.clone().run());
+    tokio::spawn(enforcement::run(state.clone()));
 
     let sampler = state.cpu.clone();
     tokio::spawn(async move {
