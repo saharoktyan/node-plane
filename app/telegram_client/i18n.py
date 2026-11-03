@@ -3583,3 +3583,16 @@ CATALOG['ru'].update({
 
 CATALOG['en']['action.error.quota'] = 'Your traffic is used up. Access returns after the next reset.'
 CATALOG['ru']['action.error.quota'] = 'Трафик исчерпан. Доступ вернётся после следующего сброса.'
+
+CATALOG['en'].update({
+    'nodebt.section': 'VPN policies', 'nodebt.summary': 'BitTorrent over VLESS: {value} · {source}',
+    'nodebt.source.node': 'this node', 'nodebt.source.installation': 'installation setting',
+    'nodebt.inherit': 'As installation ({value})',
+    'nodebt.hint': 'Overrides the installation setting for this node only. The node shows pending settings; apply them to take effect.',
+})
+CATALOG['ru'].update({
+    'nodebt.section': 'VPN-политики', 'nodebt.summary': 'BitTorrent через VLESS: {value} · {source}',
+    'nodebt.source.node': 'настройка ноды', 'nodebt.source.installation': 'настройка установки',
+    'nodebt.inherit': 'Как в установке ({value})',
+    'nodebt.hint': 'Заменяет настройку установки только для этой ноды. Нода покажет, что настройки нужно применить; изменение вступит в силу после применения.',
+})

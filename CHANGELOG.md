@@ -27,6 +27,8 @@
   and administrators are alerted when one device is disconnected often (a
   shared link). The controller reads events and per-device network counts with
   the new `ObserveSessions` agent call and never stores addresses.
+- Override BitTorrent over VLESS per node in Telegram; a change of the
+  installation setting marks only nodes that follow it for settings apply.
 - Add traffic quotas per profile (`quota.*` VPN policies): a limit for uplink
   and downlink together on every node, reset monthly on the 1st, monthly on the
   assignment day, every N days or never, in the installation time zone.

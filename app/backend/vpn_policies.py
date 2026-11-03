@@ -103,7 +103,8 @@ register(PolicyKey('quota.interval_days', frozenset({'installation', 'profile'})
 register(PolicyKey('quota.on_exhausted', frozenset({'installation', 'profile'}), frozenset({'global'}),
                    choice('freeze', 'notify'), default='freeze'))
 register(PolicyKey('quota.timezone', frozenset({'installation'}), frozenset({'global'}), time_zone, default='UTC'))
-register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global'}),
+# A node value overrides the installation value for that node (plan, 7.2).
+register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global', 'node'}),
                    choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),
                    setting='xray_bittorrent'))
 
@@ -120,9 +121,14 @@ def runtime_settings(conn, node_key, protocols):
 
 
 def _mark_nodes(conn, spec, node_key):
-    # A changed runtime value needs the ordinary per-node settings apply.
+    # A changed runtime value needs the ordinary per-node settings apply. A
+    # global change skips nodes with their own value: theirs does not change.
+    overridden = set() if node_key is not None else {row['node_key'] for row in conn.execute(
+        '''SELECT node_key FROM backend_vpn_policies WHERE subject_kind='installation' AND key=?
+        AND node_key IS NOT NULL AND protocol IS NULL''', (spec.name,)).fetchall()}
     for node in conn.execute('SELECT key,protocols_json FROM backend_nodes').fetchall():
-        if (node_key is None or node['key'] == node_key) and spec.protocols & set(json.loads(node['protocols_json'])):
+        if ((node_key is None or node['key'] == node_key) and node['key'] not in overridden
+                and spec.protocols & set(json.loads(node['protocols_json']))):
             conn.execute('UPDATE backend_nodes SET desired_revision=desired_revision+1 WHERE key=?', (node['key'],))
 
 

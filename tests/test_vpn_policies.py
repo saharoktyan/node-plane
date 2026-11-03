@@ -174,6 +174,29 @@ class VpnPolicyTests(unittest.TestCase):
             self.assertEqual(vpn_policies.runtime_settings(conn, 'awg1', ['awg']), {})
 
 
+    def test_a_node_bittorrent_override_wins_and_is_not_reapplied_by_global_changes(self):
+        from backend.nodes import NodeService
+        NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
+            'key': 'n2', 'title': 'Second', 'region': 'EU', 'transport': 'ssh', 'protocols': ['xray'],
+            'ssh_target': 'root@n2.example', 'settings': {'public_host': 'n2.example'}})
+        def revisions():
+            return {row['key']: row['desired_revision'] for row in
+                    self.db.connection.execute('SELECT key,desired_revision FROM backend_nodes').fetchall()}
+        before = revisions()
+        self.put('installation', None, self.change('allow', node_key='n2', key='xray.bittorrent'))
+        after = revisions()
+        self.assertEqual((after['n1'], after['n2']), (before['n1'], before['n2'] + 1))
+        # A global block reaches only nodes that inherit it.
+        self.put('installation', None, self.change('block', key='xray.bittorrent'))
+        final = revisions()
+        self.assertEqual((final['n1'], final['n2']), (after['n1'] + 1, after['n2']))
+        with self.db.connect() as conn:
+            self.assertEqual(vpn_policies.runtime_settings(conn, 'n1', ['xray']), {'xray_bittorrent': 'block'})
+            self.assertEqual(vpn_policies.runtime_settings(conn, 'n2', ['xray']), {})
+        values = self.service.get(self.actor, 'installation')['values']
+        self.assertIn(('xray.bittorrent', 'n2', 'allow'), [(v['key'], v['node_key'], v['value']) for v in values])
+
+
 class VpnPolicyHttpTests(unittest.TestCase):
     def setUp(self):
         from tests import test_backend_http as http_fixture

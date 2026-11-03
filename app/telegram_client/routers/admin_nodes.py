@@ -1107,6 +1107,12 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
         Section(tr(locale, 'nodes.draft.protocol_settings'), rows=(tuple(
             InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol), callback_data=f'node_section:{protocol}:{node_key}') for protocol in node['protocols']),
             (InlineKeyboardButton(text=tr(locale, 'nodes.rich.protocol_options'), callback_data=NodeProtocolsCallback(node_key=node_key).pack()),)))]
+    from .admin_node_policies import settings_section
+    try:
+        policy = await backend.request('GET', '/api/v1/vpn-policies/installation', telegram_user_id=user_id)
+    except BackendError:
+        policy = None
+    sections += list(settings_section(locale, node, policy))
     await render(bot, chat_id, Screen(tr(locale, 'nodes.settings.title'), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
     if (node.get('_settings_operation') or {}).get('status') in {'awaiting_executor', 'running'}:

@@ -17,6 +17,7 @@ from .routers import user, admin_requests, admin_profiles, admin_nodes, admin_se
 from .routers import user_devices
 from .routers import admin_connection_limits
 from .routers import admin_quotas
+from .routers import admin_node_policies
 from .routers import admin_installation_defaults
 from .routers import navigation
 from .routers import quick_start
@@ -63,6 +64,7 @@ async def main() -> None:
             dispatcher.include_router(admin_settings.router)
             dispatcher.include_router(admin_connection_limits.router)
             dispatcher.include_router(admin_quotas.router)
+            dispatcher.include_router(admin_node_policies.router)
             dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)
             dispatcher.include_router(admin_backups.router)
