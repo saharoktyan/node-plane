@@ -80,6 +80,16 @@ The start day is when the profile first got a quota; an administrator can move i
 
 A quota suspension is separate from freezing: a new period lifts only the quota suspension, never an administrator's freeze. Owners receive service notifications at 80% and when the quota is used up, and after a reset that restored access. Usage is counted from traffic collection, so a profile can exceed its limit by up to one collection interval.
 
+## Tariffs
+
+A tariff is a named set of limits with an access term and nodes. Create and edit tariffs in Telegram → Settings → VPN → **Tariffs** or Workstation → Node Plane Settings → Policies → **Tariffs**; assign one in a profile's Edit screen in Telegram (**Change tariff**) or with **Tariff** on the profile card in Workstation.
+
+- **Limits**: devices per profile, simultaneous networks, speed and traffic quota, with the same values as the installation settings. They stay linked: a tariff's values apply to every profile on it and follow its changes. A profile's own value still wins, and **As tariff** shows what removing it falls back to. A limit the tariff does not set comes from the installation.
+- **Access term** in days, or no term. Assigning can keep the profile's term, start a new one from now, or extend it: **Extend** adds the term after the remaining time, or from now when access has already expired. Assigning the same tariff again with **Extend** is a renewal.
+- **Nodes**: all nodes, chosen regions (new nodes in them are added automatically), or keep the profile's nodes. A tariff's nodes are copied only when you choose **Replace nodes** while assigning it; configs on nodes the profile loses stop working.
+
+Editing a tariff never changes a profile's term or nodes. Removing a tariff from a profile stops its limits and keeps the term and nodes. A tariff assigned to profiles cannot be deleted. Administrators' profiles may have a tariff for its limits but keep their unlimited term and access to every node.
+
 ## Roles, blocking and freezing
 
 An administrator role grants management permissions. Change a role only for someone who should manage the installation.

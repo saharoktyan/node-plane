@@ -153,8 +153,9 @@ async def show(chat_id, user_id, message_id, data, bot, backend, state, profile_
                         text=current['effective'] if custom else tr(locale, 'quota.tz_other'),
                         callback_data=f'{prefix}:tz_input', style='primary' if custom else None),),)
             else:
-                inherited = value_label(locale, name, _key(installation, FIELDS[name][0])['effective'])
-                inherit = InlineKeyboardButton(text=tr(locale, 'quota.inherit', value=inherited),
+                from .admin_tariffs import inherit_text
+                inherit = InlineKeyboardButton(text=inherit_text(locale, current, _key(installation, FIELDS[name][0])['effective'],
+                        lambda value: value_label(locale, name, value), 'quota.inherit'),
                     callback_data=f'{prefix}:{name}:inherit', style='primary' if current['value'] is None else None)
                 choice_rows = ((inherit,), *_choices(locale, name, prefix, current['value'],
                                                      none=(0,) if name == 'limit' else ()))

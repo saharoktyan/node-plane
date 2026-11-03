@@ -102,8 +102,9 @@ async def _show(query, bot, backend, state, profile_id=None):
             if profile_id is None:
                 rows = _choices(locale, name, prefix, current['effective'] or None, None)
             else:
-                inherited = rate_label(locale, _key(installation, FIELDS[name])['effective'])
-                inherit = InlineKeyboardButton(text=tr(locale, 'speed.inherit', value=inherited),
+                from .admin_tariffs import inherit_text
+                inherit = InlineKeyboardButton(text=inherit_text(locale, current, _key(installation, FIELDS[name])['effective'],
+                        lambda value: rate_label(locale, value), 'speed.inherit'),
                     callback_data=f'{prefix}:{name}:inherit', style='primary' if current['value'] is None else None)
                 rows = ((inherit,), *_choices(locale, name, prefix, current['value'], 0))
             sections += (Section(tr(locale, 'speed.field.' + name), rows=rows),)
@@ -133,6 +134,8 @@ def profile_section(locale, profile_id, policy):
     if policy is None or not {*FIELDS.values()} <= {item['key'] for item in policy.get('keys', ())}:
         return ()
     own = any(_key(policy, key)['value'] is not None for key in FIELDS.values())
-    text = summary(locale, policy) if own else tr(locale, 'speed.inherit', value=summary(locale, policy))
+    tariff = any(_key(policy, key).get('tariff') is not None for key in FIELDS.values())
+    text = summary(locale, policy) if own else tr(locale, 'tariff.inherit' if tariff else 'speed.inherit',
+                                                    value=summary(locale, policy))
     return (Section(tr(locale, 'speed.title'), (text,), ((InlineKeyboardButton(
         text=tr(locale, 'connlimit.configure'), callback_data=f'pspeedlim:{profile_id}'),),)),)

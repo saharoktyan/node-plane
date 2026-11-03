@@ -72,6 +72,14 @@ def value_label(locale, field, value):
     return quota_label(locale, field, value)
 
 
+def inherit_text(locale, current, installation, label, key):
+    """The profile's "inherited" choice: its tariff's value when the tariff
+    sets the key, otherwise the installation's."""
+    if current.get('tariff') is not None:
+        return tr(locale, 'tariff.inherit', value=label(current['tariff']))
+    return tr(locale, key, value=label(installation))
+
+
 def term_label(locale, days):
     return tr(locale, 'tariff.term.none') if days is None else tr(locale, 'tariff.term.days', days=days)
 

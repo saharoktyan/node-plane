@@ -54,6 +54,13 @@
 - Add `throttle` to `quota.on_exhausted`: a used-up quota limits the speed
   of the profile's devices to `quota.throttle_kbit` until the next reset
   instead of suspending access.
+- Add tariffs: named sets of profile limits (devices, simultaneous networks,
+  speed, traffic quota) with an access term and nodes, in Telegram and
+  Workstation. A tariff's limits are a layer between the installation and the
+  profile and follow its changes; the term and nodes are copied when it is
+  assigned: keep, start or extend the term (renewal), optionally replacing the
+  profile's nodes. Backups include tariffs (format v7). Database revision 22
+  cannot be read by older controllers.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

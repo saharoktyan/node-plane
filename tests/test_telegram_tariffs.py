@@ -104,3 +104,11 @@ class TariffScreenTests(IsolatedAsyncioTestCase):
         with patch('telegram_client.routers.admin_profiles.show_profile_edit_menu', new_callable=AsyncMock):
             await self.press(tariffs.profile_apply_cb, 'ptrf_go', backend)
         self.assertEqual(store.calls[-1][2], {'tariff_id': None, 'expiry': 'keep', 'apply_access': False})
+
+
+class InheritTextTests(IsolatedAsyncioTestCase):
+    def test_a_tariff_value_is_named_as_the_inherited_choice(self):
+        label = str
+        self.assertEqual(tariffs.inherit_text('en', {'tariff': 2}, 5, label, 'devlimit.inherit'), 'As tariff (2)')
+        self.assertEqual(tariffs.inherit_text('en', {'tariff': None}, 5, label, 'devlimit.inherit'),
+                         'As installation (5)')

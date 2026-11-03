@@ -3733,6 +3733,7 @@ CATALOG['en'].update({
     'tariff.error.admin_access_permanent': 'Administrator profiles keep their term and nodes.',
     'tariff.error.revision_conflict': 'The data changed meanwhile. Open it again.',
     'tariff.error.tariff_not_found': 'The tariff no longer exists.',
+    'tariff.inherit': 'As tariff ({value})',
 })
 CATALOG['ru'].update({
     'tariff.title': 'Тарифы',
@@ -3785,4 +3786,5 @@ CATALOG['ru'].update({
     'tariff.error.admin_access_permanent': 'Профили администраторов сохраняют срок и ноды.',
     'tariff.error.revision_conflict': 'Данные изменились. Откройте заново.',
     'tariff.error.tariff_not_found': 'Тариф больше не существует.',
+    'tariff.inherit': 'Как в тарифе ({value})',
 })

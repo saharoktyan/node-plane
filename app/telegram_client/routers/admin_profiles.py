@@ -1159,7 +1159,9 @@ def _policy_sections(locale, profile_id, policy):
 def _device_limit_text(locale, current):
     from .admin_settings import device_limit_label
     if current['value'] is None:
-        return tr(locale, 'devlimit.inherit', value=device_limit_label(locale, current['effective']))
+        from .admin_tariffs import inherit_text
+        return inherit_text(locale, current, current['effective'], lambda value: device_limit_label(locale, value),
+                            'devlimit.inherit')
     return device_limit_label(locale, current['value'])
 
 
@@ -1194,8 +1196,9 @@ async def profile_device_limit_cb(query: CallbackQuery, bot: Bot,
                    if not b.callback_data.endswith(':none')]
         installation = next(item for item in (await backend.installation_vpn_policies(query.from_user.id))['keys']
                             if item['key'] == 'devices.max')
-        inherit = InlineKeyboardButton(text=tr(locale, 'devlimit.inherit',
-                value=device_limit_label(locale, installation['effective'])),
+        from .admin_tariffs import inherit_text
+        inherit = InlineKeyboardButton(text=inherit_text(locale, current, installation['effective'],
+                lambda value: device_limit_label(locale, value), 'devlimit.inherit'),
             callback_data=f'pdevlimit:{profile_id}:inherit', style='primary' if current['value'] is None else None)
         hint = (tr(locale, 'devlimit.profile_hint'),)
         if current['value'] is not None and current['value'] not in DEVICE_LIMIT_CHOICES:
