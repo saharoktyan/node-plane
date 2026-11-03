@@ -49,6 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = protocols::xray::api::cli::run(&args).await {
         std::process::exit(code);
     }
+    if let Some(code) = protocols::xray::user_sync::run(&args).await {
+        std::process::exit(code);
+    }
     let config = AgentConfig::load();
     let state = AgentState::new(config.clone());
     let api = NodeAgentApi {

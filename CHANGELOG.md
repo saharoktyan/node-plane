@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add and remove VLESS users in the node agent (`node-plane-agent xray-user`)
+  instead of the Python helper; the shell entry points only start the agent.
 - Runtime updates now bring existing VPN containers to the release images:
   the node agent drops image pins that earlier releases wrote into node.env
   (other values stay as overrides) and redeploys containers running another

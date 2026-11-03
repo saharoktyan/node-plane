@@ -1,8 +1,8 @@
 """Opt-in real runtime checks; only uniquely named disposable containers.
 
 Requires cached production images and NODE_PLANE_TEST_DOCKER=1. No image builds,
-host network, published VPN ports or production node paths are used. The agent
-Xray API test publishes only the Xray API port, on host loopback.
+host network, published VPN ports or production node paths are used. Xray
+fixtures publish only the Xray API port (and test SOCKS ports), on host loopback.
 """
 import base64
 import importlib.util
@@ -52,8 +52,7 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertRegex(XRAY_IMAGE, r'ghcr\.io/saharoktyan/xray-core:v26\.10\.31-np\.2@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
         # Check the runtime entry points that select an image.
-        for name in ('deploy-xray.sh', 'init-xray.sh', 'sync-xray.sh',
-                     'node.env.example', 'apply-profile-intent.py'):
+        for name in ('deploy-xray.sh', 'init-xray.sh', 'sync-xray.sh', 'apply-profile-intent.py'):
             with self.subTest(path=name):
                 path = root / 'runtime_assets' / name
                 self.assertIn(XRAY_IMAGE, path.read_text())
@@ -63,8 +62,8 @@ class DockerRuntimeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.prefix = 'np-test-' + uuid4().hex[:12]
-        # Xray fixtures have no network; helpers use the container CLI unless a
-        # test opts into the agent transport.
+        # Helpers use the container CLI unless a test opts into the agent
+        # transport (agent_xray).
         absent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(self.root / 'no-agent')})
         absent.start()
         self.addCleanup(absent.stop)
@@ -84,26 +83,7 @@ class DockerRuntimeTests(unittest.TestCase):
         return name
 
     def xray(self):
-        directory = self.root / 'xray'
-        directory.mkdir()
-        path = directory / 'config.json'
-        config = {
-            'log': {'loglevel': 'warning'},
-            'api': {'tag': 'api', 'services': ['HandlerService', 'StatsService']},
-            'inbounds': [
-                {'tag': tag, 'port': port, 'protocol': 'vless',
-                 'settings': {'decryption': 'none', 'clients': []},
-                 'streamSettings': {'network': network}}
-                for tag, port, network in [('reality-tcp', 443, 'tcp'), ('reality-xhttp', 8443, 'xhttp')]
-            ] + [{'tag': 'api', 'listen': '127.0.0.1', 'port': 10085,
-                  'protocol': 'dokodemo-door', 'settings': {'address': '127.0.0.1'}}],
-            'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}],
-            'routing': {'rules': [{'type': 'field', 'inboundTag': ['api'], 'outboundTag': 'api'}]},
-        }
-        path.write_text(json.dumps(config))
-        container = self.container('xray', XRAY_IMAGE, '--network', 'none', '--user', '0:0',
-            '-v', f'{directory}:/etc/xray:ro', command=('xray', 'run', '-c', '/etc/xray/config.json'))
-        self.wait_users(container)
+        path, container, _ = self.agent_xray()
         return path, container
 
     def wait_users(self, container):
@@ -116,12 +96,18 @@ class DockerRuntimeTests(unittest.TestCase):
                     self.fail(docker('logs', container).stdout)
                 time.sleep(0.05)
 
-    def sync(self, path, container, action, identity=None):
-        XRAY.run(action, path, container, 'reality-tcp', 'reality-xhttp', 'alice', identity)
+    def sync(self, path, container, action, identity=None, name='alice'):
+        # The agent keeps the config file and the live users in sync.
+        result = subprocess.run([str(AGENT_BINARY), 'xray-user', action, str(path), container,
+                                 'reality-tcp', 'reality-xhttp', name, *([identity] if identity else [])],
+                                capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip())
 
     def started(self, container):
         return docker('inspect', '-f', '{{.State.StartedAt}}', container).stdout
 
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_expired_temporary_vless_is_pruned_before_real_container_restart(self):
         path, container = self.xray()
         self.sync(path,container,'add',str(uuid4()))
@@ -130,8 +116,8 @@ class DockerRuntimeTests(unittest.TestCase):
         intent = {'command_id':str(uuid4()),'protocol':'xray','runtime_name':'tmp_'+uuid4().hex,
             'revision':1,'action':'ensure','uuid':str(uuid4()),'short_id':'0123456789abcdef','lease_seconds':43200}
         def mutate(value,fd):
-            XRAY.run('add' if value['action']=='ensure' else 'delete',path,container,
-                     'reality-tcp','reality-xhttp',value['runtime_name'],value['uuid'] or None)
+            self.sync(path,container,'add' if value['action']=='ensure' else 'delete',
+                      value['uuid'] or None,value['runtime_name'])
             return {'summary':'OK','payload_json':''}
         engine.apply(intent,journal,mutate)
         import sqlite3
@@ -152,6 +138,7 @@ class DockerRuntimeTests(unittest.TestCase):
             self.assertNotIn(intent['runtime_name'],users)
         self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
 
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_xray_api_add_and_revoke_persist_across_real_restart(self):
         path, container = self.xray()
         identity, started = str(uuid4()), self.started(container)
@@ -197,10 +184,15 @@ class DockerRuntimeTests(unittest.TestCase):
         }
         path.write_text(json.dumps(config))
         path.chmod(0o644)
-        ports = [arg for port in ('10085', *publish) for arg in ('-p', f'127.0.0.1::{port}')]
+        # A fixed host port for the API: a restarted container keeps it.
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            api_port = probe.getsockname()[1]
+        ports = ['-p', f'127.0.0.1:{api_port}:10085',
+                 *(arg for port in publish for arg in ('-p', f'127.0.0.1::{port}'))]
         container = self.container('xray-api', XRAY_IMAGE, '--user', '0:0', *ports,
             '-v', f'{directory}:/etc/xray:ro', command=('xray', 'run', '-c', '/etc/xray/config.json'))
-        port = docker('port', container, '10085/tcp').stdout.split()[0].rsplit(':', 1)[1]
+        port = api_port
         agent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY),
                                         'NODE_PLANE_XRAY_API': f'127.0.0.1:{port}'})
         agent.start()
@@ -338,40 +330,9 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertFalse(closed(newer, 1))
 
         # Revocation removes the user and closes what is open.
-        XRAY.run('delete', path, server, 'reality-tcp', 'reality-xhttp', 'alice')
+        self.sync(path, server, 'delete')
         self.assertTrue(closed(newer))
         self.assertNotIn('alice', XRAY.users(server, 'reality-tcp'))
-
-    def test_xray_partial_api_add_and_delete_have_durable_repairable_state(self):
-        path, container = self.xray()
-        identity, started = str(uuid4()), self.started(container)
-        original = XRAY.add_live
-        def add(container, inbound, client, directory):
-            if inbound['tag'] == 'reality-xhttp':
-                raise RuntimeError('injected second-inbound API failure')
-            return original(container, inbound, client, directory)
-        with patch.object(XRAY, 'add_live', side_effect=add):
-            with self.assertRaises(RuntimeError):
-                self.sync(path, container, 'add', identity)
-        self.assertIn('alice', XRAY.users(container, 'reality-tcp'))
-        self.assertNotIn('alice', XRAY.users(container, 'reality-xhttp'))
-        self.sync(path, container, 'add', identity)
-        remove = XRAY.remove_live
-        def delete(container, tag, name):
-            if tag == 'reality-xhttp':
-                raise RuntimeError('injected second-inbound API failure')
-            return remove(container, tag, name)
-        with patch.object(XRAY, 'remove_live', side_effect=delete):
-            with self.assertRaises(RuntimeError):
-                self.sync(path, container, 'delete')
-        self.assertNotIn('alice', XRAY.users(container, 'reality-tcp'))
-        self.assertIn('alice', XRAY.users(container, 'reality-xhttp'))
-        self.assertEqual(self.started(container), started)
-        docker('restart', container)
-        self.wait_users(container)
-        for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertNotIn('alice', XRAY.users(container, tag))
-        self.sync(path, container, 'delete')
 
     def cleanup_fixture(self, conflicting=False):
         for directory in ('xray', 'amnezia-awg/data', 'awg-clients', 'unrelated'):

@@ -7,7 +7,11 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-exec python3 /opt/node-plane-runtime/xray-user-api.py delete \
+# The agent does the work (protocols/xray/user_sync.rs); this script stays
+# only as the name the profile intent journal runs. An agent without
+# `xray-user` would start its server instead: the probe settings make it exit.
+NODE_AGENT_CONFIG_PATH=/nonexistent/node-plane-agent-probe.toml NODE_AGENT_LISTEN_ADDR=probe \
+exec "${NODE_PLANE_AGENT_BIN:-/usr/local/bin/node-plane-agent}" xray-user delete \
   "${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}" \
   "${XRAY_CONTAINER_NAME:-xray}" \
   "${XRAY_INBOUND_TCP_TAG:-reality-tcp}" \
