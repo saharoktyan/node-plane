@@ -569,6 +569,35 @@ async fn diagnostic_snapshot(
     Ok((facts, inventory))
 }
 
+/// A scope's own values with the listings it inherits from, and the
+/// profile's quota for a profile scope.
+async fn load_scope(
+    session: &SshSession,
+    credential: &backend::Credential,
+    scope: &crate::policy_scope::Scope,
+) -> Result<Value> {
+    use crate::policy_scope::{INSTALLATION, Scope};
+    let get = |path: String| async move {
+        backend::request(session, credential, Method::GET, &path, None, None).await
+    };
+    let mut data = json!({"installation": get(INSTALLATION.into()).await?});
+    if !matches!(scope, Scope::Node { .. }) {
+        data["subject"] = get(scope.path()).await?;
+    }
+    match scope {
+        Scope::Device { profile, .. } => {
+            data["profile"] = get(format!("/api/v1/profiles/{profile}/vpn-policies")).await?;
+        }
+        Scope::Profile { id, .. } => {
+            data["quota"] = get(format!("/api/v1/profiles/{id}/quota"))
+                .await
+                .unwrap_or(Value::Null);
+        }
+        Scope::Node { .. } => {}
+    }
+    Ok(data)
+}
+
 async fn apply_settings(
     session: &SshSession,
     credential: &backend::Credential,
@@ -1143,7 +1172,11 @@ async fn execute_inner(
                         ensure!(content.len() <= 64 * 1024 * 1024, "Backup exceeds 64 MiB");
                         body = Some(serde_json::from_slice(&content)?);
                     }
-                    let revision = match &command { crate::controller::Command::DefaultsSave(_,revision) => Some(*revision), _ => None };
+                    if matches!(&command, crate::controller::Command::QuotaReset(..))
+                        && !events::confirm(tx, "Reset the traffic quota?", "A new period starts now with zero usage and ends at the next regular reset. Suspended access is restored.".into())? {
+                        return Ok("Quota reset cancelled".into());
+                    }
+                    let revision = match &command { crate::controller::Command::DefaultsSave(_,revision) | crate::controller::Command::QuotaAnchor(_, _, revision) => Some(*revision), _ => None };
                     let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await.map_err(|error| anyhow::Error::new(error).context(if matches!(&command, crate::controller::Command::BackupQueue(_, _)) { "Backup submission failed or is unconfirmed. Refresh Backups before submitting another operation." } else { "Controller request failed" }))?;
                     if let crate::controller::Command::BackupExport(id, file) = &command {
                         use std::io::Write;
@@ -1161,12 +1194,19 @@ async fn execute_inner(
                     if matches!(&command, crate::controller::Command::BackupPreferences(_) | crate::controller::Command::BackupDelete(_, _)) {
                         value = backend::request(session, &credential, Method::GET, "/api/v1/system/backups", None, None).await?;
                     }
+                    if let crate::controller::Command::ScopedPolicies(scope) | crate::controller::Command::ScopedPolicySave(scope, ..)
+                        | crate::controller::Command::QuotaReset(scope, _) | crate::controller::Command::QuotaAnchor(scope, ..) = &command {
+                        value = load_scope(session, &credential, scope).await?;
+                    }
                     if matches!(&command,crate::controller::Command::Policies | crate::controller::Command::PolicySave(_, _) | crate::controller::Command::VpnPolicySave(_, _)) {
                         let traffic = backend::request(session,&credential,Method::GET,"/api/v1/system/traffic",None,None).await?;
                         let requests = backend::request(session,&credential,Method::GET,"/api/v1/system/access-requests",None,None).await?;
                         // Older controllers have no VPN policy API; their other policies stay usable.
                         let vpn = backend::request(session,&credential,Method::GET,"/api/v1/vpn-policies/installation",None,None).await.unwrap_or(Value::Null);
-                        value = json!({"traffic":traffic,"requests":requests,"vpn":vpn});
+                        let connection_delivery = backend::request(session,&credential,Method::GET,"/api/v1/connection-limits/nodes",None,None).await.unwrap_or(Value::Null);
+                        let speed_delivery = backend::request(session,&credential,Method::GET,"/api/v1/speed-limits/nodes",None,None).await.unwrap_or(Value::Null);
+                        value = json!({"traffic":traffic,"requests":requests,"vpn":vpn,
+                            "connection_delivery":connection_delivery,"speed_delivery":speed_delivery});
                     }
                     if matches!(&command,crate::controller::Command::AlertPreferences(_) | crate::controller::Command::AlertDismiss(_)) { value = backend::request(session,&credential,Method::GET,"/api/v1/system/alerts",None,None).await?; }
                     let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));

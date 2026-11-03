@@ -244,6 +244,28 @@ impl App {
                 self.access.selected = 0;
                 None
             }
+            Control::AccessLimits => {
+                use crate::access::text;
+                let scope = match (&self.access.devices, &self.access.card) {
+                    (Some(devices), _) => {
+                        let Some(card) = &devices.card else {
+                            return None;
+                        };
+                        crate::policy_scope::Scope::Device {
+                            profile: text(&devices.profile["id"]),
+                            id: text(&card["id"]),
+                            title: text(&card["display_name"]),
+                        }
+                    }
+                    (None, Some(card)) => crate::policy_scope::Scope::Profile {
+                        id: text(&card["id"]),
+                        title: text(&card["display_name"]),
+                    },
+                    (None, None) => return None,
+                };
+                self.open_scoped_policies(scope);
+                None
+            }
             Control::AccessDeviceConfirm => {
                 if let Some(devices) = &self.access.devices
                     && let (Some(card), Some(key)) =
@@ -629,6 +651,7 @@ impl App {
                         | Control::AccessDeviceDelete
                         | Control::AccessDeviceRotate(_)
                         | Control::AccessDeviceConfirm
+                        | Control::AccessLimits
                         | Control::AccessDevicePage(_)
                         | Control::AccessDurationCustom
                         | Control::AccessDurationInput

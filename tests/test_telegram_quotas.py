@@ -164,7 +164,7 @@ class QuotaInputTests(IsolatedAsyncioTestCase):
             calls.append((method, path, kwargs.get('revision'), kwargs.get('body')))
             if path.endswith('/quota'):
                 return {'limit_bytes': GIB, 'reset': 'monthly_anchor', 'timezone': 'Europe/Moscow',
-                        'anchor_at': '2026-02-09T21:00:00+00:00', 'anchor_revision': 3,
+                        'anchor_at': '2026-02-09T21:00:00+00:00', 'anchor_day': '2026-02-10', 'anchor_revision': 3,
                         'period': {'used_bytes': 0, 'end': None, 'blocked': False}}
             return Policies().listing('profile' if 'profiles' in path else 'installation')
         backend = SimpleNamespace(request=AsyncMock(side_effect=request))
@@ -178,7 +178,7 @@ class QuotaInputTests(IsolatedAsyncioTestCase):
             await quotas.profile_cb(self.query, self.bot, backend, self.state)
         with patch.object(quotas, 'render', new_callable=AsyncMock):
             await quotas.quota_text(self.message('2026-03-15'), self.bot, backend, self.state)
-        self.assertIn(('PATCH', '/api/v1/profiles/p1/quota', 3, {'anchor_at': '2026-03-15T00:00:00+03:00'}), calls)
+        self.assertIn(('PATCH', '/api/v1/profiles/p1/quota', 3, {'anchor_at': '2026-03-15'}), calls)
 
 
 class QuotaTextTests(TestCase):

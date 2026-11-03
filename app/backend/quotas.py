@@ -147,6 +147,9 @@ def overview(conn, profile_id):
             'throttle_kbit': values['quota.throttle_kbit'], 'throttled': throttle(conn, profile_id),
             'timezone': values['quota.timezone'],
             'anchor_at': state['anchor_at'] if state else None, 'anchor_revision': state['revision'] if state else 0,
+            # The start day as administrators enter it: a date in the quota time zone.
+            'anchor_day': datetime.fromisoformat(state['anchor_at']).astimezone(
+                zone(values['quota.timezone'])).date().isoformat() if state else None,
             'period': _period(_open(conn, profile_id)), 'history': [_period(row) for row in history]}
 
 
@@ -302,14 +305,17 @@ class QuotaService:
             return overview(conn, profile_id)
 
     def move_anchor(self, actor, profile_id, anchor_at, revision):
-        """Moves the reset anchor; it applies from the next reset."""
+        """Moves the reset anchor; it applies from the next reset. A plain
+        date means its midnight in the quota time zone."""
         try:
             anchor = datetime.fromisoformat(anchor_at)
         except (TypeError, ValueError):
             raise AccessDenied('invalid_input', 422) from None
-        if anchor.tzinfo is None:
+        if anchor.tzinfo is None and len(anchor_at) != 10:
             raise AccessDenied('invalid_input', 422)
         with self.db.transaction() as conn:
+            if anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=zone(effective(conn, keys=['quota.timezone'])['quota.timezone']))
             from .maintenance_gate import admit
             admit(conn)
             self._admin(actor, profile_id, conn)

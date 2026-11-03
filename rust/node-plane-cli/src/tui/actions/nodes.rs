@@ -22,6 +22,17 @@ impl App {
                 }
                 None
             }
+            Control::NodesLimits => {
+                if let Some(node) = &self.nodes.card {
+                    let scope = crate::policy_scope::Scope::Node {
+                        key: node.key.clone(),
+                        title: node.title.clone(),
+                        xray: node.protocols.iter().any(|protocol| protocol == "xray"),
+                    };
+                    self.open_scoped_policies(scope);
+                }
+                None
+            }
             Control::NodesEditTab(tab) => {
                 if let Some(editor) = &mut self.nodes.editor {
                     if tab == crate::node_editor::Tab::AwgParameters {

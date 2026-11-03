@@ -101,6 +101,11 @@ pub(super) enum Control {
     ControllerUpdates,
     ControllerDefaults,
     ControllerPolicies,
+    /// Next value of a key in the profile, device or node scope.
+    ControllerScopedPolicy(&'static str),
+    ControllerQuotaReset,
+    ControllerQuotaAnchor,
+    ControllerQuotaTimezone,
     ControllerAlerts,
     ControllerAudit,
     ControllerAuditFilter(bool),
@@ -185,6 +190,8 @@ pub(super) enum Control {
     NodesBootstrap,
     NodesProtocolAction(&'static str),
     NodesEdit,
+    /// Limits of the installation on the open node.
+    NodesLimits,
     NodesEditTab(crate::node_editor::Tab),
     NodesEditField(usize),
     NodesEditChoice(usize),
@@ -237,6 +244,8 @@ pub(super) enum Control {
     /// Reissue a key; true for AWG, false for VLESS.
     AccessDeviceRotate(bool),
     AccessDeviceConfirm,
+    /// Limits of the open profile card or device card.
+    AccessLimits,
     AccessDevicePage(bool),
     AccessExpiryMenu,
     AccessDurationCustom,

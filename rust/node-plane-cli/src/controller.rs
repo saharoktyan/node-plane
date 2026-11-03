@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use hyper::Method;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -55,6 +55,13 @@ pub enum Command {
     SshKey,
     PolicySave(&'static str, Value),
     VpnPolicySave(Value, Uuid),
+    /// Policies of one profile, device or node, with what they inherit.
+    ScopedPolicies(crate::policy_scope::Scope),
+    ScopedPolicySave(crate::policy_scope::Scope, Value, Uuid),
+    /// Starts a new quota period for the scope's profile now.
+    QuotaReset(crate::policy_scope::Scope, Uuid),
+    /// Moves the scope profile's quota start day (YYYY-MM-DD) at a revision.
+    QuotaAnchor(crate::policy_scope::Scope, String, u64),
     DefaultsSave(Value, u64),
     Backups,
     BackupCatalog(usize),
@@ -295,6 +302,28 @@ impl Command {
                 Some(value.clone()),
                 Some(*key),
             ),
+            Self::ScopedPolicies(scope) => (Method::GET, scope.path(), None, None),
+            Self::ScopedPolicySave(scope, value, key) => {
+                (Method::PATCH, scope.path(), Some(value.clone()), Some(*key))
+            }
+            Self::QuotaReset(scope, key) => (
+                Method::POST,
+                format!(
+                    "/api/v1/profiles/{}/quota/reset",
+                    scope.profile().context("A quota needs a profile")?
+                ),
+                Some(json!({})),
+                Some(*key),
+            ),
+            Self::QuotaAnchor(scope, day, _) => (
+                Method::PATCH,
+                format!(
+                    "/api/v1/profiles/{}/quota",
+                    scope.profile().context("A quota needs a profile")?
+                ),
+                Some(json!({"anchor_at":day})),
+                None,
+            ),
             Self::Defaults => (
                 Method::GET,
                 "/api/v1/system/installation-defaults".into(),
@@ -370,6 +399,8 @@ pub struct Browser {
     pub branch_confirmation: bool,
     pub defaults: Option<Value>,
     pub policies: Option<Value>,
+    /// Set while Policies shows one profile, device or node.
+    pub scope: Option<crate::policy_scope::Scope>,
     pub alerts: Option<Value>,
     pub workstation_audit: Option<Value>,
     pub recovery_history: Option<Value>,
@@ -443,6 +474,9 @@ impl Browser {
                 | Command::AlertDismiss(_)
                 | Command::PolicySave(_, _)
                 | Command::VpnPolicySave(_, _)
+                | Command::ScopedPolicySave(..)
+                | Command::QuotaReset(..)
+                | Command::QuotaAnchor(..)
                 | Command::BackupPreferences(_)
                 | Command::UpdateCheck
                 | Command::UpdatePreferences(_)
@@ -546,7 +580,24 @@ impl Browser {
                 self.alerts = Some(value);
                 self.selected = 0;
             }
+            Command::ScopedPolicies(scope)
+            | Command::ScopedPolicySave(scope, ..)
+            | Command::QuotaReset(scope, _)
+            | Command::QuotaAnchor(scope, ..) => {
+                // A late answer for a scope that is no longer shown.
+                if self.scope.as_ref() != Some(&scope) {
+                    return;
+                }
+                self.policies = Some(value);
+                self.defaults_input = None;
+                if !keep_focus {
+                    self.selected = 0;
+                }
+            }
             Command::Policies | Command::PolicySave(_, _) | Command::VpnPolicySave(_, _) => {
+                if self.scope.is_some() {
+                    return;
+                }
                 self.policies = Some(value);
                 self.defaults_input = None;
                 self.selected = 0;

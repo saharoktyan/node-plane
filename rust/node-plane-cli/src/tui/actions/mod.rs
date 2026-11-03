@@ -296,6 +296,7 @@ impl App {
             | Control::AccessDeviceDelete
             | Control::AccessDeviceRotate(..)
             | Control::AccessDeviceConfirm
+            | Control::AccessLimits
             | Control::AccessDevicePage(..)
             | Control::AccessDurationCustom
             | Control::AccessDurationInput
@@ -359,6 +360,10 @@ impl App {
             | Control::ControllerTelegramAdminRemove(_)
             | Control::ControllerSshKeyCopy
             | Control::ControllerPolicies
+            | Control::ControllerScopedPolicy(..)
+            | Control::ControllerQuotaReset
+            | Control::ControllerQuotaAnchor
+            | Control::ControllerQuotaTimezone
             | Control::ControllerPolicyToggle(..)
             | Control::ControllerDefaultsInput
             | Control::ControllerTextConfirm
@@ -446,6 +451,7 @@ impl App {
                 return None;
             }
             Control::NodesEdit
+            | Control::NodesLimits
             | Control::NodesEditTab(..)
             | Control::NodesEditField(..)
             | Control::NodesEditChoice(..)

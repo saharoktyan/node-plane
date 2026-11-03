@@ -842,6 +842,8 @@ pub(in crate::tui) fn draw_controller(
             "backup_name" => "Optional name for this manual backup (up to 128 characters). Skip to create it without a name.".into(),
             "backup_import_path" => "Import backup · local JSON file path. Import adds it to the catalog; restore is a separate action.".into(),
             "backup_export_path" => "Download backup · local JSON file path. Existing files are not overwritten.".into(),
+            "quota_anchor" => "New quota start day as YYYY-MM-DD in the quota time zone. It applies from the next reset.".into(),
+            "quota_timezone" => "Quota time zone from the IANA database, for example Europe/Moscow or America/New_York.".into(),
             _ => format!("Installation defaults · {key}"),
         };
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
@@ -1356,7 +1358,10 @@ pub(in crate::tui) fn draw_controller(
         text = "Loading updates…".into();
         controls.push(("Refresh".into(), Control::ControllerUpdates));
     } else {
-        if let Some(overview) = &state.overview {
+        if let Some(scope) = &state.scope {
+            text.push_str(&scope.heading());
+            text.push_str("\nEach press moves to the next value; after the last one the value is inherited again.");
+        } else if let Some(overview) = &state.overview {
             text.push_str(&format!(
                 "Accounts: {} · Profiles: {} · Nodes: {}",
                 overview["counts"]["accounts"],
@@ -2004,7 +2009,7 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
-    if key.starts_with("backup_") || key.starts_with("telegram_") {
+    if key.starts_with("backup_") || key.starts_with("telegram_") || key.starts_with("quota_") {
         return !input.trim().is_empty();
     }
     let value = match *key {

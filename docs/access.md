@@ -62,6 +62,10 @@ Xray needs its online statistics and routing API for this. Applying node setting
 
 Each node receives its limits within a minute and keeps enforcing them without the controller; the settings screen names nodes that do not have the current limits or cannot apply them. Nodes shape traffic with `tc` and `nft` and enter the AWG container with `nsenter`, so the host needs `iproute2`, `nftables` and `util-linux` and the `ifb` kernel module. A node without them reports that it cannot limit speed; other traffic is unaffected. Limits apply per device, not per profile: two devices of one profile each get the full limit.
 
+## Device and node values
+
+Simultaneous networks and speed limits can also be set for one device and for one node. A device value overrides its profile: Telegram → device card → **Device limits**, or Workstation → Access → profile → Devices → device → **Limits**. A node value overrides the installation value on that node: Telegram → server → Settings → **Limits on this node**, or Workstation → Nodes → node → **Limits**, which also holds the node's BitTorrent setting. **As profile** or **As installation** removes the own value. Workstation → Access → profile → **Limits** shows all values of a profile, including its traffic quota.
+
 ## Traffic quotas
 
 A traffic quota limits uplink and downlink together across all servers of a profile within a period. Set it in Telegram → Settings → VPN → Traffic quota for the installation, override it in a profile's Edit screen, or use Workstation → Node Plane Settings → Policies. Traffic collection must be on.
@@ -70,7 +74,7 @@ A traffic quota limits uplink and downlink together across all servers of a prof
 - **Reset** (`quota.reset`): on the 1st of each month; monthly on the start day (the last day of shorter months); every N days (`quota.interval_days`); or never, for a one-off allowance. Periods follow the installation time zone (`quota.timezone`, UTC by default).
 - **When used up** (`quota.on_exhausted`): suspend access until the next reset (default), only notify, or limit the speed of every device of the profile to `quota.throttle_kbit` (1 Mbit/s by default) until the next reset or a raised limit. A lower speed limit of a device stays.
 
-The start day is when the profile first got a quota; an administrator can move it with the API. Changes to the reset take effect from the next reset, and the current usage stays; a new limit applies at once, so raising it restores suspended access. **Reset now** in the profile's quota screen starts a new period immediately and restores suspended access.
+The start day is when the profile first got a quota; an administrator can move it to another date in the profile's quota screen; the date is midnight in the quota time zone. The installation time zone is chosen from common zones or typed as an IANA name such as `Europe/Riga`. Changes to the reset take effect from the next reset, and the current usage stays; a new limit applies at once, so raising it restores suspended access. **Reset now** in the profile's quota screen starts a new period immediately and restores suspended access.
 
 A quota suspension is separate from freezing: a new period lifts only the quota suspension, never an administrator's freeze. Owners receive service notifications at 80% and when the quota is used up, and after a reset that restored access. Usage is counted from traffic collection, so a profile can exceed its limit by up to one collection interval.
 

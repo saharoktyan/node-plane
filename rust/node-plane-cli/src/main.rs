@@ -12,6 +12,7 @@ mod node_maintenance;
 mod node_wizard;
 mod nodes;
 mod operation_store;
+mod policy_scope;
 mod progress;
 mod self_manage;
 mod ssh;

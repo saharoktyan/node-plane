@@ -383,7 +383,7 @@ fn profile_management_actions_use_two_columns() {
             hit.area.x >= 26 && !matches!(hit.control, Control::AccessBack | Control::WindowClose)
         })
         .collect();
-    assert_eq!(controls.len(), 6);
+    assert_eq!(controls.len(), 7);
     for pair in controls.chunks(2) {
         if pair.len() == 2 {
             assert_eq!(pair[0].area.y, pair[1].area.y);
@@ -4443,7 +4443,7 @@ fn node_card_arrows_follow_button_geometry_after_resize() {
             .unwrap();
         let count = app.nodes_controls().len();
         let areas: Vec<_> = app.nodes_hits().iter().map(|hit| hit.area).collect();
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
         let row_starts: Vec<_> = (0..count - 1)
             .filter(|&i| i == 0 || areas[i].y != areas[i - 1].y)
             .collect();
@@ -8985,4 +8985,126 @@ fn custom_expiry_accepts_typed_iso_date_with_hyphens() {
             .as_deref(),
         Some("2030-12-31")
     );
+}
+
+fn scoped_request(app: &mut App) -> crate::controller::Command {
+    match app.nodes_requested.take() {
+        Some(crate::nodes::Command::Controller(_, command)) => command,
+        _ => panic!("expected a controller request"),
+    }
+}
+
+#[test]
+fn profile_limits_open_scoped_policies_and_back_returns_to_the_card() {
+    use crate::policy_scope::Scope;
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.card = Some(serde_json::json!({"id":"p1","display_name":"Anna"}));
+    app.activate(Control::AccessLimits);
+    let scope = Scope::Profile {
+        id: "p1".into(),
+        title: "Anna".into(),
+    };
+    assert!(matches!(app.screen, Screen::Controller));
+    assert!(app.controller_section == Some(ControllerSection::Policies));
+    assert_eq!(app.controller.scope.as_ref(), Some(&scope));
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::ScopedPolicies(requested) if requested == scope));
+    let data = serde_json::json!({
+        "installation":{"keys":[{"key":"devices.max","effective":3}],"values":[]},
+        "subject":{"keys":[{"key":"devices.max","value":null,"revision":0}]},
+        "quota":{"limit_bytes":1073741824,"period":{"used_bytes":0,"end":"2026-12-01T00:00:00+00:00"},
+                 "reset":"monthly_anchor","anchor_at":"2026-11-01T00:00:00+00:00",
+                 "anchor_day":"2026-11-01","anchor_revision":2}});
+    app.controller.apply(
+        crate::controller::Command::ScopedPolicies(scope.clone()),
+        data,
+    );
+    // A late answer for the installation screen does not replace the scope's values.
+    app.controller.apply(
+        crate::controller::Command::Policies,
+        serde_json::json!({"traffic":{},"requests":{}}),
+    );
+    let controls = app.controller_controls();
+    assert!(controls.contains(&Control::ControllerScopedPolicy("devices.max")));
+    assert!(controls.contains(&Control::ControllerQuotaAnchor));
+    assert!(controls.contains(&Control::ControllerQuotaReset));
+    app.activate(Control::ControllerScopedPolicy("devices.max"));
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::ScopedPolicySave(_, value, _)
+            if value == serde_json::json!({"changes":[{"key":"devices.max","value":1,"revision":0}]})));
+    app.activate(Control::ControllerQuotaAnchor);
+    app.controller.defaults_input = Some(("quota_anchor", "2026-02-30".into()));
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(app.nodes_requested.is_none());
+    assert!(!app.error.is_empty());
+    app.controller.defaults_input = Some(("quota_anchor", "2026-11-15".into()));
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::QuotaAnchor(_, day, 2) if day == "2026-11-15"));
+    app.controller.defaults_input = None;
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Access));
+    assert!(app.controller.scope.is_none());
+    // An answer that arrives after leaving is dropped.
+    app.controller.apply(
+        crate::controller::Command::ScopedPolicies(scope),
+        serde_json::json!({"installation":{}}),
+    );
+    assert!(app.controller.policies.is_none());
+}
+
+#[test]
+fn device_and_node_limits_open_their_scopes() {
+    use crate::policy_scope::Scope;
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.card = Some(serde_json::json!({"id":"p1","display_name":"Anna"}));
+    app.access.devices = Some(crate::access::Devices {
+        profile: serde_json::json!({"id":"p1"}),
+        items: Vec::new(),
+        operation: serde_json::Value::Null,
+        card: Some(serde_json::json!({"id":"d1","display_name":"Phone","status":"active"})),
+        editor: None,
+        delete_key: None,
+        rotate_key: None,
+        rotate_awg: false,
+        limit: None,
+        page: 0,
+    });
+    app.activate(Control::AccessLimits);
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::ScopedPolicies(Scope::Device { profile, id, .. })
+            if profile == "p1" && id == "d1"));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Access));
+
+    app.screen = Screen::Nodes;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    assert!(
+        crate::tui::node_card_actions(app.nodes.card.as_ref().unwrap(), None)
+            .iter()
+            .any(|(_, control)| *control == Control::NodesLimits)
+    );
+    app.activate(Control::NodesLimits);
+    let scope = Scope::Node {
+        key: "lv1".into(),
+        title: "lv1".into(),
+        xray: false,
+    };
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::ScopedPolicies(requested) if requested == scope));
+    let data = serde_json::json!({"installation":{
+        "keys":[{"key":"speed.up_kbit","effective":0}],
+        "values":[{"key":"speed.up_kbit","node_key":"lv1","protocol":null,"value":5000,"revision":3}]}});
+    app.controller
+        .apply(crate::controller::Command::ScopedPolicies(scope), data);
+    let controls = app.controller_controls();
+    assert!(!controls.contains(&Control::ControllerScopedPolicy("xray.bittorrent")));
+    app.activate(Control::ControllerScopedPolicy("speed.up_kbit"));
+    assert!(matches!(scoped_request(&mut app),
+        crate::controller::Command::ScopedPolicySave(_, value, _)
+            if value["changes"][0] == serde_json::json!({"key":"speed.up_kbit","value":10000,"revision":3,"node_key":"lv1"})));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Nodes));
 }

@@ -168,7 +168,7 @@ async def show(chat_id, user_id, message_id, data, bot, backend, state, profile_
             if quota.get('anchor_at') and quota.get('reset') in ('monthly_anchor', 'interval'):
                 actions += ((InlineKeyboardButton(text=tr(locale, 'quota.anchor_move'),
                     callback_data=f'{prefix}:anchor_input'),),)
-            anchor = (tr(locale, 'quota.anchor', date=_local_date(quota['anchor_at'], quota.get('timezone'))),) \
+            anchor = (tr(locale, 'quota.anchor', date=quota.get('anchor_day') or quota['anchor_at'][:10]),) \
                 if quota.get('anchor_at') and quota.get('reset') in ('monthly_anchor', 'interval') else ()
             usage = Section(tr(locale, 'quota.period'), (usage_line(locale, quota), *anchor), rows=actions)
             sections = (usage, *sections)
@@ -176,15 +176,6 @@ async def show(chat_id, user_id, message_id, data, bot, backend, state, profile_
         lines, sections = (error(locale, exc),), ()
     await render(bot, chat_id, Screen(tr(locale, 'quota.title'), lines, sections=sections,
         embedded_buttons=True, navigation=True), rows, state, message_id)
-
-
-def _local_date(value, tz):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    try:
-        return datetime.fromisoformat(value).astimezone(ZoneInfo(tz or 'UTC')).date().isoformat()
-    except (ValueError, KeyError):
-        return value[:10]
 
 
 async def _prompt(chat_id, user_id, message_id, field, prefix, bot, backend, state, profile_id, locale):
@@ -207,8 +198,7 @@ async def _prompt(chat_id, user_id, message_id, field, prefix, bot, backend, sta
 @router.message(QuotaInputState.waiting_for_anchor, F.text)
 async def quota_text(message: Message, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     """A typed time zone or anchor date; invalid input asks again."""
-    from datetime import date, datetime
-    from zoneinfo import ZoneInfo
+    from datetime import date
     from .admin_settings import _friendly_error
     if message.from_user is None or message.chat.type != 'private':
         return
@@ -227,9 +217,9 @@ async def quota_text(message: Message, bot: Bot, backend: BackendClient, state: 
                 day = date.fromisoformat(value)
             except ValueError:
                 raise BackendError('invalid_input', 422) from None
-            anchor = datetime(day.year, day.month, day.day, tzinfo=ZoneInfo(pending['tz']))
+            # A plain date is midnight in the quota time zone.
             await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/quota', telegram_user_id=user_id,
-                command=True, revision=pending['revision'], body={'anchor_at': anchor.isoformat()})
+                command=True, revision=pending['revision'], body={'anchor_at': day.isoformat()})
         else:
             policy = await backend.request('GET', INSTALLATION, telegram_user_id=user_id)
             current = _key(policy, 'quota.timezone')

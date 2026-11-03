@@ -30,7 +30,7 @@ VLESS clients cannot reach loopback, private, link-local, carrier-grade NAT, mul
 
 **BitTorrent over VLESS** is an installation-wide setting: Telegram → Settings → VPN → BitTorrent, or Workstation → Node Plane Settings → Policies. It defaults to **Allow**. **Block** enables traffic sniffing for routing only (destinations are not rewritten) and rejects detected BitTorrent connections. Changing it marks every VLESS node as having pending settings; apply each node's settings for the change to take effect. Encrypted or obfuscated BitTorrent traffic is not always detected. The setting does not affect AmneziaWG.
 
-A node can override the installation setting: Telegram → server → Settings → VPN policies → BitTorrent offers **As installation**, **Allow** or **Block**, and shows where the effective value comes from. Changing the installation setting marks only nodes that follow it as having pending settings.
+A node can override the installation setting: Telegram → server → Settings → VPN policies → BitTorrent, or Workstation → Nodes → node → **Limits**, offers **As installation**, **Allow** or **Block**, and shows where the effective value comes from. Changing the installation setting marks only nodes that follow it as having pending settings.
 
 ## AmneziaWG
 

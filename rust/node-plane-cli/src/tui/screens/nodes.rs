@@ -866,6 +866,9 @@ pub(in crate::tui) fn node_card_actions(
     }
     if !busy {
         actions.push(("Settings", Control::NodesEdit));
+        if !node.protocols.is_empty() {
+            actions.push(("Limits", Control::NodesLimits));
+        }
         if node.pending_settings() {
             actions.push(("Apply VPN settings", Control::NodesApply));
         }

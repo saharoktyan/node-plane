@@ -258,6 +258,13 @@ class QuotaServiceTests(unittest.TestCase):
                          ('2026-03-31T00:00:00+00:00', '2026-04-30T00:00:00+00:00'))
         self.assertEqual(self.client.patch(path, headers=self.headers_for(revision),
                                            json={'anchor_at': '2026-01-31T00:00:00+00:00'}).status_code, 412)
+        # A plain date is midnight in the quota time zone; a naive time is refused.
+        self.policy('quota.timezone', 'Europe/Moscow')
+        revision = self.client.get(path, headers=self.headers_for()).json()['anchor_revision']
+        moved = self.client.patch(path, headers=self.headers_for(revision), json={'anchor_at': '2026-05-15'})
+        self.assertEqual((moved.json()['anchor_at'], moved.json()['anchor_day']), ('2026-05-14T21:00:00+00:00', '2026-05-15'))
+        self.assertEqual(self.client.patch(path, headers=self.headers_for(revision + 1),
+                                           json={'anchor_at': '2026-05-15T00:00'}).status_code, 422)
 
     def test_collected_traffic_accrues_into_the_open_period(self):
         from backend.traffic import TrafficService

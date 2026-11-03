@@ -81,6 +81,7 @@ impl App {
                         | Control::NodesNew
                         | Control::NodesSetup
                         | Control::NodesEdit
+                        | Control::NodesLimits
                         | Control::NodesEditTab(_)
                         | Control::NodesEditField(_)
                         | Control::NodesEditChoice(_)

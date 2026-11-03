@@ -450,6 +450,7 @@ pub(in crate::tui) fn draw_access_devices(
             if card["status"] == "active" {
                 buttons.extend([
                     ("Rename", Control::AccessDeviceEdit),
+                    ("Limits", Control::AccessLimits),
                     ("New VLESS key", Control::AccessDeviceRotate(false)),
                     ("New AWG key", Control::AccessDeviceRotate(true)),
                     ("Delete", Control::AccessDeviceDelete),
@@ -796,7 +797,8 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                count += 1 + 2 * usize::from(card["_account"]["role"] != "admin");
+                // Edit, Limits, and Freeze and Delete for members.
+                count += 2 + 2 * usize::from(card["_account"]["role"] != "admin");
             }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 count += 2;
@@ -1124,6 +1126,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 buttons.push(("Edit", Control::AccessEdit));
+                buttons.push(("Limits", Control::AccessLimits));
                 if card["_account"]["role"] != "admin" {
                     buttons.push((
                         if card["frozen"] == true {

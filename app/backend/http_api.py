@@ -243,6 +243,7 @@ class QuotaOutput(BaseModel):
     timezone: str
     anchor_at: str | None
     anchor_revision: int
+    anchor_day: str | None = None
     period: QuotaPeriodOutput | None
     history: list[QuotaPeriodOutput]
 

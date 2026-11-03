@@ -416,6 +416,47 @@ impl App {
                 }
                 None
             }
+            Control::ControllerScopedPolicy(key) => {
+                if let (Some(scope), Some(data)) =
+                    (&self.controller.scope, &self.controller.policies)
+                    && data.get("installation").is_some()
+                {
+                    let change = crate::policy_scope::next_change(scope, data, key);
+                    self.controller_command(crate::controller::Command::ScopedPolicySave(
+                        scope.clone(),
+                        change,
+                        uuid::Uuid::new_v4(),
+                    ));
+                }
+                None
+            }
+            Control::ControllerQuotaReset => {
+                if let Some(scope) = &self.controller.scope {
+                    self.controller_command(crate::controller::Command::QuotaReset(
+                        scope.clone(),
+                        uuid::Uuid::new_v4(),
+                    ));
+                }
+                None
+            }
+            Control::ControllerQuotaAnchor => {
+                self.controller.defaults_input = Some(("quota_anchor", String::new()));
+                self.error.clear();
+                None
+            }
+            Control::ControllerQuotaTimezone => {
+                let current = self
+                    .controller
+                    .policies
+                    .as_ref()
+                    .and_then(|value| vpn_policy(value, "quota.timezone"))
+                    .and_then(|policy| policy["effective"].as_str())
+                    .unwrap_or("UTC")
+                    .to_string();
+                self.controller.defaults_input = Some(("quota_timezone", current));
+                self.error.clear();
+                None
+            }
             Control::ControllerPolicies => {
                 self.requests_settings = true;
                 self.controller_command(crate::controller::Command::Policies);
@@ -469,6 +510,8 @@ impl App {
                 | "quota.bytes"
                 | "quota.reset"
                 | "quota.on_exhausted"
+                | "quota.interval_days"
+                | "quota.throttle_kbit"
                 | "speed.up_kbit"
                 | "speed.down_kbit"),
             ) => {
@@ -485,6 +528,10 @@ impl App {
                         uuid::Uuid::new_v4(),
                     ));
                 }
+                None
+            }
+            Control::ControllerPolicyToggle("delivery") => {
+                self.controller_command(crate::controller::Command::Policies);
                 None
             }
             Control::ControllerPolicyToggle(choice) => {
@@ -541,6 +588,44 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
+                    if key == "quota_anchor" {
+                        let revision = self
+                            .controller
+                            .policies
+                            .as_ref()
+                            .and_then(|data| data["quota"]["anchor_revision"].as_u64());
+                        match (&self.controller.scope, revision) {
+                            (Some(scope), Some(revision))
+                                if crate::policy_scope::valid_day(&input) =>
+                            {
+                                self.controller_command(crate::controller::Command::QuotaAnchor(
+                                    scope.clone(),
+                                    input.trim().to_string(),
+                                    revision,
+                                ));
+                            }
+                            _ => self.error = "Enter a date as YYYY-MM-DD.".into(),
+                        }
+                        return None;
+                    }
+                    if key == "quota_timezone" {
+                        let revision = self
+                            .controller
+                            .policies
+                            .as_ref()
+                            .and_then(|value| vpn_policy(value, "quota.timezone"))
+                            .map(|policy| policy["revision"].clone())
+                            .unwrap_or(serde_json::json!(0));
+                        let value = match input.trim() {
+                            "UTC" => serde_json::Value::Null,
+                            zone => serde_json::json!(zone),
+                        };
+                        self.controller_command(crate::controller::Command::VpnPolicySave(
+                            serde_json::json!({"changes":[{"key":"quota.timezone","value":value,"revision":revision}]}),
+                            uuid::Uuid::new_v4(),
+                        ));
+                        return None;
+                    }
                     if key == "backup_name" {
                         if input.chars().count() > 128 {
                             self.error = "Use a backup name up to 128 characters.".into();
@@ -990,6 +1075,7 @@ impl App {
                 self.controller_navigation_revision =
                     self.controller_navigation_revision.wrapping_add(1);
                 self.controller_section = Some(section);
+                self.controller.scope = None;
                 self.requests_settings = false;
                 if section == ControllerSection::Policies {
                     self.controller_command(crate::controller::Command::Policies);
@@ -1170,6 +1256,20 @@ impl App {
                 }
                 if self.controller.text_confirmation {
                     self.controller.text_confirmation = false;
+                    return None;
+                }
+                if self.controller.defaults_input.is_none()
+                    && let Some(scope) = self.controller.scope.take()
+                {
+                    // A scope opens from a profile, device or node card; go back there.
+                    self.controller.policies = None;
+                    self.controller.selected = 0;
+                    self.controller_section = None;
+                    self.screen = if matches!(scope, crate::policy_scope::Scope::Node { .. }) {
+                        Screen::Nodes
+                    } else {
+                        Screen::Access
+                    };
                     return None;
                 }
                 if self.controller.plan_pending {
@@ -1360,6 +1460,32 @@ impl App {
             }
         }
     }
+    /// Policies of one profile, device or node; Back returns to its card.
+    pub(in crate::tui) fn open_scoped_policies(&mut self, scope: crate::policy_scope::Scope) {
+        if !self.actions_enabled() {
+            return;
+        }
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.controller.profile != profile {
+            self.controller = crate::controller::Browser {
+                profile,
+                ..Default::default()
+            };
+        }
+        self.controller_navigation_revision = self.controller_navigation_revision.wrapping_add(1);
+        self.controller.policies = None;
+        self.controller.defaults_input = None;
+        self.controller.selected = 0;
+        self.controller.scope = Some(scope.clone());
+        self.controller_viewport.set(0);
+        self.controller_section = Some(ControllerSection::Policies);
+        self.requests_settings = false;
+        self.screen = Screen::Controller;
+        self.quick_focus = false;
+        self.controller_sidebar = false;
+        self.error.clear();
+        self.controller_command(crate::controller::Command::ScopedPolicies(scope));
+    }
     pub(in crate::tui) fn open_controller(&mut self) {
         self.controller_navigation_revision = self.controller_navigation_revision.wrapping_add(1);
         self.controller_return_form = false;
@@ -1383,6 +1509,7 @@ impl App {
         self.controller.defaults = None;
         self.controller.defaults_input = None;
         self.controller.policies = None;
+        self.controller.scope = None;
         self.controller.bot_title = None;
         self.controller.telegram_settings = None;
         self.controller.ssh_key = None;
@@ -1749,6 +1876,7 @@ impl App {
                 ("SSH key".into(), Control::ControllerSshKey),
                 ("New installation".into(), Control::ControllerNew),
             ],
+            Some(Policies) if self.controller.scope.is_some() => self.scoped_policy_controls(),
             Some(Policies) => {
                 let mut items = Vec::new();
                 if let Some(value) = &self.controller.policies {
@@ -1859,6 +1987,47 @@ impl App {
                             Control::ControllerPolicyToggle("quota.on_exhausted"),
                         ));
                     }
+                    let effective =
+                        |key: &str| vpn_policy(value, key).map(|p| p["effective"].clone());
+                    if effective("quota.reset").is_some_and(|v| v == "interval")
+                        && let Some(policy) = vpn_policy(value, "quota.interval_days")
+                    {
+                        items.push((
+                            crate::policy_scope::line_value(
+                                "quota.interval_days",
+                                &policy["effective"],
+                            ),
+                            Control::ControllerPolicyToggle("quota.interval_days"),
+                        ));
+                    }
+                    if effective("quota.on_exhausted").is_some_and(|v| v == "throttle")
+                        && let Some(policy) = vpn_policy(value, "quota.throttle_kbit")
+                    {
+                        items.push((
+                            crate::policy_scope::line_value(
+                                "quota.throttle_kbit",
+                                &policy["effective"],
+                            ),
+                            Control::ControllerPolicyToggle("quota.throttle_kbit"),
+                        ));
+                    }
+                    if let Some(policy) = vpn_policy(value, "quota.timezone") {
+                        items.push((
+                            format!(
+                                "Quota time zone: {}",
+                                policy["effective"].as_str().unwrap_or("UTC")
+                            ),
+                            Control::ControllerQuotaTimezone,
+                        ));
+                    }
+                    for (name, delivery) in [
+                        ("Network limits", &value["connection_delivery"]),
+                        ("Speed limits", &value["speed_delivery"]),
+                    ] {
+                        if let Some(line) = crate::policy_scope::delivery_line(name, delivery) {
+                            items.push((line, Control::ControllerPolicyToggle("delivery")));
+                        }
+                    }
                 } else {
                     items.push((
                         "Please wait".into(),
@@ -1951,6 +2120,40 @@ fn vpn_policy<'a>(policies: &'a serde_json::Value, key: &str) -> Option<&'a serd
 
 const GIB: u64 = 1 << 30;
 
+impl App {
+    /// Policies of the profile, device or node being edited.
+    fn scoped_policy_controls(&self) -> Vec<(String, Control)> {
+        use crate::policy_scope::{Scope, has_anchor, line, quota_line};
+        let (Some(scope), Some(data)) = (&self.controller.scope, &self.controller.policies) else {
+            return vec![("Please wait".into(), Control::ControllerBack)];
+        };
+        if data.get("installation").is_none() {
+            return vec![("Please wait".into(), Control::ControllerBack)];
+        }
+        let mut items: Vec<(String, Control)> = scope
+            .keys(data)
+            .into_iter()
+            .map(|key| (line(scope, data, key), Control::ControllerScopedPolicy(key)))
+            .collect();
+        if matches!(scope, Scope::Profile { .. }) {
+            if let Some(period) = quota_line(&data["quota"]) {
+                items.push((
+                    format!("{period} · Reset now"),
+                    Control::ControllerQuotaReset,
+                ));
+            }
+            if has_anchor(&data["quota"]) {
+                let day = data["quota"]["anchor_day"].as_str().unwrap_or("");
+                items.push((
+                    format!("Quota start day: {day} · Move"),
+                    Control::ControllerQuotaAnchor,
+                ));
+            }
+        }
+        items
+    }
+}
+
 /// A speed limit in kbit/s as shown in the Telegram bot.
 fn speed_label(kbit: &serde_json::Value) -> String {
     match kbit.as_u64().filter(|kbit| *kbit > 0) {
@@ -1976,6 +2179,8 @@ fn next_preset(key: &str, policy: &serde_json::Value) -> serde_json::Value {
         "speed.up_kbit" | "speed.down_kbit" => {
             serde_json::json!([null, 1_000, 5_000, 10_000, 20_000, 50_000, 100_000])
         }
+        "quota.interval_days" => serde_json::json!([7, 30]),
+        "quota.throttle_kbit" => serde_json::json!([512, 1_000, 2_000, 5_000]),
         _ => serde_json::json!(["freeze", "notify", "throttle"]),
     };
     let presets = presets.as_array().cloned().unwrap_or_default();
