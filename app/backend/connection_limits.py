@@ -33,6 +33,8 @@ NOTIFY_MINUTES = 30
 ALERT_EVENTS = 5
 ALERT_HOURS = 24
 RETENTION_DAYS = 7
+# Observations older than this are not shown as current.
+FRESH_MINUTES = 5
 
 
 def create_schema(conn):
@@ -64,6 +66,23 @@ def node_snapshot(conn, node_key, now=None):
                         'window_seconds': values['connections.window_seconds'],
                         'cooldown_seconds': values['connections.cooldown_seconds']})
     return clients
+
+
+def device_networks(conn, profile_id, now=None):
+    """Active devices of a profile with a limit: networks seen in the last
+    `FRESH_MINUTES` on any node, and the effective limit."""
+    since = ((now or datetime.now(timezone.utc)) - timedelta(minutes=FRESH_MINUTES)).isoformat()
+    result = {}
+    for row in conn.execute('''SELECT d.id,
+            COALESCE(SUM(CASE WHEN o.observed_at>=? THEN o.active_sources END),0) AS active,
+            COALESCE(SUM(CASE WHEN o.observed_at>=? THEN o.blocked_sources END),0) AS blocked
+        FROM backend_devices d LEFT JOIN backend_vpn_session_observations o ON o.device_id=d.id
+        WHERE d.profile_id=? AND d.status='active' GROUP BY d.id''', (since, since, profile_id)).fetchall():
+        values = effective(conn, device_id=row['id'], keys=KEYS[:2])
+        if values['connections.mode'] != 'off':
+            result[row['id']] = {'active': row['active'], 'blocked': row['blocked'],
+                                 'limit': values['connections.max_sources']}
+    return result
 
 
 def _digest(clients):

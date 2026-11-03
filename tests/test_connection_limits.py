@@ -169,8 +169,17 @@ class ObservationTests(Fixture, unittest.TestCase):
         rows = self.db.connection.execute(
             'SELECT device_id,node_key,active_sources,blocked_sources FROM backend_vpn_session_observations').fetchall()
         self.assertEqual([tuple(row) for row in rows], [(self.phone['id'], 'node', 1, 1)])
+        devices = self.client.get(f'/api/v1/profiles/{self.profile}/devices', headers=self.headers_for()).json()
+        self.assertEqual(next(d for d in devices['items'] if d['id'] == self.phone['id'])['networks'],
+                         {'active': 1, 'blocked': 1, 'limit': 1})
         self.driver.observed['sessions'] = []
         self.limits.sync()
+        devices = self.client.get(f'/api/v1/profiles/{self.profile}/devices', headers=self.headers_for()).json()
+        self.assertEqual(next(d for d in devices['items'] if d['id'] == self.phone['id'])['networks'],
+                         {'active': 0, 'blocked': 0, 'limit': 1})
+        self.set_policy(f'/api/v1/profiles/{self.profile}/vpn-policies', 'connections.mode', 'off')
+        devices = self.client.get(f'/api/v1/profiles/{self.profile}/devices', headers=self.headers_for()).json()
+        self.assertTrue(all(d['networks'] is None for d in devices['items']))
         self.assertEqual(self.db.connection.execute(
             'SELECT COUNT(*) FROM backend_vpn_session_observations').fetchone()[0], 0)
 

@@ -3521,3 +3521,6 @@ CATALOG['ru'].update({
     'notification.connection_evicted.title': 'Подключение из другой сети',
     'notification.connection_evicted.body': 'Устройство {device} подключилось к {node} из другой сети, поэтому его прежнее подключение отключено. Если это были не вы, перевыпустите ключ устройства в боте.',
 })
+
+CATALOG['en']['devices.networks'] = 'VLESS networks now: {active} of {limit}. Connecting from another network disconnects the oldest one.'
+CATALOG['ru']['devices.networks'] = 'Сетей VLESS сейчас: {active} из {limit}. Подключение из новой сети отключает самую старую.'

@@ -340,9 +340,12 @@ class ProfileService:
         self.get(actor, profile_id)
         from .device_commands import device_limit
         from .devices import DeviceRepository
+        from .connection_limits import device_networks
         with self.repository.db.connect() as conn:
             limit = device_limit(conn, profile_id)
-        return {'items': DeviceRepository(self.repository.db).list_for_profile(profile_id),
+            networks = device_networks(conn, profile_id)
+        return {'items': [{**item, 'networks': networks.get(item['id'])}
+                          for item in DeviceRepository(self.repository.db).list_for_profile(profile_id)],
                 'device_limit': limit}
 
     def grants(self, actor, profile_id):

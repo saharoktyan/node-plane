@@ -285,6 +285,16 @@ class TelegramVlessDeviceTests(IsolatedAsyncioTestCase):
         self.assertEqual(issue.call_args.args[3:7], ('profile', 'node', 'xray', 'xhttp'))
         self.assertEqual(issue.call_args.kwargs['device_id'], 'new')
 
+    async def test_card_shows_current_networks_only_for_limited_devices(self):
+        for networks, expected in ((None, 1), ({'active': 1, 'blocked': 1, 'limit': 2}, 2)):
+            backend = self.backend([{'id': 'phone', 'display_name': 'Phone', 'status': 'active', 'revision': 5,
+                                     'networks': networks}])
+            with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+                await user_devices.show_card(123, 123, 77, 'profile', 'phone', self.bot, backend, self.state)
+            lines = draw.call_args.args[2].lines
+            self.assertEqual(len(lines), expected)
+        self.assertIn('1 of 2', lines[-1])
+
     async def test_key_rotation_requires_confirmation_and_replays_safely(self):
         backend = self.backend([{'id': 'phone', 'display_name': 'Phone', 'status': 'active', 'revision': 5}])
         with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:

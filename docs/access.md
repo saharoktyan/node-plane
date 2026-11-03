@@ -48,6 +48,8 @@ Open it in Telegram → Settings → VPN → Simultaneous networks, in a profile
 
 Each node receives the full set of its limits from the controller within a minute and enforces it on its own, including while the controller is unreachable. The settings screen lists nodes that do not have the current limits yet. A node whose agent is too old to enforce limits is named there; update the agent. Limits apply to VLESS only; AWG is not affected. Other devices and users are never blocked by another device's limit.
 
+The device card in Telegram shows how many networks the device uses now out of its limit.
+
 When a device is disconnected, its owner receives a service notification, at most once per 30 minutes per device. When one device reaches 5 disconnections (or, in observe mode, 5 would-be disconnections) within 24 hours, administrators receive a **VLESS link is probably shared** alert; the next alert needs 5 new events. The controller stores only these events and per-device network counts, never addresses; events are kept for 7 days.
 
 Xray needs its online statistics and routing API for this. Applying node settings turns them on.

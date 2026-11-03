@@ -201,6 +201,9 @@ class DeviceOutput(BaseModel):
     status: Literal['active', 'deleting', 'retired']
     revision: int
     created_at: str
+    # Simultaneous VLESS networks when the device has a limit: recently
+    # observed counts summed over nodes, and the effective limit.
+    networks: dict[str, int] | None = None
 
 
 class DeviceList(BaseModel):
