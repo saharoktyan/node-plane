@@ -3292,6 +3292,18 @@ fn quota_toggles_cycle_presets_including_no_limit() {
             null.clone(),
         ),
         (
+            "speed.down_kbit",
+            null.clone(),
+            null.clone(),
+            serde_json::json!(1_000),
+        ),
+        (
+            "speed.up_kbit",
+            serde_json::json!(100_000),
+            null.clone(),
+            null.clone(),
+        ),
+        (
             "quota.reset",
             serde_json::json!("none"),
             serde_json::json!("calendar_month"),
@@ -3312,6 +3324,8 @@ fn quota_toggles_cycle_presets_including_no_limit() {
         let control = match key {
             "quota.bytes" => Control::ControllerPolicyToggle("quota.bytes"),
             "quota.reset" => Control::ControllerPolicyToggle("quota.reset"),
+            "speed.up_kbit" => Control::ControllerPolicyToggle("speed.up_kbit"),
+            "speed.down_kbit" => Control::ControllerPolicyToggle("speed.down_kbit"),
             _ => Control::ControllerPolicyToggle("quota.on_exhausted"),
         };
         assert!(app.controller_controls().contains(&control));

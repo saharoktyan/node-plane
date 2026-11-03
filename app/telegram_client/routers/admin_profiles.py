@@ -1139,10 +1139,11 @@ async def _quota_section(locale, profile_id, backend, user_id):
 
 def _policy_sections(locale, profile_id, policy):
     from .admin_connection_limits import profile_section
+    from .admin_speed_limits import profile_section as speed_section
     if policy is None:
         return ()
     return (*_device_limit_section(locale, profile_id, _device_limit_key(policy)),
-            *profile_section(locale, profile_id, policy))
+            *profile_section(locale, profile_id, policy), *speed_section(locale, profile_id, policy))
 
 
 def _device_limit_text(locale, current):

@@ -3596,3 +3596,24 @@ CATALOG['ru'].update({
     'nodebt.inherit': 'Как в установке ({value})',
     'nodebt.hint': 'Заменяет настройку установки только для этой ноды. Нода покажет, что настройки нужно применить; изменение вступит в силу после применения.',
 })
+
+CATALOG['en'].update({
+    'speed.title': 'Speed limit', 'speed.none': 'No limit', 'speed.unlimited': 'unlimited', 'speed.mbit': '{value} Mbit/s', 'speed.kbit': '{value} kbit/s',
+    'speed.summary': 'upload {up}, download {down}', 'speed.inherit': 'As installation ({value})',
+    'speed.field.up': 'Upload per device', 'speed.field.down': 'Download per device',
+    'speed.hint': 'Limits the speed of each device on every server, VLESS and AmneziaWG alike. Nodes receive changes within a minute and keep enforcing them without the controller.',
+    'speed.profile_hint': 'Overrides the installation limit for every device of this profile. No limit exempts them.',
+    'speed.protocol.xray': 'VLESS', 'speed.protocol.awg': 'AmneziaWG',
+    'speed.node.failed': '{node}, {protocol}: limits could not be applied ({detail})',
+    'speed.node.unsupported': '{node}, {protocol}: the server cannot limit speed ({detail})',
+})
+CATALOG['ru'].update({
+    'speed.title': 'Ограничение скорости', 'speed.none': 'Без ограничения', 'speed.unlimited': 'без ограничения', 'speed.mbit': '{value} Мбит/с', 'speed.kbit': '{value} кбит/с',
+    'speed.summary': 'отдача {up}, загрузка {down}', 'speed.inherit': 'Как в установке ({value})',
+    'speed.field.up': 'Отдача на устройство', 'speed.field.down': 'Загрузка на устройство',
+    'speed.hint': 'Ограничивает скорость каждого устройства на всех серверах, для VLESS и AmneziaWG одинаково. Ноды получают изменения в течение минуты и соблюдают их без контроллера.',
+    'speed.profile_hint': 'Заменяет ограничение установки для всех устройств этого профиля. «Без ограничения» снимает его.',
+    'speed.protocol.xray': 'VLESS', 'speed.protocol.awg': 'AmneziaWG',
+    'speed.node.failed': '{node}, {protocol}: ограничение не применилось ({detail})',
+    'speed.node.unsupported': '{node}, {protocol}: сервер не умеет ограничивать скорость ({detail})',
+})

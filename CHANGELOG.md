@@ -44,6 +44,13 @@
   device limit and each limited device's current VLESS networks. Database
   revision 19 cannot be read by older controllers, which would leave reissued
   peers working.
+- Limit upload and download speed per device (`speed.*` VPN policies) for
+  VLESS and AWG, set for the installation and per profile in Telegram and for
+  the installation in Workstation. Nodes receive the limits through the new
+  `ApplyRatePolicy` agent call, journal them and shape traffic with tc/nft
+  without the controller; Xray clients get marked outbounds, AWG peers are
+  shaped inside the AWG container. Nodes report when they cannot shape (no
+  tc, nft or nsenter). Database revision 21 adds runtime state only.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

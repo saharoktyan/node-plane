@@ -468,7 +468,9 @@ impl App {
                 | "connections.max_sources"
                 | "quota.bytes"
                 | "quota.reset"
-                | "quota.on_exhausted"),
+                | "quota.on_exhausted"
+                | "speed.up_kbit"
+                | "speed.down_kbit"),
             ) => {
                 if let Some(policy) = self
                     .controller
@@ -1819,6 +1821,17 @@ impl App {
                             Control::ControllerPolicyToggle("quota.bytes"),
                         ));
                     }
+                    for (key, label) in [
+                        ("speed.up_kbit", "Upload limit per device"),
+                        ("speed.down_kbit", "Download limit per device"),
+                    ] {
+                        if let Some(policy) = vpn_policy(value, key) {
+                            items.push((
+                                format!("{label}: {}", speed_label(&policy["effective"])),
+                                Control::ControllerPolicyToggle(key),
+                            ));
+                        }
+                    }
                     if let Some(policy) = vpn_policy(value, "quota.reset") {
                         items.push((
                             format!(
@@ -1938,7 +1951,16 @@ fn vpn_policy<'a>(policies: &'a serde_json::Value, key: &str) -> Option<&'a serd
 
 const GIB: u64 = 1 << 30;
 
-/// The next preset of a `connections.*` or `quota.*` policy, as in the
+/// A speed limit in kbit/s as shown in the Telegram bot.
+fn speed_label(kbit: &serde_json::Value) -> String {
+    match kbit.as_u64().filter(|kbit| *kbit > 0) {
+        None => "No limit".to_string(),
+        Some(kbit) if kbit % 1000 == 0 => format!("{} Mbit/s", kbit / 1000),
+        Some(kbit) => format!("{kbit} kbit/s"),
+    }
+}
+
+/// The next preset of a `connections.*`, `quota.*` or `speed.*` policy, as in the
 /// Telegram bot. It wraps around, and a value set elsewhere moves to the
 /// first preset. The default is stored as no value.
 fn next_preset(key: &str, policy: &serde_json::Value) -> serde_json::Value {
@@ -1950,6 +1972,9 @@ fn next_preset(key: &str, policy: &serde_json::Value) -> serde_json::Value {
         }
         "quota.reset" => {
             serde_json::json!(["calendar_month", "monthly_anchor", "interval", "none"])
+        }
+        "speed.up_kbit" | "speed.down_kbit" => {
+            serde_json::json!([null, 1_000, 5_000, 10_000, 20_000, 50_000, 100_000])
         }
         _ => serde_json::json!(["freeze", "notify"]),
     };

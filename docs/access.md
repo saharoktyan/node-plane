@@ -54,6 +54,14 @@ When a device is disconnected, its owner receives a service notification, at mos
 
 Xray needs its online statistics and routing API for this. Applying node settings turns them on.
 
+## Speed limits
+
+**Speed limit** caps the upload and download speed of each device, on every server, for VLESS and AWG alike. Set it in Telegram → Settings → VPN → Speed limit for the installation, override it in a profile's Edit screen, or use Workstation → Node Plane Settings → Policies.
+
+- `speed.up_kbit` and `speed.down_kbit`: kbit/s per device, no limit by default. A profile can choose **No limit** to be exempt from the installation limit. Each direction is set on its own.
+
+Each node receives its limits within a minute and keeps enforcing them without the controller; the settings screen names nodes that do not have the current limits or cannot apply them. Nodes shape traffic with `tc` and `nft` and enter the AWG container with `nsenter`, so the host needs `iproute2`, `nftables` and `util-linux` and the `ifb` kernel module. A node without them reports that it cannot limit speed; other traffic is unaffected. Limits apply per device, not per profile: two devices of one profile each get the full limit.
+
 ## Traffic quotas
 
 A traffic quota limits uplink and downlink together across all servers of a profile within a period. Set it in Telegram → Settings → VPN → Traffic quota for the installation, override it in a profile's Edit screen, or use Workstation → Node Plane Settings → Policies. Traffic collection must be on.
