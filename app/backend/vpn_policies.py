@@ -103,6 +103,12 @@ register(PolicyKey('quota.interval_days', frozenset({'installation', 'profile'})
 register(PolicyKey('quota.on_exhausted', frozenset({'installation', 'profile'}), frozenset({'global'}),
                    choice('freeze', 'notify'), default='freeze'))
 register(PolicyKey('quota.timezone', frozenset({'installation'}), frozenset({'global'}), time_zone, default='UTC'))
+# Speed per device in kbit/s, each direction on its own (plan, section 11d).
+# No limit by default; 0 exempts a profile or device from an inherited limit.
+register(PolicyKey('speed.up_kbit', frozenset({'installation', 'profile', 'device'}),
+                   frozenset({'global', 'node'}), integer(0, 100_000_000)))
+register(PolicyKey('speed.down_kbit', frozenset({'installation', 'profile', 'device'}),
+                   frozenset({'global', 'node'}), integer(0, 100_000_000)))
 # A node value overrides the installation value for that node (plan, 7.2).
 register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global', 'node'}),
                    choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),

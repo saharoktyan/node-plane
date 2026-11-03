@@ -88,6 +88,40 @@ class DevicesPostgresTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT events_sequence FROM backend_node_admission").fetchone()
                              ['events_sequence'], 2)
 
+    def test_speed_limit_snapshot_covers_both_protocols_on_postgres(self):
+        from backend.speed_limits import SpeedLimits
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT INTO backend_nodes(key,title,region,protocols_json,enabled,applied_revision)
+                VALUES ('node','Node','Europe','["awg","xray"]',1,1)""")
+            for protocol in ('awg', 'xray'):
+                conn.execute('INSERT INTO backend_grants VALUES (?,?,?)', (profile_id, 'node', protocol))
+            conn.execute("""INSERT INTO backend_vpn_policies(id,subject_kind,key,value_json,updated_at)
+                VALUES ('down','installation','speed.down_kbit','8000','now')""")
+        device = DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+            profile_id=profile_id, revision=1, display_name='Phone')['device']
+
+        class Driver:
+            calls = []
+
+            def apply_rate_policy(self, node_key, revision, clients):
+                self.calls.append((node_key, revision, clients))
+                return {'revision': revision, 'protocols': [{'protocol': 'awg', 'state': 'applied', 'detail': ''}]}
+
+        driver = Driver()
+        SpeedLimits(self.db, driver).sync()
+        with self.db.connect() as conn:
+            names = {'xray': conn.execute('SELECT runtime_name FROM backend_device_credentials WHERE device_id=?',
+                                          (device['id'],)).fetchone()['runtime_name'],
+                     'awg': conn.execute('SELECT runtime_name FROM backend_devices WHERE id=?',
+                                         (device['id'],)).fetchone()['runtime_name']}
+            row = conn.execute("SELECT status,protocols_json FROM backend_node_shaping WHERE node_key='node'").fetchone()
+        self.assertEqual(driver.calls, [('node', 1, [
+            {'protocol': protocol, 'name': names[protocol], 'up_kbit': 0, 'down_kbit': 8000}
+            for protocol in ('awg', 'xray')])])
+        self.assertEqual(row['status'], 'current')
+        self.assertIn('applied', row['protocols_json'])
+
     def test_traffic_quota_suspends_and_keeps_one_open_period_on_postgres(self):
         from datetime import datetime, timezone
         from backend import quotas

@@ -149,6 +149,8 @@ class ProfileRepository:
         TrafficService(self.db).initialize_schema()
         from .connection_limits import ConnectionLimits
         ConnectionLimits(self.db).initialize_schema()
+        from .speed_limits import SpeedLimits
+        SpeedLimits(self.db).initialize_schema()
         from .quotas import QuotaService
         QuotaService(self.db).initialize_schema()
         from .system_cleanup import SystemCleanupService

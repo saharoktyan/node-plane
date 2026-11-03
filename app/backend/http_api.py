@@ -1191,6 +1191,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT device_id,protocol FROM backend_traffic_peers LIMIT 1').fetchone()
                 conn.execute('SELECT node_key FROM backend_node_traffic LIMIT 1').fetchone()
                 conn.execute('SELECT node_key,revision,events_boot FROM backend_node_admission LIMIT 1').fetchone()
+                conn.execute('SELECT node_key,protocols_json FROM backend_node_shaping LIMIT 1').fetchone()
                 conn.execute('SELECT device_id FROM backend_vpn_session_observations LIMIT 1').fetchone()
                 conn.execute('SELECT device_id,alerted FROM backend_admission_events LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_system_cleanup_jobs LIMIT 1').fetchone()
@@ -1321,6 +1322,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def connection_limit_delivery(current=Depends(actor)):
         from .connection_limits import ConnectionLimits
         return ConnectionLimits(db).delivery(current)
+
+    @app.get('/api/v1/speed-limits/nodes')
+    def speed_limit_delivery(current=Depends(actor)):
+        from .speed_limits import SpeedLimits
+        return SpeedLimits(db).delivery(current)
 
     @app.get('/api/v1/profiles/{profile_id}/vpn-policies')
     def profile_vpn_policies(profile_id: UUID, current=Depends(actor)):

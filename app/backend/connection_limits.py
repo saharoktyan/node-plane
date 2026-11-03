@@ -3,9 +3,7 @@
 The agent enforces a full per-node snapshot and journals it, so limits work
 while the controller is unreachable (VPN plan, section 5). The controller
 resolves `connections.*` for every active VLESS client on a node and sends
-the snapshot every minute. The agent ignores a snapshot whose revision is
-not newer than its own, so resending is harmless and also restores a node
-whose journal was lost. Nodes that never had a limit are never contacted.
+the snapshot every minute (delivery: backend.node_snapshots).
 
 After each delivery the controller reads the node's eviction events and
 per-client source counts (`ObserveSessions`). Only counts are stored, never
@@ -14,13 +12,11 @@ addresses. An eviction notifies the device owner at most once per
 alert administrators.
 """
 from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 import logging
 from uuid import NAMESPACE_URL, uuid5
 
 from .authorization import require_permission
-from .nodes import AGENT_INSTALLED_SQL
 from .vpn_policies import effective
 
 INTERVAL_SECONDS = 60
@@ -44,26 +40,13 @@ def create_schema(conn):
 
 def node_snapshot(conn, node_key, now=None):
     """Limited VLESS clients of active devices with a grant on this node."""
-    now = now or datetime.now(timezone.utc)
-    from .quotas import BLOCKED_SQL
-    rows = conn.execute(f'''SELECT d.id AS device_id, p.expires_at, c.runtime_name
-        FROM backend_devices d
-        JOIN backend_device_credentials c ON c.device_id=d.id AND c.protocol='xray'
-        JOIN backend_profiles p ON p.id=d.profile_id
-        JOIN backend_grants g ON g.profile_id=p.id AND g.node_key=? AND g.protocol='xray'
-        LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
-        WHERE d.status='active' AND p.frozen=0 AND NOT {BLOCKED_SQL}
-        AND (p.owner_account_id IS NULL OR a.status='approved')
-        AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions x WHERE x.profile_id=p.id)
-        ORDER BY c.runtime_name''', (node_key,)).fetchall()
+    from .node_snapshots import active_devices
     clients = []
-    for row in rows:
-        if row['expires_at'] and datetime.fromisoformat(row['expires_at']) <= now:
-            continue
+    for row in active_devices(conn, node_key, 'xray', now):
         values = effective(conn, device_id=row['device_id'], node_key=node_key, protocol='xray', keys=KEYS)
         if values['connections.mode'] == 'off':
             continue
-        clients.append({'email': row['runtime_name'], 'mode': values['connections.mode'],
+        clients.append({'email': row['name'], 'mode': values['connections.mode'],
                         'max_sources': values['connections.max_sources'],
                         'window_seconds': values['connections.window_seconds'],
                         'cooldown_seconds': values['connections.cooldown_seconds']})
@@ -87,10 +70,6 @@ def device_networks(conn, profile_id, now=None):
     return result
 
 
-def _digest(clients):
-    return hashlib.sha256(json.dumps(clients, sort_keys=True).encode()).hexdigest()
-
-
 class ConnectionLimits:
     def __init__(self, db, driver=None):
         self.db, self.driver = db, driver
@@ -99,47 +78,17 @@ class ConnectionLimits:
         with self.db.transaction() as conn:
             create_schema(conn)
 
-    def plan(self, conn):
+    @staticmethod
+    def plan(conn):
         """Records a new revision for every changed snapshot; returns what to send."""
-        nodes = conn.execute(f'''SELECT n.key,n.protocols_json FROM backend_nodes n
-            WHERE n.enabled=1 AND {AGENT_INSTALLED_SQL}
-            AND NOT EXISTS (SELECT 1 FROM backend_node_retirements r WHERE r.node_key=n.key)
-            AND NOT EXISTS (SELECT 1 FROM backend_node_cleanup c WHERE c.node_key=n.key)
-            ORDER BY n.key''').fetchall()
-        sends = []
-        for node in nodes:
-            clients = node_snapshot(conn, node['key']) if 'xray' in json.loads(node['protocols_json']) else []
-            digest = _digest(clients)
-            row = conn.execute('SELECT * FROM backend_node_admission WHERE node_key=?', (node['key'],)).fetchone()
-            if row is None:
-                if not clients:
-                    continue
-                conn.execute('''INSERT INTO backend_node_admission(node_key,revision,digest,status)
-                    VALUES (?,1,?,'pending')''', (node['key'], digest))
-                revision = 1
-            elif row['digest'] != digest:
-                revision = row['revision'] + 1
-                conn.execute('''UPDATE backend_node_admission SET revision=?,digest=?,status='pending'
-                    WHERE node_key=?''', (revision, digest, node['key']))
-            else:
-                revision = row['revision']
-            sends.append((node['key'], revision, clients))
-        return sends
+        from .node_snapshots import plan
+        return plan(conn, 'backend_node_admission', lambda conn, node: node_snapshot(conn, node['key'])
+                    if 'xray' in json.loads(node['protocols_json']) else [])
 
     def _record(self, node_key, sent, in_force, status):
+        from .node_snapshots import record
         with self.db.transaction() as conn:
-            now = datetime.now(timezone.utc).isoformat()
-            if in_force is not None and in_force > sent:
-                # The agent holds a newer revision, e.g. after a controller
-                # restore. Move past it; the next pass resends this snapshot.
-                conn.execute('''UPDATE backend_node_admission SET revision=?,status='pending',checked_at=?
-                    WHERE node_key=? AND revision=?''', (in_force + 1, now, node_key, sent))
-            elif in_force == sent:
-                conn.execute('''UPDATE backend_node_admission SET applied_revision=?,status='current',checked_at=?
-                    WHERE node_key=? AND revision=?''', (sent, now, node_key, sent))
-            else:
-                conn.execute('''UPDATE backend_node_admission SET status=?,checked_at=?
-                    WHERE node_key=? AND revision=?''', (status, now, node_key, sent))
+            record(conn, 'backend_node_admission', node_key, sent, in_force, status)
 
     def _store(self, conn, node_key, observed, now):
         cursor = conn.execute('SELECT events_boot,events_sequence FROM backend_node_admission WHERE node_key=?',
@@ -217,22 +166,19 @@ class ConnectionLimits:
         return observed
 
     def sync(self):
+        from .node_snapshots import failure_status, paused
         with self.db.transaction() as conn:
-            from .maintenance_gate import active
-            if active(conn) or conn.execute(
-                    "SELECT 1 FROM backend_backup_jobs WHERE action='restore' AND status IN ('awaiting_executor','running')"
-            ).fetchone():
+            if paused(conn):
                 return []
             sends = self.plan(conn)
         for node_key, revision, clients in sends:
             try:
                 in_force = self.driver.apply_admission_policy(node_key, revision, clients)
             except Exception as exc:  # noqa: BLE001 -- the next pass retries
-                code = getattr(exc, 'code', lambda: None)()
-                outdated = getattr(code, 'name', '') == 'UNIMPLEMENTED'
+                status = failure_status(exc)
                 logging.getLogger(__name__).warning('Connection limits not delivered: node=%s error=%s',
-                    node_key, 'agent_outdated' if outdated else type(exc).__name__)
-                self._record(node_key, revision, None, 'outdated' if outdated else 'unavailable')
+                    node_key, 'agent_outdated' if status == 'outdated' else type(exc).__name__)
+                self._record(node_key, revision, None, status)
                 continue
             self._record(node_key, revision, in_force, 'unavailable')
             try:

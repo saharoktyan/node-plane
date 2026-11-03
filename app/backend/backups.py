@@ -55,6 +55,7 @@ CLEAR = (
     "backend_admission_events",
     "backend_vpn_session_observations",
     "backend_node_admission",
+    "backend_node_shaping",
     "backend_traffic_peers",
     "backend_traffic_usage",
     "backend_node_traffic",
