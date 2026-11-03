@@ -339,6 +339,8 @@ class DevicesPostgresTests(unittest.TestCase):
         del payload['tables']['backend_retired_peers']
         del payload['tables']['backend_quota_state']
         del payload['tables']['backend_quota_periods']
+        del payload['tables']['backend_tariffs']
+        del payload['tables']['backend_profile_tariffs']
         payload['format'] = 'node-plane-backend-v1'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

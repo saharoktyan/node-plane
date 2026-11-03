@@ -303,6 +303,8 @@ class MemberProfileSummary(BaseModel):
     expired: bool
     # Access suspended until the traffic quota resets.
     quota_suspended: bool = False
+    # The profile's tariff: id, title, duration_days, assigned_at.
+    tariff: dict[str, str | int | None] | None = None
     # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted,
     # throttled_kbit (speed while throttled, else None).
     quota: dict[str, int | str | None] | None = None
@@ -818,6 +820,21 @@ class ProfileEditInput(BaseModel):
     expires_at: str | None = None
     grants: Annotated[list[GrantInput], Field(max_length=100)] | None = None
     access_policy: GrantPolicyInput | None = None
+
+
+class TariffInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: StrictStr | None = None
+    duration_days: StrictInt | None = None
+    access_policy: GrantPolicyInput | None = None
+    policies: dict[str, object] | None = None
+
+
+class ProfileTariffInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    tariff_id: UUID | None
+    expiry: Literal['keep', 'start', 'extend'] = 'keep'
+    apply_access: StrictBool = False
 
 
 class GrantsInput(BaseModel):
@@ -2119,6 +2136,40 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                        if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
         result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='grants',
             profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump())
+        return mutation_response(response, result)
+
+    @app.get('/api/v1/tariffs')
+    def list_tariffs(current=Depends(actor)):
+        from .tariffs import Tariffs
+        return Tariffs(db).list(current)
+
+    @app.post('/api/v1/tariffs', status_code=201)
+    def create_tariff(body: TariffInput, current=Depends(actor)):
+        from .tariffs import Tariffs
+        return Tariffs(db).create(current, body.model_dump(mode='json', exclude_unset=True))
+
+    @app.get('/api/v1/tariffs/{tariff_id}')
+    def get_tariff(tariff_id: UUID, current=Depends(actor)):
+        from .tariffs import Tariffs
+        return Tariffs(db).get(current, tariff_id)
+
+    @app.patch('/api/v1/tariffs/{tariff_id}')
+    def edit_tariff(tariff_id: UUID, body: TariffInput, request: Request, current=Depends(actor)):
+        from .tariffs import Tariffs
+        return Tariffs(db).edit(current, tariff_id, revision_header(request),
+                                body.model_dump(mode='json', exclude_unset=True))
+
+    @app.delete('/api/v1/tariffs/{tariff_id}')
+    def delete_tariff(tariff_id: UUID, request: Request, current=Depends(actor)):
+        from .tariffs import Tariffs
+        return Tariffs(db).delete(current, tariff_id, revision_header(request))
+
+    @app.put('/api/v1/profiles/{profile_id}/tariff', response_model=ProfileCommandOutput)
+    def assign_tariff(profile_id: UUID, body: ProfileTariffInput, request: Request, response: Response,
+                      command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                      if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
+        result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='tariff',
+            profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump(mode='json'))
         return mutation_response(response, result)
 
     @app.delete('/api/v1/profiles/{profile_id}', response_model=ProfileCommandOutput)

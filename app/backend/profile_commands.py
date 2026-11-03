@@ -61,7 +61,7 @@ class ProfileCommands:
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
         require_permission(actor, 'grants.manage' if action in {'grants', 'policy'} else 'profiles.manage')
-        if action not in {'create', 'edit', 'grants', 'policy', 'delete'}:
+        if action not in {'create', 'edit', 'grants', 'policy', 'delete', 'tariff'}:
             raise ValueError('unknown profile command')
         values = values or {}
         fingerprint = hashlib.sha256(json.dumps({'action': action, 'profile_id': profile_id,
@@ -70,7 +70,9 @@ class ProfileCommands:
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
-            if action == 'policy' or values.get('access_policy') is not None:
+            if action == 'policy' or values.get('access_policy') is not None or (
+                    action == 'tariff' and values.get('apply_access') is True):
+                require_permission(actor, 'grants.manage')
                 account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (actor.account.id,)).fetchone()
                 if not account or account['role'] != 'admin' or account['status'] != 'approved':
                     raise AccessDenied('permission_denied')
@@ -129,7 +131,8 @@ class ProfileCommands:
             else:
                 if revision is None:
                     raise AccessDenied('revision_required', 428)
-                row = conn.execute('''SELECT p.desired_revision, p.owner_account_id, p.display_name, d.profile_id AS deleting
+                row = conn.execute('''SELECT p.desired_revision, p.owner_account_id, p.display_name, p.expires_at,
+                    d.profile_id AS deleting
                     FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
                     WHERE p.id = ?''', (profile_id,)).fetchone()
                 if row is None:
@@ -196,6 +199,16 @@ class ProfileCommands:
                     parameters = [int(values[field]) if field == 'frozen' else values[field] for field in sorted(values)]
                     cursor = conn.execute(f'UPDATE backend_profiles SET {assignments}desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id',
                                          (*parameters, profile_id, revision))
+                elif action == 'tariff':
+                    from .tariffs import assign
+                    expires_at, policy = assign(conn, profile_id, owner_admin, row['expires_at'], values)
+                    if policy is not None:
+                        from .grant_policies import validate, store, materialize
+                        store(conn, profile_id, validate(conn, policy))
+                        materialize(conn, profile_id)
+                    cursor = conn.execute('''UPDATE backend_profiles SET expires_at = ?,
+                        desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id''',
+                        (expires_at, profile_id, revision))
                 elif action == 'policy':
                     from .grant_policies import validate, store, materialize
                     policy = validate(conn, values)

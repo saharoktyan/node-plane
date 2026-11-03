@@ -252,6 +252,8 @@ class ProfileRepository:
             from .quotas import blocked, overview
             suspended = blocked(conn, profile_id)
             quota = overview(conn, profile_id)
+            from .tariffs import Tariffs
+            tariff = Tariffs(self.db).of_profile(conn, profile_id)
             activity = conn.execute('''SELECT COUNT(*) AS issued_count,
                 MAX(created_at) AS last_issued_at FROM backend_config_issuances
                 WHERE profile_id = ? AND status = 'succeeded' ''',
@@ -265,7 +267,7 @@ class ProfileRepository:
             'frozen': bool(profile['frozen']), 'expires_at': profile['expires_at'],
             'expired': bool(profile['expires_at'] and
                 datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc)),
-            'quota_suspended': suspended,
+            'quota_suspended': suspended, 'tariff': tariff,
             'quota': None if quota['limit_bytes'] is None or quota['period'] is None else {
                 'limit_bytes': quota['limit_bytes'], 'used_bytes': quota['period']['used_bytes'],
                 'period_end': quota['period']['end'], 'on_exhausted': quota['on_exhausted'],

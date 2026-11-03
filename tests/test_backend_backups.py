@@ -248,11 +248,33 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v6')
+        self.assertEqual(payload['format'], 'node-plane-backend-v7')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
         self.assertEqual((saved['display_name'], saved['status'], saved['revision']), ('Phone', 'retired', 3))
+        self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
+
+    def test_tariffs_and_assignments_are_backed_up_and_older_formats_have_none(self):
+        profile_id = self.device_profile()
+        with self.db.transaction() as conn:
+            conn.execute("""INSERT INTO backend_tariffs(id,title,canonical,duration_days,policies_json,created_at,updated_at)
+                VALUES ('t1','Basic','basic',30,'{"speed.up_kbit": 1000}','2026-11-03','2026-11-03')""")
+            conn.execute("INSERT INTO backend_profile_tariffs VALUES (?,'t1','2026-11-03')", (profile_id,))
+        backup_id, _ = self.snapshot()
+        payload = self.service._load(backup_id)
+        self.assertEqual(payload['tables']['backend_tariffs']['rows'][0]['policies_json'], '{"speed.up_kbit": 1000}')
+        self.assertEqual(payload['tables']['backend_profile_tariffs']['rows'][0]['profile_id'], profile_id)
+        path = self.service._path(backup_id)
+        raw = json.loads(path.read_bytes())
+        del raw['tables']['backend_tariffs']
+        del raw['tables']['backend_profile_tariffs']
+        raw['format'] = 'node-plane-backend-v6'
+        raw['checksum'] = hashlib.sha256(encoded(raw['tables'])).hexdigest()
+        path.write_bytes(encoded(raw))
+        converted = self.service._load(backup_id)
+        self.assertEqual((converted['tables']['backend_tariffs']['rows'],
+                          converted['tables']['backend_profile_tariffs']['rows']), ([], []))
         self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
 
     def test_v2_snapshot_gains_regions_without_adopting_policy_access(self):
@@ -268,6 +290,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_retired_peers']
         del payload['tables']['backend_quota_state']
         del payload['tables']['backend_quota_periods']
+        del payload['tables']['backend_tariffs']
+        del payload['tables']['backend_profile_tariffs']
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -292,6 +316,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_retired_peers']
         del payload['tables']['backend_quota_state']
         del payload['tables']['backend_quota_periods']
+        del payload['tables']['backend_tariffs']
+        del payload['tables']['backend_profile_tariffs']
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -319,6 +345,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_retired_peers']
         del payload['tables']['backend_quota_state']
         del payload['tables']['backend_quota_periods']
+        del payload['tables']['backend_tariffs']
+        del payload['tables']['backend_profile_tariffs']
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
         converted = self.service._load(backup_id)

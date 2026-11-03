@@ -3,8 +3,9 @@
 Policies describe what is allowed; protocol adapters receive only resolved
 values. A feature registers keys with their subjects, scopes and validator
 instead of adding columns to nodes or profiles. Device values override profile
-values, which override installation values; within one subject a node/protocol
-value overrides a node value, which overrides the global value.
+values, which override the profile's tariff (backend.tariffs), which overrides
+installation values; within one subject a node/protocol value overrides a node
+value, which overrides the global value. A tariff sets global values only.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -144,6 +145,8 @@ def _mark_nodes(conn, spec, node_key):
 def create_schema(conn):
     from db.migration_revisions.r0015_vpn_policies import upgrade
     upgrade(conn)
+    from .tariffs import create_schema as create_tariffs
+    create_tariffs(conn)
 
 
 def _scope(node_key, protocol):
@@ -185,6 +188,7 @@ def effective(conn, *, profile_id=None, device_id=None, node_key=None, protocol=
         raise ValueError('unknown policy key')
     subjects = [('installation', None)]
     if profile_id is not None:
+        subjects.append(('tariff', profile_id))
         subjects.append(('profile', profile_id))
     if device_id is not None:
         subjects.append(('device', device_id))
@@ -192,6 +196,13 @@ def effective(conn, *, profile_id=None, device_id=None, node_key=None, protocol=
     result = {name: REGISTRY[name].default for name in names}
     best = {}
     for subject_rank, (subject_kind, subject_id) in enumerate(subjects):
+        if subject_kind == 'tariff':
+            from .tariffs import profile_values
+            for name, value in profile_values(conn, subject_id).items():
+                if name in result:
+                    best[name] = (subject_rank, 0)
+                    result[name] = value
+            continue
         for row in _rows(conn, subject_kind, subject_id):
             if row['key'] not in result:
                 continue
@@ -253,9 +264,13 @@ class VpnPolicies:
         names = sorted(name for name, spec in REGISTRY.items()
                        if subject_kind in spec.subjects and 'global' in spec.scopes)
         resolved = effective(conn, keys=names, **target) if names else {}
+        # A profile's tariff value is what removing its own value falls back to.
+        from .tariffs import profile_values
+        tariff = profile_values(conn, subject_id) if subject_kind == 'profile' else {}
         return [{'key': name, 'value': json.loads(own[name]['value_json']) if name in own else None,
                  'revision': own[name]['revision'] if name in own else 0,
-                 'default': REGISTRY[name].default, 'effective': resolved[name]} for name in names]
+                 'default': REGISTRY[name].default, 'effective': resolved[name],
+                 **({'tariff': tariff.get(name)} if subject_kind == 'profile' else {})} for name in names]
 
     def get(self, actor, subject_kind, subject_id=None):
         self._authorize(actor, subject_kind)
