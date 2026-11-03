@@ -282,6 +282,13 @@ impl App {
                 self.open_scoped_policies(scope);
                 None
             }
+            Control::AccessTariff => {
+                use crate::access::text;
+                let card = self.access.card.as_ref()?;
+                let (id, title) = (text(&card["id"]), text(&card["display_name"]));
+                self.open_profile_tariff(id, title);
+                None
+            }
             Control::AccessDeviceConfirm => {
                 if let Some(devices) = &self.access.devices
                     && let (Some(card), Some(key)) =
@@ -672,6 +679,7 @@ impl App {
                         | Control::AccessDeviceRotate(_)
                         | Control::AccessDeviceConfirm
                         | Control::AccessLimits
+                        | Control::AccessTariff
                         | Control::AccessTraffic
                         | Control::AccessTrafficPage(_)
                         | Control::AccessDevicePage(_)

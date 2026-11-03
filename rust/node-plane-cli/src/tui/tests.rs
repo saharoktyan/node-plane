@@ -383,7 +383,7 @@ fn profile_management_actions_use_two_columns() {
             hit.area.x >= 26 && !matches!(hit.control, Control::AccessBack | Control::WindowClose)
         })
         .collect();
-    assert_eq!(controls.len(), 7);
+    assert_eq!(controls.len(), 8);
     for pair in controls.chunks(2) {
         if pair.len() == 2 {
             assert_eq!(pair[0].area.y, pair[1].area.y);
@@ -9042,6 +9042,119 @@ fn scoped_request(app: &mut App) -> crate::controller::Command {
         Some(crate::nodes::Command::Controller(_, command)) => command,
         _ => panic!("expected a controller request"),
     }
+}
+
+#[test]
+fn profile_tariff_is_chosen_with_its_term_and_nodes_and_back_returns_to_the_card() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.card = Some(serde_json::json!({"id":"p1","display_name":"Anna"}));
+    app.activate(Control::AccessTariff);
+    assert!(matches!(app.screen, Screen::Controller));
+    assert!(matches!(scoped_request(&mut app), Command::TariffChoices(id) if id == "p1"));
+    let tariff = serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","title":"Basic",
+        "duration_days":30,"access_policy":{"rules":[{"scope":"all"}]}});
+    let choices = serde_json::json!({"profile_id":"p1","tariffs":{"items":[tariff]},
+        "profile":{"desired_revision":4,"expires_at":"2026-12-01T00:00:00+00:00"},
+        "summary":{"tariff":null}});
+    // An answer for another profile is dropped.
+    app.controller.apply(
+        Command::TariffChoices("p2".into()),
+        serde_json::json!({"profile_id":"p2"}),
+    );
+    assert!(!app.controller.tariff_assign.as_ref().unwrap()["tariffs"].is_object());
+    app.controller
+        .apply(Command::TariffChoices("p1".into()), choices);
+    assert!(
+        app.controller_controls()
+            == [
+                Control::ControllerTariffPick(Some(0)),
+                Control::ControllerTariffPick(None),
+                Control::ControllerBack
+            ]
+    );
+    app.activate(Control::ControllerTariffPick(Some(0)));
+    // An existing term is extended by default; nodes are kept unless chosen.
+    assert_eq!(
+        app.controller.tariff_draft.as_ref().unwrap().expiry,
+        "extend"
+    );
+    assert!(
+        app.tariff_view()
+            .0
+            .contains("Adds 30 days after the remaining time.")
+    );
+    app.activate(Control::ControllerTariffAccess);
+    app.activate(Control::ControllerTariffApply);
+    assert!(
+        matches!(scoped_request(&mut app), Command::TariffAssign(id, body, 4, _)
+        if id == "p1" && body == serde_json::json!({"tariff_id":"11111111-1111-4111-8111-111111111111",
+            "expiry":"extend","apply_access":true}))
+    );
+    // Back leaves the choice first, then returns to the profile card.
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.tariff_draft.is_none());
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Access));
+    assert!(app.controller.tariff_assign.is_none());
+}
+
+#[test]
+fn tariff_card_changes_term_nodes_and_limits_and_back_returns_to_it() {
+    use crate::controller::Command;
+    use crate::policy_scope::Scope;
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller_section = Some(ControllerSection::Policies);
+    app.activate(Control::ControllerTariffs);
+    assert!(matches!(scoped_request(&mut app), Command::Tariffs));
+    let id = "11111111-1111-4111-8111-111111111111";
+    let tariff = serde_json::json!({"id":id,"title":"Basic","duration_days":30,"access_policy":null,
+        "policies":{"speed.up_kbit":5000},"revision":2,"profiles":1,
+        "regions":[{"id":"r1","title":"Europe"}]});
+    app.controller.apply(
+        Command::Tariffs,
+        serde_json::json!({"items":[tariff.clone()]}),
+    );
+    app.activate(Control::ControllerTariff(0));
+    assert!(matches!(scoped_request(&mut app), Command::Tariff(_)));
+    app.controller
+        .apply(Command::Tariff(uuid::Uuid::parse_str(id).unwrap()), tariff);
+    let (text, controls) = app.tariff_view();
+    assert!(text.contains("Upload limit per device: 5 Mbit/s"));
+    assert!(
+        controls
+            .iter()
+            .any(|(label, _)| label == "[ ] Region: Europe")
+    );
+    app.activate(Control::ControllerTariffTerm);
+    assert!(
+        matches!(scoped_request(&mut app), Command::TariffSave(_, body, 2)
+        if body == serde_json::json!({"duration_days":90}))
+    );
+    app.activate(Control::ControllerTariffRegion(0));
+    assert!(
+        matches!(scoped_request(&mut app), Command::TariffSave(_, body, 2)
+        if body["access_policy"]["rules"][0]["region_id"] == "r1")
+    );
+    app.activate(Control::ControllerTariffLimits);
+    assert!(matches!(app.controller.scope, Some(Scope::Tariff { .. })));
+    assert!(matches!(
+        scoped_request(&mut app),
+        Command::ScopedPolicies(Scope::Tariff { .. })
+    ));
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.scope.is_none());
+    assert!(matches!(scoped_request(&mut app), Command::Tariff(_)));
+    // Back from the tariff refreshes the list.
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.tariff.is_none());
+    assert!(matches!(scoped_request(&mut app), Command::Tariffs));
+    app.activate(Control::ControllerTariffNew);
+    app.controller.defaults_input = Some(("tariff_new", " Premium ".into()));
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(matches!(scoped_request(&mut app), Command::TariffCreate(title) if title == "Premium"));
 }
 
 #[test]

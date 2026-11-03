@@ -844,6 +844,8 @@ pub(in crate::tui) fn draw_controller(
             "backup_export_path" => "Download backup · local JSON file path. Existing files are not overwritten.".into(),
             "quota_anchor" => "New quota start day as YYYY-MM-DD in the quota time zone. It applies from the next reset.".into(),
             "quota_timezone" => "Quota time zone from the IANA database, for example Europe/Moscow or America/New_York.".into(),
+            "tariff_new" => "New tariff · name up to 64 characters".into(),
+            "tariff_title" => "Tariff name · up to 64 characters".into(),
             _ => format!("Installation defaults · {key}"),
         };
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
@@ -865,6 +867,8 @@ pub(in crate::tui) fn draw_controller(
             ));
         }
         controls.push(("Cancel".into(), Control::ControllerBack));
+    } else if app.tariff_view_open() {
+        (text, controls) = app.tariff_view();
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
         let requests_enabled = value["requests"]["enabled"] == true;
         let status = |enabled: bool| if enabled { "On" } else { "Off" };
@@ -2009,7 +2013,11 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
-    if key.starts_with("backup_") || key.starts_with("telegram_") || key.starts_with("quota_") {
+    if key.starts_with("backup_")
+        || key.starts_with("telegram_")
+        || key.starts_with("quota_")
+        || key.starts_with("tariff_")
+    {
         return !input.trim().is_empty();
     }
     let value = match *key {

@@ -63,6 +63,17 @@ pub enum Command {
     /// Moves the scope profile's quota start day (YYYY-MM-DD) at a revision.
     QuotaAnchor(crate::policy_scope::Scope, String, u64),
     DefaultsSave(Value, u64),
+    /// The tariff catalog, with the regions a tariff may grant.
+    Tariffs,
+    Tariff(Uuid),
+    TariffCreate(String),
+    /// A partial tariff document at the tariff's revision.
+    TariffSave(Uuid, Value, u64),
+    TariffDelete(Uuid, u64),
+    /// Tariffs offered to one profile, with the profile and its summary.
+    TariffChoices(String),
+    /// Assigns, relinks or removes a profile's tariff at a profile revision.
+    TariffAssign(String, Value, u64, Uuid),
     Backups,
     BackupCatalog(usize),
     BackupDetail(Uuid),
@@ -145,6 +156,31 @@ impl Command {
                 None,
             ),
             Self::Backups => (Method::GET, "/api/v1/system/backups".into(), None, None),
+            Self::Tariffs | Self::TariffChoices(_) => {
+                (Method::GET, "/api/v1/tariffs".into(), None, None)
+            }
+            Self::Tariff(id) => (Method::GET, format!("/api/v1/tariffs/{id}"), None, None),
+            Self::TariffCreate(title) => (
+                Method::POST,
+                "/api/v1/tariffs".into(),
+                Some(json!({"title":title})),
+                None,
+            ),
+            Self::TariffSave(id, body, _) => (
+                Method::PATCH,
+                format!("/api/v1/tariffs/{id}"),
+                Some(body.clone()),
+                None,
+            ),
+            Self::TariffDelete(id, _) => {
+                (Method::DELETE, format!("/api/v1/tariffs/{id}"), None, None)
+            }
+            Self::TariffAssign(profile, body, _, key) => (
+                Method::PUT,
+                format!("/api/v1/profiles/{profile}/tariff"),
+                Some(body.clone()),
+                Some(*key),
+            ),
             Self::BackupCatalog(offset) => (
                 Method::GET,
                 format!("/api/v1/system/backups/catalog?offset={offset}"),
@@ -303,6 +339,14 @@ impl Command {
                 Some(*key),
             ),
             Self::ScopedPolicies(scope) => (Method::GET, scope.path(), None, None),
+            Self::ScopedPolicySave(scope @ crate::policy_scope::Scope::Tariff { .. }, value, _) => {
+                (
+                    Method::PATCH,
+                    scope.path(),
+                    Some(crate::policy_scope::split_revision(value).0),
+                    None,
+                )
+            }
             Self::ScopedPolicySave(scope, value, key) => {
                 (Method::PATCH, scope.path(), Some(value.clone()), Some(*key))
             }
@@ -389,6 +433,36 @@ impl Command {
         })
     }
 }
+/// The tariff chosen for a profile and what assigning it does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TariffDraft {
+    /// Index into the offered tariffs; None removes the tariff.
+    pub choice: Option<usize>,
+    pub expiry: &'static str,
+    pub apply_access: bool,
+    pub key: Uuid,
+}
+
+impl TariffDraft {
+    /// The assignment body for the offered tariffs.
+    pub fn body(&self, tariffs: &Value) -> Value {
+        let tariff = self.choice.map(|index| &tariffs["items"][index]);
+        json!({"tariff_id": tariff.map(|t| t["id"].clone()),
+               "expiry": if tariff.is_some() { self.expiry } else { "keep" },
+               "apply_access": tariff.is_some() && self.apply_access})
+    }
+}
+
+/// The If-Match revision of a tariff command.
+pub fn tariff_revision(command: &Command) -> Option<u64> {
+    match command {
+        Command::TariffSave(_, _, revision)
+        | Command::TariffDelete(_, revision)
+        | Command::TariffAssign(_, _, revision, _) => Some(*revision),
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 pub struct Browser {
     pub plan_pending: bool,
@@ -429,6 +503,12 @@ pub struct Browser {
     pub backup_catalog: Option<Value>,
     pub backup_detail: Option<Value>,
     pub backup_job: Option<Value>,
+    /// The tariff catalog and the open tariff, each with `regions`.
+    pub tariffs: Option<Value>,
+    pub tariff: Option<Value>,
+    /// A profile's tariff being chosen: `tariffs`, `profile`, `summary`.
+    pub tariff_assign: Option<Value>,
+    pub tariff_draft: Option<TariffDraft>,
     pub versions: Option<Value>,
     pub components: Option<Value>,
     pub update_result: Option<Value>,
@@ -643,6 +723,38 @@ impl Browser {
             }
             Command::BackupJob(_) => {
                 self.backup_job = Some(value);
+            }
+            Command::Tariffs | Command::TariffDelete(..) => {
+                self.tariffs = Some(value);
+                self.tariff = None;
+                self.defaults_input = None;
+                self.selected = 0;
+            }
+            Command::Tariff(_) | Command::TariffCreate(_) | Command::TariffSave(..) => {
+                // A late answer after the tariff screens were left.
+                if self.tariffs.is_none() && self.tariff.is_none() {
+                    return;
+                }
+                self.tariff = Some(value);
+                self.defaults_input = None;
+                if !matches!(&command, Command::TariffSave(..)) {
+                    self.selected = 0;
+                }
+            }
+            Command::TariffChoices(ref profile) | Command::TariffAssign(ref profile, ..) => {
+                // A late answer for a profile that is no longer shown.
+                if self
+                    .tariff_assign
+                    .as_ref()
+                    .is_none_or(|open| open["profile_id"] != profile.as_str())
+                {
+                    return;
+                }
+                if matches!(&command, Command::TariffAssign(..)) {
+                    self.tariff_draft = None;
+                }
+                self.tariff_assign = Some(value);
+                self.selected = 0;
             }
             Command::UpdateResult(_) => {
                 self.update_result = Some(value);

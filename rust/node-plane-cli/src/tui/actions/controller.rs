@@ -25,6 +25,9 @@ impl App {
             self.screen = Screen::Controller;
             self.controller_sidebar = false;
         }
+        if self.activate_tariff(control) {
+            return None;
+        }
         match control {
             Control::ControllerAuditFilter(errors) => {
                 self.controller_command(if errors {
@@ -588,6 +591,9 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
+                    if self.tariff_input(key, &input) {
+                        return None;
+                    }
                     if key == "quota_anchor" {
                         let revision = self
                             .controller
@@ -1258,6 +1264,9 @@ impl App {
                     self.controller.text_confirmation = false;
                     return None;
                 }
+                if self.controller.defaults_input.is_none() && self.tariff_back() {
+                    return None;
+                }
                 if self.controller.defaults_input.is_none()
                     && let Some(scope) = self.controller.scope.take()
                 {
@@ -1638,6 +1647,9 @@ impl App {
         if state.alerts.is_some() {
             return alert_controls(state);
         }
+        if self.tariff_view_open() {
+            return self.tariff_view().1.into_iter().map(|(_, c)| c).collect();
+        }
         if state.defaults_input.is_some() {
             let mut controls = vec![Control::ControllerDefaultsInput];
             if defaults_input_changed(state) {
@@ -1881,6 +1893,9 @@ impl App {
             Some(Policies) => {
                 let mut items = Vec::new();
                 if let Some(value) = &self.controller.policies {
+                    if value["vpn"].is_object() {
+                        items.push(("Tariffs".into(), Control::ControllerTariffs));
+                    }
                     items.push((
                         format!(
                             "Traffic collection: {}",

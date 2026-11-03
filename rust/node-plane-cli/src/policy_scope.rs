@@ -1,8 +1,8 @@
-//! VPN policies of one profile, device or node, with the same keys,
-//! presets and wording as the Telegram bot. A profile value overrides the
-//! installation, a device value overrides its profile, and a node value
-//! overrides the installation on that node. "Inherited" removes the own
-//! value.
+//! VPN policies of one profile, device, node or tariff, with the same keys,
+//! presets and wording as the Telegram bot. A profile value overrides its
+//! tariff, which overrides the installation; a device value overrides its
+//! profile, and a node value overrides the installation on that node.
+//! "Inherited" removes the own value.
 use serde_json::{Value, json};
 
 const GIB: u64 = 1 << 30;
@@ -24,6 +24,11 @@ pub enum Scope {
         title: String,
         xray: bool,
     },
+    /// A tariff's limits: one document written whole at its revision.
+    Tariff {
+        id: String,
+        title: String,
+    },
 }
 
 impl Scope {
@@ -35,6 +40,7 @@ impl Scope {
                 format!("/api/v1/profiles/{profile}/devices/{id}/vpn-policies")
             }
             Self::Node { .. } => INSTALLATION.into(),
+            Self::Tariff { id, .. } => format!("/api/v1/tariffs/{id}"),
         }
     }
 
@@ -43,13 +49,14 @@ impl Scope {
             Self::Profile { title, .. } => format!("Profile limits: {title}"),
             Self::Device { title, .. } => format!("Device limits: {title}"),
             Self::Node { title, .. } => format!("Limits on node: {title}"),
+            Self::Tariff { title, .. } => format!("Tariff limits: {title}"),
         }
     }
 
     pub fn profile(&self) -> Option<&str> {
         match self {
             Self::Profile { id, .. } | Self::Device { profile: id, .. } => Some(id),
-            Self::Node { .. } => None,
+            Self::Node { .. } | Self::Tariff { .. } => None,
         }
     }
 
@@ -69,7 +76,7 @@ impl Scope {
             "speed.down_kbit",
         ];
         match self {
-            Self::Profile { .. } => {
+            Self::Profile { .. } | Self::Tariff { .. } => {
                 let mut keys = vec!["devices.max"];
                 keys.extend(limits);
                 keys.extend(["quota.bytes", "quota.reset"]);
@@ -186,6 +193,13 @@ fn listing_key<'a>(listing: &'a Value, key: &str) -> Option<&'a Value> {
 
 /// The scope's own value (Null when inherited) and its revision.
 pub fn own(scope: &Scope, data: &Value, key: &str) -> (Value, u64) {
+    if matches!(scope, Scope::Tariff { .. }) {
+        let tariff = &data["subject"];
+        return (
+            tariff["policies"][key].clone(),
+            tariff["revision"].as_u64().unwrap_or(0),
+        );
+    }
     let item = match scope.node() {
         Some(node) => data["installation"]["values"]
             .as_array()
@@ -204,8 +218,21 @@ pub fn own(scope: &Scope, data: &Value, key: &str) -> (Value, u64) {
     })
 }
 
+/// The profile's tariff value of `key`, if its tariff sets one.
+fn tariff_value(scope: &Scope, data: &Value, key: &str) -> Option<Value> {
+    if !matches!(scope, Scope::Profile { .. }) {
+        return None;
+    }
+    listing_key(&data["subject"], key)
+        .map(|item| item["tariff"].clone())
+        .filter(|value| !value.is_null())
+}
+
 /// What the scope would get without its own value.
 pub fn inherited(scope: &Scope, data: &Value, key: &str) -> Value {
+    if let Some(value) = tariff_value(scope, data, key) {
+        return value;
+    }
     let parent = match scope {
         Scope::Device { .. } => &data["profile"],
         _ => &data["installation"],
@@ -260,6 +287,8 @@ pub fn line(scope: &Scope, data: &Value, key: &str) -> String {
     if own.is_null() {
         let from = if matches!(scope, Scope::Device { .. }) {
             "profile"
+        } else if tariff_value(scope, data, key).is_some() {
+            "tariff"
         } else {
             "installation"
         };
@@ -287,11 +316,33 @@ pub fn next_change(scope: &Scope, data: &Value, key: &str) -> Value {
             .cloned()
             .unwrap_or(Value::Null)
     };
+    if matches!(scope, Scope::Tariff { .. }) {
+        // A tariff is written whole; its revision travels as If-Match.
+        let mut policies = data["subject"]["policies"].clone();
+        if let Some(policies) = policies.as_object_mut() {
+            if next.is_null() {
+                policies.remove(key);
+            } else {
+                policies.insert(key.into(), next);
+            }
+        }
+        return json!({"policies":policies,"_revision":revision});
+    }
     let mut change = json!({"key":key,"value":next,"revision":revision});
     if let Some(node) = scope.node() {
         change["node_key"] = json!(node);
     }
     json!({"changes":[change]})
+}
+
+/// A save body without the If-Match revision a tariff body carries.
+pub fn split_revision(body: &Value) -> (Value, Option<u64>) {
+    let mut body = body.clone();
+    let revision = body
+        .as_object_mut()
+        .and_then(|body| body.remove("_revision"))
+        .and_then(|revision| revision.as_u64());
+    (body, revision)
 }
 
 /// The profile's open quota period in one line.
@@ -396,6 +447,44 @@ mod tests {
             Value::Null
         );
         assert_eq!(device.path(), "/api/v1/profiles/p/devices/d/vpn-policies");
+    }
+
+    #[test]
+    fn tariff_values_are_written_whole_and_profiles_inherit_them() {
+        let tariff = Scope::Tariff {
+            id: "t".into(),
+            title: "Basic".into(),
+        };
+        let data = json!({"subject":{"policies":{"speed.up_kbit":5000},"revision":3},
+            "installation":{"keys":[{"key":"speed.down_kbit","effective":20000}]}});
+        assert_eq!(own(&tariff, &data, "speed.up_kbit"), (json!(5000), 3));
+        assert_eq!(
+            line(&tariff, &data, "speed.down_kbit"),
+            "Download limit per device: as installation (20 Mbit/s)"
+        );
+        let body = next_change(&tariff, &data, "speed.down_kbit");
+        assert_eq!(
+            split_revision(&body),
+            (
+                json!({"policies":{"speed.up_kbit":5000,"speed.down_kbit":0}}),
+                Some(3)
+            )
+        );
+        assert_eq!(
+            next_change(&tariff, &data, "speed.up_kbit")["policies"],
+            json!({"speed.up_kbit":10000})
+        );
+        assert_eq!(tariff.path(), "/api/v1/tariffs/t");
+        let profile = Scope::Profile {
+            id: "p".into(),
+            title: "Alice".into(),
+        };
+        let data = json!({"subject":{"keys":[{"key":"speed.up_kbit","value":null,"revision":0,"tariff":5000}]},
+            "installation":{"keys":[{"key":"speed.up_kbit","effective":20000}]}});
+        assert_eq!(
+            line(&profile, &data, "speed.up_kbit"),
+            "Upload limit per device: as tariff (5 Mbit/s)"
+        );
     }
 
     #[test]

@@ -593,9 +593,43 @@ async fn load_scope(
                 .await
                 .unwrap_or(Value::Null);
         }
-        Scope::Node { .. } => {}
+        Scope::Node { .. } | Scope::Tariff { .. } => {}
     }
     Ok(data)
+}
+
+/// What a tariff screen shows after a tariff command: the catalog or one
+/// tariff with the regions it may grant, or a profile's choice of tariffs.
+async fn tariff_view(
+    session: &SshSession,
+    credential: &backend::Credential,
+    command: &crate::controller::Command,
+    value: Value,
+) -> Result<Value> {
+    use crate::controller::Command;
+    let get = |path: String| async move {
+        backend::request(session, credential, Method::GET, &path, None, None).await
+    };
+    Ok(match command {
+        Command::Tariffs | Command::TariffDelete(..) => {
+            let mut list = get("/api/v1/tariffs".into()).await?;
+            list["regions"] = get("/api/v1/regions?limit=100".into()).await?["items"].clone();
+            list
+        }
+        Command::Tariff(_) | Command::TariffCreate(_) | Command::TariffSave(..) => {
+            let mut tariff = value;
+            tariff["regions"] = get("/api/v1/regions?limit=100".into()).await?["items"].clone();
+            tariff
+        }
+        Command::TariffChoices(profile) | Command::TariffAssign(profile, ..) => json!({
+            "profile_id": profile,
+            "tariffs": get("/api/v1/tariffs".into()).await?,
+            "profile": get(format!("/api/v1/profiles/{profile}")).await?,
+            "summary": get(format!("/api/v1/profiles/{profile}/summary")).await?,
+            "applied": matches!(command, Command::TariffAssign(..)),
+        }),
+        _ => value,
+    })
 }
 
 async fn apply_settings(
@@ -1172,12 +1206,23 @@ async fn execute_inner(
                         ensure!(content.len() <= 64 * 1024 * 1024, "Backup exceeds 64 MiB");
                         body = Some(serde_json::from_slice(&content)?);
                     }
+                    if matches!(&command, crate::controller::Command::TariffDelete(..))
+                        && !events::confirm(tx, "Delete the tariff?", "A tariff assigned to profiles cannot be deleted.".into())? {
+                        return Ok("Tariff deletion cancelled".into());
+                    }
                     if matches!(&command, crate::controller::Command::QuotaReset(..))
                         && !events::confirm(tx, "Reset the traffic quota?", "A new period starts now with zero usage and ends at the next regular reset. Suspended access is restored.".into())? {
                         return Ok("Quota reset cancelled".into());
                     }
-                    let revision = match &command { crate::controller::Command::DefaultsSave(_,revision) | crate::controller::Command::QuotaAnchor(_, _, revision) => Some(*revision), _ => None };
-                    let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await.map_err(|error| anyhow::Error::new(error).context(if matches!(&command, crate::controller::Command::BackupQueue(_, _)) { "Backup submission failed or is unconfirmed. Refresh Backups before submitting another operation." } else { "Controller request failed" }))?;
+                    let revision = match &command {
+                        crate::controller::Command::DefaultsSave(_,revision) | crate::controller::Command::QuotaAnchor(_, _, revision) => Some(*revision),
+                        crate::controller::Command::ScopedPolicySave(crate::policy_scope::Scope::Tariff { .. }, value, _) => crate::policy_scope::split_revision(value).1,
+                        _ => crate::controller::tariff_revision(&command),
+                    };
+                    let mut value = backend::request_revision(session, &credential, method, &path, body, key, revision).await.map_err(|error| {
+                        let context = if matches!(&command, crate::controller::Command::BackupQueue(_, _)) { "Backup submission failed or is unconfirmed. Refresh Backups before submitting another operation." } else { crate::tariffs::error_text(&error.code).unwrap_or("Controller request failed") };
+                        anyhow::Error::new(error).context(context)
+                    })?;
                     if let crate::controller::Command::BackupExport(id, file) = &command {
                         use std::io::Write;
                         let parent = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
@@ -1208,6 +1253,7 @@ async fn execute_inner(
                         value = json!({"traffic":traffic,"requests":requests,"vpn":vpn,
                             "connection_delivery":connection_delivery,"speed_delivery":speed_delivery});
                     }
+                    value = tariff_view(session, &credential, &command, value).await?;
                     if matches!(&command,crate::controller::Command::AlertPreferences(_) | crate::controller::Command::AlertDismiss(_)) { value = backend::request(session,&credential,Method::GET,"/api/v1/system/alerts",None,None).await?; }
                     let _ = tx.send(Event::Nodes(Update::Controller(profile, command, value)));
                     return Ok("Controller state loaded".into());

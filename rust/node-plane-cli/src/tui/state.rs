@@ -104,6 +104,20 @@ pub(super) enum Control {
     /// Next value of a key in the profile, device or node scope.
     ControllerScopedPolicy(&'static str),
     ControllerQuotaReset,
+    ControllerTariffs,
+    ControllerTariff(usize),
+    ControllerTariffNew,
+    ControllerTariffTerm,
+    ControllerTariffNodes,
+    ControllerTariffRegion(usize),
+    ControllerTariffLimits,
+    ControllerTariffRename,
+    ControllerTariffDelete,
+    /// A tariff offered to a profile; None removes its tariff.
+    ControllerTariffPick(Option<usize>),
+    ControllerTariffExpiry,
+    ControllerTariffAccess,
+    ControllerTariffApply,
     ControllerQuotaAnchor,
     ControllerQuotaTimezone,
     ControllerAlerts,
@@ -246,6 +260,7 @@ pub(super) enum Control {
     AccessDeviceConfirm,
     /// Limits of the open profile card or device card.
     AccessLimits,
+    AccessTariff,
     /// Traffic by server of the open profile card, and its pages.
     AccessTraffic,
     AccessTrafficPage(bool),

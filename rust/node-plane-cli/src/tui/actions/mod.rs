@@ -2,6 +2,7 @@ mod access;
 mod controller;
 mod nodes;
 mod settings;
+mod tariffs;
 mod temporary;
 
 use super::*;
@@ -297,6 +298,7 @@ impl App {
             | Control::AccessDeviceRotate(..)
             | Control::AccessDeviceConfirm
             | Control::AccessLimits
+            | Control::AccessTariff
             | Control::AccessTraffic
             | Control::AccessTrafficPage(..)
             | Control::AccessDevicePage(..)
@@ -364,6 +366,19 @@ impl App {
             | Control::ControllerPolicies
             | Control::ControllerScopedPolicy(..)
             | Control::ControllerQuotaReset
+            | Control::ControllerTariffs
+            | Control::ControllerTariff(..)
+            | Control::ControllerTariffNew
+            | Control::ControllerTariffTerm
+            | Control::ControllerTariffNodes
+            | Control::ControllerTariffRegion(..)
+            | Control::ControllerTariffLimits
+            | Control::ControllerTariffRename
+            | Control::ControllerTariffDelete
+            | Control::ControllerTariffPick(..)
+            | Control::ControllerTariffExpiry
+            | Control::ControllerTariffAccess
+            | Control::ControllerTariffApply
             | Control::ControllerQuotaAnchor
             | Control::ControllerQuotaTimezone
             | Control::ControllerPolicyToggle(..)

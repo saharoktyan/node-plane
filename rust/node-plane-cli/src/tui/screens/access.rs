@@ -797,8 +797,8 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                // Edit, Limits, Traffic when collected, and Freeze and Delete for members.
-                count += 2
+                // Edit, Limits, Tariff, Traffic when collected, and Freeze and Delete for members.
+                count += 3
                     + usize::from(card["_summary"]["traffic"].is_object())
                     + 2 * usize::from(card["_account"]["role"] != "admin");
             }
@@ -1151,6 +1151,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 buttons.push(("Edit", Control::AccessEdit));
                 buttons.push(("Limits", Control::AccessLimits));
+                buttons.push(("Tariff", Control::AccessTariff));
                 if card["_summary"]["traffic"].is_object() {
                     buttons.push(("Traffic", Control::AccessTraffic));
                 }
