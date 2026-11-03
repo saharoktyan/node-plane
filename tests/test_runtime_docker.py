@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -48,7 +49,7 @@ def docker(*args, input=None, check=True):
 @unittest.skipUnless(os.environ.get('NODE_PLANE_TEST_DOCKER') == '1', 'requires disposable Docker runtime fixtures')
 class DockerRuntimeTests(unittest.TestCase):
     def test_xray_image_reference_is_version_and_digest_pinned(self):
-        self.assertRegex(XRAY_IMAGE, r'ghcr\.io/xtls/xray-core:26\.10\.29@sha256:[0-9a-f]{64}')
+        self.assertRegex(XRAY_IMAGE, r'ghcr\.io/saharoktyan/xray-core:v26\.10\.31-np\.2@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
         # Check the runtime entry points that select an image.
         for name in ('deploy-xray.sh', 'init-xray.sh', 'sync-xray.sh',
@@ -170,8 +171,10 @@ class DockerRuntimeTests(unittest.TestCase):
         for tag in ('reality-tcp', 'reality-xhttp'):
             self.assertNotIn('alice', XRAY.users(container, tag))
 
-    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
-    def test_agent_xray_api_adds_rotates_and_revokes_users_on_real_runtime(self):
+    def agent_xray(self, *publish):
+        """Xray with the API published on host loopback and the helpers
+        pointed at the built agent. Returns the config path, the container,
+        and a runner for `node-plane-agent xray-api`."""
         directory = self.root / 'xray'
         directory.mkdir()
         path = directory / 'config.json'
@@ -194,7 +197,8 @@ class DockerRuntimeTests(unittest.TestCase):
         }
         path.write_text(json.dumps(config))
         path.chmod(0o644)
-        container = self.container('xray-api', XRAY_IMAGE, '--user', '0:0', '-p', '127.0.0.1::10085',
+        ports = [arg for port in ('10085', *publish) for arg in ('-p', f'127.0.0.1::{port}')]
+        container = self.container('xray-api', XRAY_IMAGE, '--user', '0:0', *ports,
             '-v', f'{directory}:/etc/xray:ro', command=('xray', 'run', '-c', '/etc/xray/config.json'))
         port = docker('port', container, '10085/tcp').stdout.split()[0].rsplit(':', 1)[1]
         agent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY),
@@ -202,13 +206,6 @@ class DockerRuntimeTests(unittest.TestCase):
         agent.start()
         self.addCleanup(agent.stop)
         self.assertEqual(XRAY.agent(), str(AGENT_BINARY))
-
-        def cli_users(tag):
-            # Independent view through the Xray CLI inside the container.
-            raw = docker('exec', container, 'xray', 'api', 'inbounduser',
-                         '--server=127.0.0.1:10085', f'-tag={tag}').stdout
-            return {user['email']: user['account'] for user in json.loads(raw or '{}').get('users', [])}
-
         deadline = time.monotonic() + 10
         while True:
             try:
@@ -218,6 +215,20 @@ class DockerRuntimeTests(unittest.TestCase):
                 if time.monotonic() >= deadline:
                     self.fail(docker('logs', container).stdout)
                 time.sleep(0.1)
+        run = lambda *args: subprocess.run([str(AGENT_BINARY), 'xray-api', f'--server=127.0.0.1:{port}', *args],
+                                           capture_output=True, text=True, timeout=15)
+        return path, container, run
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
+    def test_agent_xray_api_adds_rotates_and_revokes_users_on_real_runtime(self):
+        path, container, run = self.agent_xray()
+
+        def cli_users(tag):
+            # Independent view through the Xray CLI inside the container.
+            raw = docker('exec', container, 'xray', 'api', 'inbounduser',
+                         '--server=127.0.0.1:10085', f'-tag={tag}').stdout
+            return {user['email']: user['account'] for user in json.loads(raw or '{}').get('users', [])}
+
         first, second = str(uuid4()), str(uuid4())
         with patch.object(XRAY, 'xray_api', side_effect=AssertionError('container CLI used')):
             self.sync(path, container, 'add', first)
@@ -230,8 +241,6 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertEqual(cli_users('reality-tcp'), {})
         self.assertEqual(cli_users('reality-xhttp'), {})
 
-        run = lambda *args: subprocess.run([str(AGENT_BINARY), 'xray-api', f'--server=127.0.0.1:{port}', *args],
-                                           capture_output=True, text=True, timeout=15)
         added = run('add-rule', '--rule-tag=np-evict-test', '--outbound=node-plane-blocked',
                     '--user=alice', '--source=[2001:db8::7]/64')
         self.assertEqual(added.returncode, 0, added.stderr)
@@ -242,6 +251,96 @@ class DockerRuntimeTests(unittest.TestCase):
         for _ in range(2):
             self.assertEqual(run('remove-rule', '--rule-tag=np-evict-test').returncode, 0)
         self.assertEqual(json.loads(run('uptime').stdout)['uptime'] >= 0, True)
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
+    def test_agent_closes_established_vless_connections_on_real_runtime(self):
+        path, server, run = self.agent_xray('1080', '1081')
+        identity = str(uuid4())
+        added = run('add-user', '--tag=reality-tcp', '--email=alice', f'--uuid={identity}')
+        self.assertEqual(added.returncode, 0, added.stderr)
+        # A VLESS client in the server's network namespace. Each SOCKS port,
+        # published with the server, dials from its own loopback address, so
+        # the server sees two sources.
+        client_dir = self.root / 'client'
+        client_dir.mkdir()
+        (client_dir / 'config.json').write_text(json.dumps({
+            'log': {'loglevel': 'warning'},
+            'inbounds': [{'tag': f's{port}', 'listen': '0.0.0.0', 'port': port, 'protocol': 'socks',
+                          'settings': {'udp': False}} for port in (1080, 1081)],
+            'outbounds': [{'tag': f'o{port}', 'sendThrough': source, 'protocol': 'vless',
+                           'settings': {'vnext': [{'address': '127.0.0.1', 'port': 443,
+                               'users': [{'id': identity, 'encryption': 'none'}]}]},
+                           'streamSettings': {'network': 'tcp'}}
+                          for port, source in ((1080, '127.0.0.2'), (1081, '127.0.0.3'))],
+            'routing': {'rules': [{'type': 'field', 'inboundTag': [f's{port}'], 'outboundTag': f'o{port}'}
+                                  for port in (1080, 1081)]},
+        }))
+        (client_dir / 'config.json').chmod(0o644)
+        self.container('xray-client', XRAY_IMAGE, '--user', '0:0', '--network', f'container:{server}',
+            '-v', f'{client_dir}:/etc/xray:ro', command=('xray', 'run', '-c', '/etc/xray/config.json'))
+        socks = {port: int(docker('port', server, f'{port}/tcp').stdout.split()[0].rsplit(':', 1)[1])
+                 for port in (1080, 1081)}
+
+        def connect(port=1080):
+            # Through VLESS to the server's own API port: an idle HTTP/2
+            # connection the gRPC server keeps open.
+            deadline = time.monotonic() + 10
+            while True:
+                stream = socket.create_connection(('127.0.0.1', socks[port]), timeout=5)
+                try:
+                    stream.sendall(b'\x05\x01\x00')
+                    if stream.recv(2) == b'\x05\x00':
+                        stream.sendall(b'\x05\x01\x00\x01' + bytes([127, 0, 0, 1]) + (10085).to_bytes(2, 'big'))
+                        if stream.recv(10)[:2] == b'\x05\x00':
+                            break
+                except OSError:
+                    pass
+                stream.close()
+                if time.monotonic() >= deadline:
+                    self.fail('SOCKS through VLESS did not connect')
+                time.sleep(0.2)
+            self.addCleanup(stream.close)
+            # The VLESS session is dispatched once the first payload arrives.
+            stream.sendall(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n' + bytes([0, 0, 0, 4, 0, 0, 0, 0, 0]))
+            return stream
+
+        def closed(stream, timeout=5):
+            stream.settimeout(timeout)
+            try:
+                while stream.recv(4096):
+                    pass
+            except (ConnectionResetError, TimeoutError, socket.timeout) as error:
+                return not isinstance(error, (TimeoutError, socket.timeout))
+            return True
+
+        stream = connect()
+        self.assertFalse(closed(stream, 1))
+        # Another source closes nothing.
+        other = run('close-connections', '--tag=reality-tcp', '--email=alice', '--source=203.0.113.7')
+        self.assertEqual(json.loads(other.stdout), {'closed': 0}, other.stderr)
+        closing = run('close-connections', '--tag=reality-tcp', '--email=alice', '--source=127.0.0.2')
+        self.assertEqual(json.loads(closing.stdout), {'closed': 1}, closing.stderr)
+        self.assertTrue(closed(stream))
+
+        # The source limit evicts the older source and closes only its
+        # connections.
+        state = self.root / 'agent-state'
+        state.mkdir()
+        (state / 'admission-policy.json').write_text(json.dumps({'revision': 1, 'clients': {'alice': {
+            'max_sources': 1, 'mode': 'enforce', 'window_seconds': 60, 'cooldown_seconds': 300}}}))
+        step = lambda: json.loads(run('admission-step', f'--state-dir={state}').stdout)['events']
+        older = connect(1080)
+        self.assertEqual(step(), [])
+        time.sleep(1.1)
+        newer = connect(1081)
+        self.assertEqual(step(), [{'kind': 'evicted', 'email': 'alice', 'source': '127.0.0.2/32'}])
+        self.assertTrue(closed(older))
+        self.assertFalse(closed(newer, 1))
+
+        # Revocation removes the user and closes what is open.
+        XRAY.run('delete', path, server, 'reality-tcp', 'reality-xhttp', 'alice')
+        self.assertTrue(closed(newer))
+        self.assertNotIn('alice', XRAY.users(server, 'reality-tcp'))
 
     def test_xray_partial_api_add_and_delete_have_durable_repairable_state(self):
         path, container = self.xray()

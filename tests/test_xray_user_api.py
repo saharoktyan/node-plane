@@ -141,6 +141,7 @@ class XrayApiTransportTests(unittest.TestCase):
     def test_probe_accepts_an_agent_that_serves_xray_api(self):
         path = self.executable("new-agent", """[ "$1 $2" = "xray-api capabilities" ] && echo '{"xray_api": 1}'""")
         self.assertEqual(MODULE._probe(path), path)
+        self.assertEqual(MODULE._probe_version(path), 1)
 
     def test_probe_makes_an_older_agent_exit_before_it_serves(self):
         # Older agents ignore arguments and start their server: the probe must
@@ -168,6 +169,7 @@ sleep 30""")
         calls, run = self.run_agent(json.dumps({"users": [
             {"email": "alice", "account": {"id": "1", "flow": "xtls-rprx-vision"}}]}))
         with patch.object(MODULE, "agent", return_value="/agent"), run, \
+             patch.object(MODULE, "agent_version", return_value=1), \
              patch.dict(os.environ, {"NODE_PLANE_XRAY_API": "127.0.0.1:1234"}), \
              patch.object(MODULE, "docker", side_effect=AssertionError("docker used")):
             self.assertEqual(MODULE.users("xray", "reality-tcp"),
@@ -181,6 +183,15 @@ sleep 30""")
             ["/agent", "xray-api", "--server=127.0.0.1:1234", "remove-user", "--tag=reality-tcp",
              "--email=alice"],
         ])
+
+    def test_newer_agent_closes_connections_of_a_removed_user(self):
+        calls, run = self.run_agent(json.dumps({"removed": 1}))
+        with patch.object(MODULE, "agent", return_value="/agent"), run, \
+             patch.object(MODULE, "agent_version", return_value=2), \
+             patch.dict(os.environ, {"NODE_PLANE_XRAY_API": "127.0.0.1:1234"}):
+            MODULE.remove_live("xray", "reality-tcp", "alice")
+        self.assertEqual(calls, [["/agent", "xray-api", "--server=127.0.0.1:1234", "remove-user",
+                                  "--tag=reality-tcp", "--email=alice", "--close-connections=true"]])
 
     def test_agent_transport_failure_is_an_error_not_absence(self):
         _, run = self.run_agent("", returncode=3, stderr="Xray API unavailable: refused")

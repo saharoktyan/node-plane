@@ -16,6 +16,22 @@ message AddUserOperation {
 
 message RemoveUserOperation {
   string email = 1;
+  // Also terminate established connections. Unsupported proxies return UNIMPLEMENTED.
+  bool close_connections = 2;
+}
+
+message CloseUserConnectionsRequest {
+  // Inbound handler tag and user email are required.
+  string tag = 1;
+  string email = 2;
+  // Optional source IP address or CIDR. Empty selects all sources.
+  string source = 3;
+}
+
+message CloseUserConnectionsResponse {
+  // Number of carrier connections successfully closed, not multiplexed streams.
+  // Retained XUDP resources are also terminated but are not counted here.
+  uint64 closed = 1;
 }
 
 message AddInboundRequest {
@@ -89,6 +105,9 @@ service HandlerService {
   rpc RemoveInbound(RemoveInboundRequest) returns (RemoveInboundResponse) {}
 
   rpc AlterInbound(AlterInboundRequest) returns (AlterInboundResponse) {}
+
+  // Disconnect a user's current connections without removing authorization.
+  rpc CloseUserConnections(CloseUserConnectionsRequest) returns (CloseUserConnectionsResponse) {}
 
   rpc ListInbounds(ListInboundsRequest) returns (ListInboundsResponse) {}
 

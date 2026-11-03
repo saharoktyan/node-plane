@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Run Xray from the Node Plane fork image (`ghcr.io/saharoktyan/xray-core`,
+  based on upstream v26.10.31), which can close a VLESS user's established
+  connections through the Xray API.
+- Close established VLESS connections when a device or profile loses access
+  and when the simultaneous networks limit evicts a network. Containers still
+  on the upstream image keep blocking new connections only.
 - Block VLESS client access to loopback, private and reserved destinations
   with an explicit node routing rule, applied with node settings.
 - Add an installation-wide BitTorrent over VLESS setting (allow by default)
@@ -545,6 +551,12 @@
 
 ## Unreleased
 
+- Run Xray from the Node Plane fork image (`ghcr.io/saharoktyan/xray-core`,
+  based on upstream v26.10.31), which can close a VLESS user's established
+  connections through the Xray API.
+- Close established VLESS connections when a device or profile loses access
+  and when the simultaneous networks limit evicts a network. Containers still
+  on the upstream image keep blocking new connections only.
 - Separate stable/dev Workstation installations, launchers, local data and self-update receipts; restrict installation, updates and controller management to the matching channel.
 - Copy connection profiles between NPW channels without sharing SSH keys or operation journals; allow an explicit controller-channel transition through Node Plane Updates.
 - Fix Back from unconfirmed installation management, align installation buttons and reuse the selected profile in Quick Start.

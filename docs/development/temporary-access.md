@@ -24,7 +24,7 @@ Provisioning installs `node-plane-lease-expiry.service` and `.timer` before issu
 
 Artifact retrieval verifies current node state against the original receipt. Expired credentials are denied even before reconciliation. AWG receipts include peer/config artifacts; VLESS uses an independent UUID and `revocation_mode=new_connections_only`.
 
-VLESS authorization removal prevents new connections; established sessions may survive until disconnect. AWG removal deletes the peer. Neither an unavailable runtime nor a failed delete is confirmed tunnel termination. Keep that distinction in backend states and both interfaces.
+VLESS authorization removal prevents new connections and, on the Node Plane Xray image with a version 2 agent, closes established ones (`RemoveUser` with `close_connections`). Receipts keep `revocation_mode=new_connections_only` because the controller does not yet know which image a node runs (VPN plan, 11m). AWG removal deletes the peer. Neither an unavailable runtime nor a failed delete is confirmed tunnel termination. Keep that distinction in backend states and both interfaces.
 
 ## Backups and retirement
 
@@ -32,6 +32,6 @@ Configuration backups exclude temporary credentials. Restore checks outstanding 
 
 ## Tests
 
-Check expiry with agent/controller offline, Docker restart, actual systemd boot, failed delete, duplicate issuance, uncertain ensure and artifact denial after expiry. Use disposable deadlines/identities. Confirm new VLESS connections are denied and record the established-session limitation; confirm AWG traffic stops while another peer survives.
+Check expiry with agent/controller offline, Docker restart, actual systemd boot, failed delete, duplicate issuance, uncertain ensure and artifact denial after expiry. Use disposable deadlines/identities. Confirm new VLESS connections are denied and established ones close (`test_agent_closes_established_vless_connections_on_real_runtime`); confirm AWG traffic stops while another peer survives.
 
 See [Testing](testing.md) for isolated boot fixtures and [the user guide](../temporary-configs.md) for interface behavior.

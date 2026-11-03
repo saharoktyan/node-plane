@@ -10,8 +10,10 @@ and talks to the pinned runtime image
 [the Node Plane fork](https://github.com/saharoktyan/Xray-core/tree/v26.10.31-np.2),
 based on upstream `v26.10.31`. The runtime defaults also pin its OCI digest.
 These vendored files match upstream `v26.10.21` and `v26.10.31` except for
-comments. The fork adds VLESS connection termination to HandlerService; those
-proto extensions are not vendored or called by the node agent yet.
+comments, apart from `app/proxyman/command/command.proto`, which is the fork's
+(tag `v26.10.31-np.2`): it adds `RemoveUserOperation.close_connections` and
+`HandlerService.CloseUserConnections` for VLESS connection termination.
+Upstream Xray ignores the flag and answers `UNIMPLEMENTED` to the call.
 
 Only the import closure of the services the agent uses is vendored:
 `HandlerService`, `StatsService` and `RoutingService`. The VLESS account
@@ -19,6 +21,7 @@ Only the import closure of the services the agent uses is vendored:
 declares the fields it needs (`id`, `flow`, `encryption`) by hand with the same
 field numbers.
 
-To update: copy the same files from the new tag, keep this list and the commit
+To update: copy the same files from the new tag (`command.proto` from the
+fork tag the runtime image is built from), keep this list and the commit
 above in sync (also in `licenses/vendored/manifest.json`), regenerate
 `THIRD_PARTY_LICENSES` and run the Xray API tests in `tests/test_runtime_docker.py`.

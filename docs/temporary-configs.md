@@ -25,7 +25,7 @@ Temporary credentials cannot be extended or converted to permanent credentials. 
 
 ## Expiry and revocation
 
-**VLESS:** new connections are blocked after expiry or revocation. An existing connection may continue until it disconnects. This also applies to ordinary profile expiry and manual VLESS revocation.
+**VLESS:** expiry or revocation blocks new connections and closes established ones. This also applies to ordinary profile expiry and manual VLESS revocation. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed.
 
 **AWG:** expiry/revocation removes the independent peer. The node needs working protocol administration to apply that removal.
 

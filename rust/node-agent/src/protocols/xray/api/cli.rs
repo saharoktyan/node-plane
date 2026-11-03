@@ -11,11 +11,13 @@ use serde_json::json;
 use super::{DEFAULT_ADDRESS, InboundUser, RouteRule, SourceNet, XrayApi, XrayApiError};
 
 /// Bumped when helpers need a new command. `capabilities` reports it.
-const VERSION: u32 = 1;
+/// 2: `remove-user --close-connections`, `close-connections`.
+const VERSION: u32 = 2;
 
 const EXIT_USAGE: i32 = 2;
 const EXIT_UNAVAILABLE: i32 = 3;
 const EXIT_REJECTED: i32 = 4;
+const EXIT_UNSUPPORTED: i32 = 5;
 
 /// Runs the subcommand when the agent was started as `xray-api …`.
 /// Returns `None` for an ordinary agent start.
@@ -38,6 +40,7 @@ pub(crate) async fn run(args: &[String]) -> Option<i32> {
             match err {
                 XrayApiError::Unavailable(_) => EXIT_UNAVAILABLE,
                 XrayApiError::Rejected(_) | XrayApiError::Invalid(_) => EXIT_REJECTED,
+                XrayApiError::Unsupported(_) => EXIT_UNSUPPORTED,
             }
         }
     })
@@ -109,6 +112,16 @@ impl Options {
     }
 }
 
+fn flag(value: &str) -> Result<bool, Failure> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(Failure::Usage(format!(
+            "expected true or false, got {value}"
+        ))),
+    }
+}
+
 pub(crate) fn valid_email(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -171,15 +184,36 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
         "remove-user" => {
             let tag = options.take("tag")?;
             let email = options.take("email")?;
+            let close = flag(&options.take_or("close-connections", "false"))?;
             options.finish()?;
             if !valid_email(&email) {
                 return Err(Failure::Usage("invalid email".into()));
             }
             XrayApi::connect(&server)
                 .await?
-                .remove_user(&tag, &email)
+                .remove_user(&tag, &email, close)
                 .await?;
             json!({"removed": 1})
+        }
+        "close-connections" => {
+            let tag = options.take("tag")?;
+            let email = options.take("email")?;
+            let source = options.take_or("source", "");
+            options.finish()?;
+            if !valid_email(&email) {
+                return Err(Failure::Usage("invalid email".into()));
+            }
+            let source = match source.as_str() {
+                "" => None,
+                value => {
+                    Some(SourceNet::parse(value).map_err(|err| Failure::Usage(err.to_string()))?)
+                }
+            };
+            let closed = XrayApi::connect(&server)
+                .await?
+                .close_user_connections(&tag, &email, source.as_ref())
+                .await?;
+            json!({"closed": closed})
         }
         "query-stats" => {
             let pattern = options.take("pattern")?;
@@ -318,6 +352,27 @@ mod tests {
                 "--email",
                 "-alice!",
             ],
+            vec![
+                "xray-api",
+                "remove-user",
+                "--tag",
+                "t",
+                "--email",
+                "alice",
+                "--close-connections",
+                "yes",
+            ],
+            vec![
+                "xray-api",
+                "close-connections",
+                "--tag",
+                "t",
+                "--email",
+                "alice",
+                "--source",
+                "not-an-ip",
+            ],
+            vec!["xray-api", "close-connections", "--email", "alice"],
             vec![
                 "xray-api",
                 "remove-rule",

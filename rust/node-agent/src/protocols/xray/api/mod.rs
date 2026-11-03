@@ -16,8 +16,9 @@ use tonic::transport::{Channel, Endpoint};
 
 use proto::xray::app::proxyman::command::handler_service_client::HandlerServiceClient;
 use proto::xray::app::proxyman::command::{
-    AddOutboundRequest, AddUserOperation, AlterInboundRequest, GetInboundUserRequest,
-    ListOutboundsRequest, RemoveOutboundRequest, RemoveUserOperation,
+    AddOutboundRequest, AddUserOperation, AlterInboundRequest, CloseUserConnectionsRequest,
+    GetInboundUserRequest, ListInboundsRequest, ListOutboundsRequest, RemoveOutboundRequest,
+    RemoveUserOperation,
 };
 use proto::xray::app::router::command::routing_service_client::RoutingServiceClient;
 use proto::xray::app::router::command::{AddRuleRequest, ListRuleRequest, RemoveRuleRequest};
@@ -34,6 +35,7 @@ use proto::{FreedomConfig, SenderConfig, SocketConfig, StreamConfig, VlessAccoun
 pub(crate) const DEFAULT_ADDRESS: &str = "127.0.0.1:10085";
 const TIMEOUT: Duration = Duration::from_secs(3);
 const VLESS_ACCOUNT: &str = "xray.proxy.vless.Account";
+const VLESS_INBOUND: &str = "xray.proxy.vless.inbound.Config";
 
 #[derive(Debug)]
 pub(crate) enum XrayApiError {
@@ -41,6 +43,9 @@ pub(crate) enum XrayApiError {
     Unavailable(String),
     /// Xray answered and refused the call.
     Rejected(String),
+    /// The runtime image does not implement the call, e.g. connection
+    /// termination on an Xray without the Node Plane patch.
+    Unsupported(String),
     /// Bad input or an answer the agent does not understand.
     Invalid(String),
 }
@@ -50,6 +55,7 @@ impl fmt::Display for XrayApiError {
         match self {
             Self::Unavailable(detail) => write!(f, "Xray API unavailable: {detail}"),
             Self::Rejected(detail) => write!(f, "Xray API rejected the call: {detail}"),
+            Self::Unsupported(detail) => write!(f, "Xray API does not support the call: {detail}"),
             Self::Invalid(detail) => write!(f, "invalid Xray API exchange: {detail}"),
         }
     }
@@ -61,6 +67,7 @@ impl From<tonic::Status> for XrayApiError {
             tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => {
                 Self::Unavailable(status.message().to_string())
             }
+            tonic::Code::Unimplemented => Self::Unsupported(status.message().to_string()),
             _ => Self::Rejected(status.message().to_string()),
         }
     }
@@ -264,9 +271,19 @@ impl XrayApi {
         Ok(())
     }
 
-    pub(crate) async fn remove_user(&self, tag: &str, email: &str) -> Result<(), XrayApiError> {
+    /// Removes a user. With `close_connections` the patched runtime also
+    /// closes the user's established connections; VLESS serializes this with
+    /// handshakes, so none authenticated before the removal survives it.
+    /// Upstream Xray ignores the flag and only removes the user.
+    pub(crate) async fn remove_user(
+        &self,
+        tag: &str,
+        email: &str,
+        close_connections: bool,
+    ) -> Result<(), XrayApiError> {
         let operation = RemoveUserOperation {
             email: email.to_string(),
+            close_connections,
         };
         self.handler()
             .alter_inbound(AlterInboundRequest {
@@ -278,6 +295,49 @@ impl XrayApi {
             })
             .await?;
         Ok(())
+    }
+
+    /// Closes a user's established connections on one inbound, from `source`
+    /// only when given, and returns how many carrier connections closed.
+    /// Authorization stays: block or remove the user first. Upstream Xray
+    /// answers `Unsupported`.
+    pub(crate) async fn close_user_connections(
+        &self,
+        tag: &str,
+        email: &str,
+        source: Option<&SourceNet>,
+    ) -> Result<u64, XrayApiError> {
+        Ok(self
+            .handler()
+            .close_user_connections(CloseUserConnectionsRequest {
+                tag: tag.to_string(),
+                email: email.to_string(),
+                source: source.map(ToString::to_string).unwrap_or_default(),
+            })
+            .await?
+            .into_inner()
+            .closed)
+    }
+
+    /// Tags of the VLESS inbounds.
+    pub(crate) async fn vless_inbound_tags(&self) -> Result<Vec<String>, XrayApiError> {
+        Ok(self
+            .handler()
+            .list_inbounds(ListInboundsRequest {
+                is_only_tags: false,
+            })
+            .await?
+            .into_inner()
+            .inbounds
+            .into_iter()
+            .filter(|inbound| {
+                inbound
+                    .proxy_settings
+                    .as_ref()
+                    .is_some_and(|settings| settings.r#type == VLESS_INBOUND)
+            })
+            .map(|inbound| inbound.tag)
+            .collect())
     }
 
     /// Counters whose names contain `pattern`, e.g. `user>>>alice>>>`.

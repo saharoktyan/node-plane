@@ -2,7 +2,9 @@
 //!
 //! A source is an IP (IPv6: its /64) with a new connection within `window`.
 //! Over the limit the source that appeared first is evicted: a routing rule
-//! `{user, source} -> blackhole` blocks it for `cooldown`. A blocked source
+//! `{user, source} -> blackhole` blocks it for `cooldown`, then its
+//! established connections are closed on every VLESS inbound (the patched
+//! runtime image; upstream Xray only stops new dispatches). A blocked source
 //! is not counted and cannot evict others, so two parties sharing one link
 //! swap at most once per cooldown. Blocks are journaled and re-applied after
 //! an Xray restart (detected by its uptime going back).
@@ -268,6 +270,7 @@ pub(crate) async fn step(
         }
     }
     let mut events = Vec::new();
+    let mut inbounds = None;
     for (email, policy) in policies {
         let online = api.online_ips(email).await?;
         let changes = state.observe(email, policy, &online, now);
@@ -275,11 +278,33 @@ pub(crate) async fn step(
             api.remove_rule(rule_tag).await?;
         }
         for (rule_tag, email, source) in &changes.add {
-            api.add_rule(&rule(rule_tag, email, source)?).await?;
+            let block = rule(rule_tag, email, source)?;
+            api.add_rule(&block).await?;
+            // The rule comes first: a client reconnecting after the close
+            // is refused at dispatch.
+            if inbounds.is_none() {
+                inbounds = Some(api.vless_inbound_tags().await?);
+            }
+            for tag in inbounds.iter().flatten() {
+                close_connections(api, tag, email, &block.sources[0]).await?;
+            }
         }
         events.extend(changes.events);
     }
     Ok(events)
+}
+
+/// Upstream Xray cannot close connections; the block still stops new ones.
+async fn close_connections(
+    api: &XrayApi,
+    tag: &str,
+    email: &str,
+    source: &SourceNet,
+) -> Result<(), XrayApiError> {
+    match api.close_user_connections(tag, email, Some(source)).await {
+        Ok(_) | Err(XrayApiError::Unsupported(_)) => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 /// The controller's latest snapshot; journaled so limits keep working

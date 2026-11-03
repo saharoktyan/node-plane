@@ -1,7 +1,7 @@
 [
   {
     "name": "Xray-core protobuf definitions",
-    "version": "v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74)",
+    "version": "v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74); app/proxyman/command/command.proto from the Node Plane fork v26.10.31-np.2 (https://github.com/saharoktyan/Xray-core)",
     "spdx": "MPL-2.0",
     "source": "https://github.com/XTLS/Xray-core",
     "path": "proto/vendor/xray",

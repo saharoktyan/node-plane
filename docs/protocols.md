@@ -22,7 +22,7 @@ If an earlier edit left an old address in the VLESS/AWG address fields, set thos
 
 Use a valid hostname for SNI, without a scheme, path or port. Client links include the node's address, selected transport and REALITY parameters. Download a fresh configuration after changes to keys, ports or transport settings.
 
-Revoking a VLESS identity blocks new connections. Existing connections may continue until they disconnect.
+Revoking a VLESS identity blocks new connections and closes its established ones. Nodes run Xray from the [Node Plane fork](https://github.com/saharoktyan/Xray-core), which adds connection termination to the Xray API. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed.
 
 ### Destination policy
 

@@ -70,7 +70,7 @@ Your installation Telegram ID receives administrator access automatically. To sh
 
 VLESS configurations are delivered as URIs or QR codes, and AmneziaWG configurations as `.conf` files. Use a VPN client that supports the relevant format; a VLESS URI configures the proxy connection, while full-device routing requires a client with TUN/VPN mode. I have tested VLESS with v2rayA on Linux, v2rayN on Windows, NekoBox on Android (TCP transport only) and v2box on iOS. I have also tested AmneziaWG with AmneziaVPN on Linux, Windows, Android and iOS. These are maintainer test results, not a compatibility guarantee for every version or device.
 
-Traffic statistics are available; traffic quotas and connection-count enforcement are not implemented yet. Revoking VLESS access blocks new connections, while established sessions may remain until disconnect.
+Traffic statistics are available; traffic quotas and connection-count enforcement are not implemented yet. Revoking VLESS access also closes the device's established connections.
 
 ## Compared with 3x-ui and Remnawave
 
@@ -87,7 +87,7 @@ This compares documented standard workflows, not every third-party integration o
 | Protocol scope | VLESS REALITY TCP/XHTTP and AmneziaWG | Broader protocol selection, including AmneziaWG | Xray-based proxy management |
 | Configuration subscriptions | Planned | Available | Available |
 | User/client traffic quotas | Planned | Available | Available |
-| Access expiry | Available; established VLESS-session caveat above | Available | Available |
+| Access expiry | Available | Available | Available |
 
 Sources: [3x-ui features](https://docs.sanaei.dev/docs/), [installation](https://docs.sanaei.dev/docs/guide/installation/), [multi-node](https://docs.sanaei.dev/docs/operations/multi-node/); Remnawave [setup](https://docs.rw/overview/quick-start/), [users and limits](https://docs.rw/learn-en/users/), [Telegram integrations](https://docs.rw/awesome-remnawave/).
 

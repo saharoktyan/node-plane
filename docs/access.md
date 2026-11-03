@@ -38,7 +38,7 @@ Profiles created before VLESS devices keep their link: on upgrade the profile's 
 
 ## Simultaneous networks
 
-The **Simultaneous networks** setting limits from how many networks one VLESS device connects at the same time. It discourages sharing one link: when a device connects from a new network over the limit, the node disconnects the oldest network of that device and blocks it for a cooldown. A network is one IPv4 address or one IPv6 /64, counted while it opened a connection within the window.
+The **Simultaneous networks** setting limits from how many networks one VLESS device connects at the same time. It discourages sharing one link: when a device connects from a new network over the limit, the node closes the connections of the oldest network of that device and blocks it for a cooldown. A network is one IPv4 address or one IPv6 /64, counted while it opened a connection within the window.
 
 - `connections.mode`: `off` (default), `observe` (only report what would be disconnected) or `enforce`. Set it for the installation and override it per profile.
 - `connections.max_sources`: networks per device, 1 by default. Set it for the installation and per profile.
@@ -100,7 +100,7 @@ An administrator role grants management permissions. Change a role only for some
 
 **Block account** disables bot/API access. Installed VPN access is retained; use **Freeze profile** to suspend it while keeping profile settings. After freezing or unfreezing, inspect the runtime operation status.
 
-Expiry and revocation remove runtime authorization. New VLESS connections are blocked, but established connections may continue until they disconnect. See [Temporary configurations](temporary-configs.md) for the same limitation on short-lived access.
+Expiry and revocation remove runtime authorization and close established VLESS connections. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed. See [Temporary configurations](temporary-configs.md) for short-lived access.
 
 ## Delete an account
 

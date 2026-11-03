@@ -9065,7 +9065,7 @@ Vendored Third-Party Source Files
 These files are unmodified upstream copies kept in this repository. Their
 Source Code Form is available at the repository path and upstream source below.
 
-- Xray-core protobuf definitions v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74)
+- Xray-core protobuf definitions v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74); app/proxyman/command/command.proto from the Node Plane fork v26.10.31-np.2 (https://github.com/saharoktyan/Xray-core)
   Declared SPDX: MPL-2.0
   Components: node-plane-agent
   Source: https://github.com/XTLS/Xray-core
@@ -9089,7 +9089,7 @@ Third-Party License Notices & Verbatim Texts
 --------------------------------------------------------------------------------
 License Notice (SHA-256: 1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5)
 Used by:
-  - Xray-core protobuf definitions v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74) [Components: node-plane-agent] [SPDX: MPL-2.0]
+  - Xray-core protobuf definitions v26.10.21 (1b1647cd9ddf0abc34b981d4611fc03bcac1ca74); app/proxyman/command/command.proto from the Node Plane fork v26.10.31-np.2 (https://github.com/saharoktyan/Xray-core) [Components: node-plane-agent] [SPDX: MPL-2.0]
 --------------------------------------------------------------------------------
 
 Mozilla Public License Version 2.0

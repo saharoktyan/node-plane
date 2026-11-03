@@ -32,10 +32,20 @@ def agent():
     return _probe(os.environ.get("NODE_PLANE_AGENT_BIN") or AGENT)
 
 
-@functools.lru_cache(maxsize=None)
+def agent_version():
+    """The `xray-api` version of the agent, 0 without one."""
+    path = agent()
+    return _probe_version(path) if path else 0
+
+
 def _probe(path):
+    return path if _probe_version(path) >= 1 else None
+
+
+@functools.lru_cache(maxsize=None)
+def _probe_version(path):
     if not os.access(path, os.X_OK):
-        return None
+        return 0
     # An older agent ignores the arguments and starts its server. A missing
     # config and an unparsable listen address make it exit before binding.
     env = {**os.environ, "NODE_AGENT_CONFIG_PATH": "/nonexistent/node-plane-agent-probe.toml",
@@ -43,11 +53,11 @@ def _probe(path):
     try:
         result = subprocess.run([path, "xray-api", "capabilities"], env=env,
                                 capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and json.loads(result.stdout).get("xray_api", 0) >= 1:
-            return path
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+        if result.returncode == 0:
+            return int(json.loads(result.stdout).get("xray_api", 0))
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
         pass
-    return None
+    return 0
 
 
 def agent_api(*args):
@@ -162,7 +172,10 @@ def add_live(container, inbound, client, config_dir):
 
 def remove_live(container, tag, name):
     if agent():
-        agent_api("remove-user", f"--tag={tag}", f"--email={name}")
+        # Version 2 agents also close the user's established connections
+        # (the patched runtime image); older ones only revoke new handshakes.
+        close = ("--close-connections=true",) if agent_version() >= 2 else ()
+        agent_api("remove-user", f"--tag={tag}", f"--email={name}", *close)
         return
     output = xray_api(container, "rmu", f"-tag={tag}", name)
     check_result(output, "Removed")
