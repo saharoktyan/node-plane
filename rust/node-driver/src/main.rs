@@ -1086,6 +1086,47 @@ impl RuntimeService for RuntimeApi {
             revision: applied.revision,
         }))
     }
+
+    async fn observe_sessions(
+        &self,
+        request: Request<driver::v1::ObserveSessionsRequest>,
+    ) -> Result<Response<driver::v1::ObserveSessionsResponse>, Status> {
+        let req = request.into_inner();
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::unavailable("node agent is unavailable"))?;
+        let observed = agent_transport::AgentTransport::new(target)
+            .observe_sessions(agent::v1::ObserveSessionsRequest {
+                boot_id: req.boot_id,
+                after_sequence: req.after_sequence,
+            })
+            .await?;
+        Ok(Response::new(driver::v1::ObserveSessionsResponse {
+            boot_id: observed.boot_id,
+            events: observed
+                .events
+                .into_iter()
+                .map(|event| driver::v1::AdmissionEvent {
+                    sequence: event.sequence,
+                    email: event.email,
+                    kind: event.kind,
+                    occurred_at: event.occurred_at,
+                })
+                .collect(),
+            sessions: observed
+                .sessions
+                .into_iter()
+                .map(|session| driver::v1::SessionObservation {
+                    email: session.email,
+                    active_sources: session.active_sources,
+                    blocked_sources: session.blocked_sources,
+                })
+                .collect(),
+            truncated: observed.truncated,
+            node_key: req.node_key,
+        }))
+    }
 }
 
 #[tonic::async_trait]

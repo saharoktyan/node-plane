@@ -706,6 +706,9 @@ class AlertService:
                 if update_notice:
                     payload = json.loads(event['payload_json'])
                     eligible = selection == (True, payload['branch'], payload['dev_track'])
+                elif event['kind'] == 'link_sharing':
+                    # Enabled with connection limits, not with node monitoring.
+                    eligible = True
                 else:
                     eligible = self._policy(conn)['enabled']
                 if not eligible:

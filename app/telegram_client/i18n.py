@@ -3486,6 +3486,10 @@ CATALOG['en'].update({
     'connlimit.inherit': 'As installation ({value})',
     'connlimit.hint': 'Limits from how many networks one VLESS device connects at once. A new network disconnects the oldest one for a while, so a shared link stops working for everyone at the same time. Observe only reports what would be disconnected. Nodes receive changes within a minute and keep enforcing them without the controller.',
     'connlimit.profile_hint': 'Overrides the installation setting for every VLESS device of this profile.',
+    'connlimit.nodes': 'Nodes', 'connlimit.nodes_current': 'Up to date: {current} of {total}.',
+    'connlimit.node.pending': '{node}: sending the change',
+    'connlimit.node.unavailable': '{node}: unreachable, keeps the previous limits',
+    'connlimit.node.outdated': '{node}: update the node agent to enforce limits',
     'connlimit.timing': 'A network counts while it opened a connection in the last {window} s; a disconnected network is blocked for {cooldown} s.',
 })
 CATALOG['ru'].update({
@@ -3496,5 +3500,24 @@ CATALOG['ru'].update({
     'connlimit.inherit': 'Как в установке ({value})',
     'connlimit.hint': 'Ограничивает, из скольких сетей одно VLESS-устройство подключается одновременно. Новая сеть на время отключает самую старую, поэтому ссылкой, которую раздали другим, нельзя пользоваться одновременно. В режиме наблюдения бот только сообщает, кто был бы отключён. Ноды получают изменения в течение минуты и соблюдают их без контроллера.',
     'connlimit.profile_hint': 'Заменяет настройку установки для всех VLESS-устройств этого профиля.',
+    'connlimit.nodes': 'Ноды', 'connlimit.nodes_current': 'Применено: {current} из {total}.',
+    'connlimit.node.pending': '{node}: изменение отправляется',
+    'connlimit.node.unavailable': '{node}: недоступна, действуют прежние лимиты',
+    'connlimit.node.outdated': '{node}: обновите агент ноды, чтобы лимиты работали',
     'connlimit.timing': 'Сеть учитывается, если за последние {window} с открыла соединение; отключённая сеть блокируется на {cooldown} с.',
+})
+
+CATALOG['en'].update({
+    'alerts.condition.link_sharing': 'A VLESS link is probably shared',
+    'alerts.link_sharing': 'Profile {profile}, device {device}: {events} disconnections from other networks within {hours} h. Reissue the device key if the link leaked.',
+    'alerts.link_sharing.observe': 'Profile {profile}, device {device}: {events} connections over the network limit within {hours} h (observe mode, nothing was disconnected).',
+    'notification.connection_evicted.title': 'Connected from another network',
+    'notification.connection_evicted.body': 'Device {device} connected to {node} from another network, so its earlier connection was disconnected. If this was not you, reissue the device key in the bot.',
+})
+CATALOG['ru'].update({
+    'alerts.condition.link_sharing': 'VLESS-ссылкой, вероятно, делятся',
+    'alerts.link_sharing': 'Профиль {profile}, устройство {device}: {events} отключений из-за других сетей за {hours} ч. Если ссылка утекла, перевыпустите ключ устройства.',
+    'alerts.link_sharing.observe': 'Профиль {profile}, устройство {device}: {events} подключений сверх лимита сетей за {hours} ч (режим наблюдения, никто не отключён).',
+    'notification.connection_evicted.title': 'Подключение из другой сети',
+    'notification.connection_evicted.body': 'Устройство {device} подключилось к {node} из другой сети, поэтому его прежнее подключение отключено. Если это были не вы, перевыпустите ключ устройства в боте.',
 })

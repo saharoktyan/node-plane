@@ -194,6 +194,19 @@ class GrpcIntentDriver:
             raise ValueError('driver returned a different node identity')
         return response.revision
 
+    def observe_sessions(self, node_key, boot_id, after_sequence):
+        """Eviction events after the cursor and source counts of limited clients."""
+        from driver.v1 import runtime_service_pb2
+        response = self.runtime.ObserveSessions(runtime_service_pb2.ObserveSessionsRequest(
+            node_key=node_key, boot_id=boot_id, after_sequence=after_sequence), timeout=self.timeout)
+        if response.node_key != node_key:
+            raise ValueError('driver returned a different node identity')
+        return {'boot_id': response.boot_id, 'truncated': response.truncated,
+                'events': [{'sequence': e.sequence, 'email': e.email, 'kind': e.kind, 'occurred_at': e.occurred_at}
+                           for e in response.events],
+                'sessions': [{'email': s.email, 'active_sources': s.active_sources,
+                              'blocked_sources': s.blocked_sources} for s in response.sessions]}
+
     @staticmethod
     def node_settings_request(intent):
         from driver.v1 import runtime_service_pb2

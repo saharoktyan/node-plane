@@ -218,6 +218,15 @@ impl NodeAgentService for NodeAgentApi {
         ))
     }
 
+    async fn observe_sessions(
+        &self,
+        request: Request<agent::v1::ObserveSessionsRequest>,
+    ) -> Result<Response<agent::v1::ObserveSessionsResponse>, Status> {
+        Ok(Response::new(
+            self.state.observe_sessions(request.into_inner())?,
+        ))
+    }
+
     async fn install_docker(
         &self,
         _request: Request<InstallDockerRequest>,

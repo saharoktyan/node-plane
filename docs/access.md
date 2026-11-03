@@ -36,6 +36,22 @@ The `devices.max` VPN policy limits the number of active devices per profile. Se
 
 Profiles created before VLESS devices keep their link: on upgrade the profile's VLESS client moves to its default device with the same UUID, so no client needs to be reconfigured.
 
+## Simultaneous networks
+
+The **Simultaneous networks** setting limits from how many networks one VLESS device connects at the same time. It discourages sharing one link: when a device connects from a new network over the limit, the node disconnects the oldest network of that device and blocks it for a cooldown. A network is one IPv4 address or one IPv6 /64, counted while it opened a connection within the window.
+
+- `connections.mode`: `off` (default), `observe` (only report what would be disconnected) or `enforce`. Set it for the installation and override it per profile.
+- `connections.max_sources`: networks per device, 1 by default. Set it for the installation and per profile.
+Open it in Telegram → Settings → VPN → Simultaneous networks, in a profile's Edit screen, or in Workstation → Node Plane Settings → Policies.
+
+- `connections.window_seconds` (120) and `connections.cooldown_seconds` (300) apply to the whole installation.
+
+Each node receives the full set of its limits from the controller within a minute and enforces it on its own, including while the controller is unreachable. The settings screen lists nodes that do not have the current limits yet. A node whose agent is too old to enforce limits is named there; update the agent. Limits apply to VLESS only; AWG is not affected. Other devices and users are never blocked by another device's limit.
+
+When a device is disconnected, its owner receives a service notification, at most once per 30 minutes per device. When one device reaches 5 disconnections (or, in observe mode, 5 would-be disconnections) within 24 hours, administrators receive a **VLESS link is probably shared** alert; the next alert needs 5 new events. The controller stores only these events and per-device network counts, never addresses; events are kept for 7 days.
+
+Xray needs its online statistics and routing API for this. Applying node settings turns them on.
+
 ## Roles, blocking and freezing
 
 An administrator role grants management permissions. Change a role only for someone who should manage the installation.

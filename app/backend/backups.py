@@ -49,6 +49,8 @@ CLEAR = (
     "backend_system_cleanup_items",
     "backend_system_cleanup_jobs",
     "backend_system_cleanup_plans",
+    "backend_admission_events",
+    "backend_vpn_session_observations",
     "backend_node_admission",
     "backend_traffic_peers",
     "backend_traffic_usage",

@@ -6,7 +6,10 @@
 //! is not counted and cannot evict others, so two parties sharing one link
 //! swap at most once per cooldown. Blocks are journaled and re-applied after
 //! an Xray restart (detected by its uptime going back).
-use std::collections::BTreeMap;
+//!
+//! Evictions are buffered for the controller without the source address;
+//! `ObserveSessions` reads them with per-client source counts.
+use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -17,7 +20,10 @@ use tonic::Status;
 
 use super::api::cli::valid_email;
 use super::api::{DEFAULT_ADDRESS, RouteRule, SourceNet, XrayApi, XrayApiError};
-use crate::agent::v1::{ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse};
+use crate::agent::v1::{
+    AdmissionEvent, ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse,
+    ObserveSessionsRequest, ObserveSessionsResponse, SessionObservation,
+};
 use crate::journal::Journal;
 use crate::state::AgentState;
 
@@ -59,6 +65,10 @@ pub(crate) struct Block {
 struct Client {
     sources: BTreeMap<String, Source>,
     blocks: BTreeMap<String, Block>,
+    /// Observe mode: sources already reported, until when. Reported once
+    /// per cooldown, like an eviction would be.
+    #[serde(default)]
+    reported: BTreeMap<String, u64>,
 }
 
 /// Journaled state of every limited client on this node.
@@ -132,6 +142,7 @@ impl State {
             }
             keep
         });
+        client.reported.retain(|_, until| *until > now);
         // A client vanishing without FIN stays in the online list; only a
         // recent new connection counts (spike, 5.7).
         let since = now.saturating_sub(policy.window_seconds);
@@ -167,10 +178,18 @@ impl State {
             let excess = client.sources.len() - limit;
             for (_, source) in order.into_iter().take(excess) {
                 match policy.mode {
-                    Mode::Observe => changes.events.push(Event::WouldEvict {
-                        email: email.to_string(),
-                        source,
-                    }),
+                    Mode::Observe => {
+                        if client.reported.contains_key(&source) {
+                            continue;
+                        }
+                        client
+                            .reported
+                            .insert(source.clone(), now + policy.cooldown_seconds);
+                        changes.events.push(Event::WouldEvict {
+                            email: email.to_string(),
+                            source,
+                        });
+                    }
                     Mode::Enforce => {
                         client.sources.remove(&source);
                         let rule_tag = format!("np-evict-{}", self.next_rule);
@@ -272,6 +291,79 @@ pub(crate) struct Snapshot {
     pub(crate) clients: BTreeMap<String, Policy>,
 }
 
+impl Event {
+    fn email(&self) -> &str {
+        match self {
+            Event::Evicted { email, .. } | Event::WouldEvict { email, .. } => email,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Event::Evicted { .. } => "evicted",
+            Event::WouldEvict { .. } => "would_evict",
+        }
+    }
+}
+
+/// Events for the controller, kept in memory for one agent run. Addresses
+/// are dropped here: the controller stores counts only.
+struct Outbox {
+    boot_id: String,
+    next_sequence: u64,
+    /// Highest sequence dropped to bound memory.
+    dropped_through: u64,
+    events: VecDeque<AdmissionEvent>,
+}
+
+const OUTBOX_LIMIT: usize = 1000;
+
+impl Outbox {
+    fn new() -> Self {
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        Self {
+            boot_id: format!("{:x}-{:x}", started.as_nanos(), std::process::id()),
+            next_sequence: 1,
+            dropped_through: 0,
+            events: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, event: &Event, occurred_at: u64) {
+        if self.events.len() == OUTBOX_LIMIT
+            && let Some(dropped) = self.events.pop_front()
+        {
+            self.dropped_through = dropped.sequence;
+        }
+        self.events.push_back(AdmissionEvent {
+            sequence: self.next_sequence,
+            email: event.email().to_string(),
+            kind: event.kind().to_string(),
+            occurred_at: i64::try_from(occurred_at).unwrap_or(i64::MAX),
+        });
+        self.next_sequence += 1;
+    }
+
+    /// Events after `after_sequence` of run `boot_id`; another run's cursor
+    /// reads everything buffered.
+    fn after(&self, boot_id: &str, after_sequence: u64) -> (Vec<AdmissionEvent>, bool) {
+        let after = if boot_id == self.boot_id {
+            after_sequence
+        } else {
+            0
+        };
+        let events = self
+            .events
+            .iter()
+            .filter(|event| event.sequence > after)
+            .cloned()
+            .collect();
+        (events, after < self.dropped_through)
+    }
+}
+
 const POLL: Duration = Duration::from_secs(5);
 const MAX_WINDOW_SECONDS: u64 = 3600;
 const MAX_COOLDOWN_SECONDS: u64 = 86_400;
@@ -281,6 +373,7 @@ pub(crate) struct Service {
     snapshot: Mutex<Snapshot>,
     snapshot_journal: Journal,
     state_journal: Journal,
+    outbox: Mutex<Outbox>,
 }
 
 impl Service {
@@ -296,6 +389,7 @@ impl Service {
             snapshot: Mutex::new(snapshot),
             snapshot_journal,
             state_journal: Journal::new(dir.join("admission-state.json")),
+            outbox: Mutex::new(Outbox::new()),
         })
     }
 
@@ -366,7 +460,48 @@ impl Service {
         self.state_journal
             .save(&state)
             .map_err(|err| err.to_string())?;
-        result.map_err(|err| err.to_string())
+        let events = result.map_err(|err| err.to_string())?;
+        if let Ok(mut outbox) = self.outbox.lock() {
+            for event in &events {
+                outbox.push(event, now);
+            }
+        }
+        Ok(events)
+    }
+
+    /// Buffered events and the source counts of every limited client.
+    pub(crate) fn observe(
+        &self,
+        request: &ObserveSessionsRequest,
+    ) -> Result<ObserveSessionsResponse, Status> {
+        let policies = self.snapshot().clients;
+        let state: State = self
+            .state_journal
+            .load()
+            .map_err(|_| Status::unavailable("admission state unreadable"))?;
+        let sessions = policies
+            .keys()
+            .map(|email| {
+                let client = state.clients.get(email);
+                let count = |len: usize| u32::try_from(len).unwrap_or(u32::MAX);
+                SessionObservation {
+                    email: email.clone(),
+                    active_sources: client.map_or(0, |client| count(client.sources.len())),
+                    blocked_sources: client.map_or(0, |client| count(client.blocks.len())),
+                }
+            })
+            .collect();
+        let outbox = self
+            .outbox
+            .lock()
+            .map_err(|_| Status::internal("admission state unavailable"))?;
+        let (events, truncated) = outbox.after(&request.boot_id, request.after_sequence);
+        Ok(ObserveSessionsResponse {
+            boot_id: outbox.boot_id.clone(),
+            events,
+            sessions,
+            truncated,
+        })
     }
 
     /// Runs for the life of the agent.
@@ -404,6 +539,13 @@ impl AgentState {
         Ok(ApplyAdmissionPolicyResponse {
             revision: self.admission.apply(request)?,
         })
+    }
+
+    pub(crate) fn observe_sessions(
+        &self,
+        request: ObserveSessionsRequest,
+    ) -> Result<ObserveSessionsResponse, Status> {
+        self.admission.observe(&request)
     }
 }
 
@@ -526,6 +668,120 @@ mod tests {
                 source: "198.51.100.1/32".into()
             }]
         );
+    }
+
+    #[test]
+    fn observe_reports_a_source_once_per_cooldown() {
+        let mut state = State::default();
+        let watch = policy(1, Mode::Observe);
+        let two = |at| online(&[("198.51.100.1", 1000), ("203.0.113.9", at)]);
+        state.observe("phone", &watch, &online(&[("198.51.100.1", 1000)]), 1000);
+        assert_eq!(
+            state
+                .observe("phone", &watch, &two(1005), 1005)
+                .events
+                .len(),
+            1
+        );
+        assert!(
+            state
+                .observe("phone", &watch, &two(1010), 1010)
+                .events
+                .is_empty()
+        );
+        // After the cooldown the same overlap is reported again.
+        let later = 1005 + watch.cooldown_seconds;
+        let changes = state.observe(
+            "phone",
+            &watch,
+            &online(&[
+                ("198.51.100.1", later as i64),
+                ("203.0.113.9", later as i64),
+            ]),
+            later,
+        );
+        assert_eq!(changes.events.len(), 1);
+    }
+
+    #[test]
+    fn the_outbox_numbers_events_without_addresses_and_resets_per_run() {
+        let mut outbox = Outbox::new();
+        for at in 0..3 {
+            outbox.push(
+                &Event::Evicted {
+                    email: "phone".into(),
+                    source: "198.51.100.1/32".into(),
+                },
+                1000 + at,
+            );
+        }
+        let boot = outbox.boot_id.clone();
+        let (events, truncated) = outbox.after(&boot, 1);
+        assert!(!truncated);
+        assert_eq!(
+            events.iter().map(|e| e.sequence).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert_eq!(
+            (
+                events[0].email.as_str(),
+                events[0].kind.as_str(),
+                events[0].occurred_at
+            ),
+            ("phone", "evicted", 1001)
+        );
+        // A cursor from another run reads everything buffered.
+        assert_eq!(outbox.after("old-run", 3).0.len(), 3);
+        for at in 0..OUTBOX_LIMIT as u64 {
+            outbox.push(
+                &Event::WouldEvict {
+                    email: "phone".into(),
+                    source: "198.51.100.1/32".into(),
+                },
+                at,
+            );
+        }
+        let (events, truncated) = outbox.after(&boot, 1);
+        assert!(truncated);
+        assert_eq!(events.len(), OUTBOX_LIMIT);
+        assert!(!outbox.after(&boot, outbox.dropped_through).1);
+    }
+
+    #[test]
+    fn observe_sessions_counts_only_limited_clients() {
+        let dir = state_dir("observe");
+        let service = Service::open(&dir);
+        service.apply(request(1, &[("phone", "enforce")])).unwrap();
+        let mut state = State::default();
+        state.observe(
+            "phone",
+            &policy(1, Mode::Enforce),
+            &online(&[("198.51.100.1", 1000), ("203.0.113.9", 1001)]),
+            1001,
+        );
+        state.observe(
+            "gone",
+            &policy(1, Mode::Enforce),
+            &online(&[("198.51.100.2", 1000)]),
+            1001,
+        );
+        service.state_journal.save(&state).unwrap();
+        let observed = service
+            .observe(&ObserveSessionsRequest {
+                boot_id: String::new(),
+                after_sequence: 0,
+            })
+            .unwrap();
+        assert_eq!(observed.boot_id, service.outbox.lock().unwrap().boot_id);
+        assert_eq!(
+            observed
+                .sessions
+                .iter()
+                .map(|s| (s.email.as_str(), s.active_sources, s.blocked_sources))
+                .collect::<Vec<_>>(),
+            vec![("phone", 1, 1)]
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

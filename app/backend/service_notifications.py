@@ -29,9 +29,17 @@ def _access_expired_current(conn, system, delivery):
                 and datetime.fromisoformat(row['expires_at']) <= datetime.now(timezone.utc))
 
 
+def _device_active(conn, system, delivery):
+    return bool(conn.execute("SELECT 1 FROM backend_devices WHERE id=? AND status='active'",
+                             (system['device_id'],)).fetchone())
+
+
 KINDS = {
     'access_expired': Kind(_access_expired_current,
                            lambda payload, title: f'Your access to {title} has expired.'),
+    'connection_evicted': Kind(_device_active, lambda payload, title: (
+        f"Device {payload['device']} connected to {payload['node']} from another network; "
+        'the earlier connection was disconnected.')),
 }
 
 

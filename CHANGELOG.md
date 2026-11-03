@@ -17,6 +17,16 @@
   reissue a device's VLESS key. Existing VLESS links keep working: the profile
   client moves to the default device unchanged. Database revision 17 cannot be
   read by older controllers.
+- Limit simultaneous networks per VLESS device (`connections.*` VPN policies:
+  off, observe or enforce), set for the installation and per profile in Telegram
+  and for the installation in Workstation. Nodes receive the limits through the
+  new `ApplyAdmissionPolicy` agent call, journal them and keep enforcing them
+  without the controller; a new network disconnects the device's oldest one for
+  a cooldown. Applying node settings enables Xray online statistics and the
+  routing API this needs. Owners are notified when a device is disconnected,
+  and administrators are alerted when one device is disconnected often (a
+  shared link). The controller reads events and per-device network counts with
+  the new `ObserveSessions` agent call and never stores addresses.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from telegram_client.backend import BackendError
 from telegram_client.routers import admin_connection_limits as limits
 from telegram_client.routers import admin_profiles as profiles
-from tests.test_telegram_admin_profiles_rich import ProfileRichTests
+from tests import test_telegram_admin_profiles_rich as profile_fixture
 
 DEFAULTS = {'connections.mode': 'off', 'connections.max_sources': 1,
             'connections.window_seconds': 120, 'connections.cooldown_seconds': 300}
@@ -19,6 +19,7 @@ class Policies:
         self.values = {'installation': {}, 'profile': {}}
         self.revisions = {'installation': {}, 'profile': {}}
         self.patches = []
+        self.delivery = []
 
     def listing(self, scope):
         keys = []
@@ -31,6 +32,8 @@ class Policies:
         return {'keys': keys}
 
     async def request(self, method, path, **kwargs):
+        if path == '/api/v1/connection-limits/nodes':
+            return {'items': self.delivery}
         scope = 'installation' if path.endswith('/installation') else 'profile'
         if method == 'PATCH':
             change = kwargs['body']['changes'][0]
@@ -45,7 +48,7 @@ class Policies:
 
 
 class ConnectionLimitScreenTests(IsolatedAsyncioTestCase):
-    setUp = ProfileRichTests.setUp
+    setUp = profile_fixture.ProfileRichTests.setUp
 
     async def press(self, handler, data, backend):
         self.query.data = data
@@ -105,6 +108,20 @@ class ConnectionLimitScreenTests(IsolatedAsyncioTestCase):
         self.assertEqual(limits.profile_section('en', 'p1', policies.listing('profile'))[0].lines,
                          ('Observe, up to 5 per device',))
 
+    async def test_installation_screen_names_nodes_without_the_current_limits(self):
+        policies = Policies()
+        backend = SimpleNamespace(request=AsyncMock(side_effect=policies.request))
+        screen, _ = await self.press(limits.installation_cb, 'connlimit', backend)
+        self.assertEqual(len(screen.sections), 2)
+        policies.delivery = [
+            {'node_key': 'a', 'title': 'Riga', 'flag': '🇱🇻', 'status': 'current'},
+            {'node_key': 'b', 'title': 'Berlin', 'flag': '', 'status': 'outdated'},
+            {'node_key': 'c', 'title': '', 'flag': '', 'status': 'unavailable'}]
+        screen, _ = await self.press(limits.installation_cb, 'connlimit', backend)
+        self.assertEqual(screen.sections[-1].lines, (
+            'Up to date: 1 of 3.', 'Berlin: update the node agent to enforce limits',
+            'c: unreachable, keeps the previous limits'))
+
     async def test_backend_errors_replace_the_choices(self):
         backend = SimpleNamespace(request=AsyncMock(side_effect=BackendError('backend_unavailable', 503)))
         screen, _ = await self.press(limits.installation_cb, 'connlimit:mode:enforce', backend)
@@ -112,3 +129,21 @@ class ConnectionLimitScreenTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(screen.lines), 1)
         screen, _ = await self.press(limits.profile_cb, 'pconnlimit:p1', backend)
         self.assertEqual(screen.sections, ())
+
+
+class ConnectionLimitNoticeTests(IsolatedAsyncioTestCase):
+    def test_link_sharing_alert_and_eviction_notification_are_localized(self):
+        from telegram_client.alert_delivery import alert_screen
+        from telegram_client.notifications import notification_content
+        for locale in ('en', 'ru'):
+            for observe in (False, True):
+                text = alert_screen({'locale': locale, 'event': {'kind': 'link_sharing', 'resolved': False,
+                    'at': '2026-11-03T10:00:00Z', 'payload': {'node_title': 'Riga', 'profile': 'Alice',
+                    'device': 'Phone', 'events': 5, 'hours': 24, 'observe': observe}}}).plain()
+                self.assertNotIn('alerts.', text)
+                self.assertIn('Phone', text)
+                self.assertIn('Alice', text)
+            title, lines = notification_content({'notification_kind': 'connection_evicted', 'service_title': 'VPN',
+                'payload': {'device': 'Phone', 'node': 'Riga'}}, locale)
+            self.assertNotIn('notification.', title + ' '.join(lines))
+            self.assertIn('Riga', lines[-1])

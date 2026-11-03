@@ -47,6 +47,20 @@ def _choices(locale, field, prefix, selected):
         style='primary' if selected == value else None) for value in (MODES if field == 'mode' else SOURCE_CHOICES))
 
 
+def delivery_section(locale, delivery):
+    """Which nodes enforce the current limits; nodes that never had one are left out."""
+    items = delivery.get('items', ())
+    if not items:
+        return ()
+    current = sum(item['status'] == 'current' for item in items)
+    lines = [tr(locale, 'connlimit.nodes_current', current=current, total=len(items))]
+    for item in items:
+        if item['status'] != 'current':
+            name = ' '.join(part for part in (item.get('flag'), item.get('title') or item['node_key']) if part)
+            lines.append(tr(locale, 'connlimit.node.' + item['status'], node=name))
+    return (Section(tr(locale, 'connlimit.nodes'), tuple(lines)),)
+
+
 async def _show(query, bot, backend, state, profile_id=None):
     from .admin_profiles import _profile_error
     from .admin_settings import _friendly_error
@@ -82,6 +96,9 @@ async def _show(query, bot, backend, state, profile_id=None):
                     callback_data=f'{prefix}:{name}:inherit', style='primary' if current['value'] is None else None)
                 rows = ((inherit,), _choices(locale, name, prefix, current['value']))
             sections += (Section(tr(locale, title), rows=rows),)
+        if profile_id is None:
+            sections += delivery_section(locale, await backend.request(
+                'GET', '/api/v1/connection-limits/nodes', telegram_user_id=query.from_user.id))
         lines = (tr(locale, 'connlimit.hint' if profile_id is None else 'connlimit.profile_hint'),
                  tr(locale, 'connlimit.timing', window=_key(installation, 'connections.window_seconds')['effective'],
                     cooldown=_key(installation, 'connections.cooldown_seconds')['effective']))

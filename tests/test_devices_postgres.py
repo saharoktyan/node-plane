@@ -53,10 +53,18 @@ class DevicesPostgresTests(unittest.TestCase):
 
         class Driver:
             calls = []
+            events = []
 
             def apply_admission_policy(self, node_key, revision, clients):
                 self.calls.append((node_key, revision, clients))
                 return revision
+
+            def observe_sessions(self, node_key, boot_id, after_sequence):
+                email = clients[0]['email'] if (clients := self.calls[-1][2]) else ''
+                return {'boot_id': 'boot', 'truncated': False,
+                        'sessions': [{'email': email, 'active_sources': 1, 'blocked_sources': 1}],
+                        'events': [{'sequence': n, 'email': email, 'kind': 'evicted', 'occurred_at': 1}
+                                   for n in self.events]}
 
         driver = Driver()
         ConnectionLimits(self.db, driver).sync()
@@ -67,6 +75,18 @@ class DevicesPostgresTests(unittest.TestCase):
         self.assertEqual(driver.calls, [('node', 1, [{'email': email, 'mode': 'enforce', 'max_sources': 1,
                                                       'window_seconds': 120, 'cooldown_seconds': 300}])])
         self.assertEqual(status, 'current')
+        # Observations and events land on PostgreSQL; resent events are stored once.
+        driver.events = [1, 2]
+        ConnectionLimits(self.db, driver).sync()
+        ConnectionLimits(self.db, driver).sync()
+        with self.db.connect() as conn:
+            observed = conn.execute('SELECT active_sources,blocked_sources FROM backend_vpn_session_observations'
+                                    ).fetchone()
+            self.assertEqual((observed['active_sources'], observed['blocked_sources']), (1, 1))
+            # Events from 1970 are past the retention window and removed again.
+            self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_admission_events').fetchone()['n'], 0)
+            self.assertEqual(conn.execute("SELECT events_sequence FROM backend_node_admission").fetchone()
+                             ['events_sequence'], 2)
 
     def test_concurrent_custom_devices_share_parent_revision_fence(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')

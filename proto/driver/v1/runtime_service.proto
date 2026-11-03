@@ -18,6 +18,7 @@ service RuntimeService {
   rpc GetBackendXrayPublic(GetBackendXrayPublicRequest) returns (BackendXrayPublicResult);
   rpc RefreshAwgConfig(RefreshAwgConfigRequest) returns (RefreshAwgConfigResponse);
   rpc ApplyAdmissionPolicy(ApplyAdmissionPolicyRequest) returns (ApplyAdmissionPolicyResponse);
+  rpc ObserveSessions(ObserveSessionsRequest) returns (ObserveSessionsResponse);
 }
 
 message BackendNodeActionRequest {
@@ -104,4 +105,37 @@ message ApplyAdmissionPolicyRequest {
 message ApplyAdmissionPolicyResponse {
   string node_key = 1;
   uint64 revision = 2;
+}
+
+// What the admission loop saw, without addresses (VPN plan, section 5).
+// Events are buffered in agent memory and numbered within one agent run
+// (`boot_id`); a new run starts again from 1. Pass the last seen boot id and
+// sequence; a different boot id returns everything buffered.
+message AdmissionEvent {
+  uint64 sequence = 1;
+  string email = 2;
+  // "evicted" or "would_evict".
+  string kind = 3;
+  // Unix seconds.
+  int64 occurred_at = 4;
+}
+
+message SessionObservation {
+  string email = 1;
+  uint32 active_sources = 2;
+  uint32 blocked_sources = 3;
+}
+
+message ObserveSessionsRequest {
+  string boot_id = 1;
+  uint64 after_sequence = 2;
+  string node_key = 3;
+}
+
+message ObserveSessionsResponse {
+  string boot_id = 1;
+  repeated AdmissionEvent events = 2;
+  repeated SessionObservation sessions = 3;
+  bool truncated = 4;
+  string node_key = 5;
 }

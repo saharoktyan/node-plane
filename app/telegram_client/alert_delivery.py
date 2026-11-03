@@ -39,6 +39,10 @@ def alert_screen(delivery):
             lines.append(tr(locale, 'alerts.value.load_high', value=measured, cpus=payload.get('cpus', '—')))
         else:
             lines.append(tr(locale, 'alerts.value', value=measured))
+    if event['kind'] == 'link_sharing':
+        lines.append(tr(locale, 'alerts.link_sharing.observe' if payload.get('observe') else 'alerts.link_sharing',
+                        profile=payload.get('profile', '—'), device=payload.get('device', '—'),
+                        events=payload.get('events', '—'), hours=payload.get('hours', '—')))
     if event['kind'] == 'cpu_high' and not event['resolved']:
         lines.append(tr(locale, 'alerts.severity.' + payload.get('severity', 'warning')))
     return Screen(
