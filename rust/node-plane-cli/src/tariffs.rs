@@ -144,9 +144,20 @@ pub fn expiry_label(expiry: &str) -> &'static str {
     }
 }
 
-/// A tariff error code in the bot's words.
+/// Days an administrator may extend a renewal by: the tariff term, or
+/// the bot's presets without one.
+pub fn renewal_days(request: &Value) -> Vec<u64> {
+    match request["tariff"]["duration_days"].as_u64() {
+        Some(term) => vec![term],
+        None => TERMS.to_vec(),
+    }
+}
+
+/// A tariff or renewal error code in the bot's words.
 pub fn error_text(code: &str) -> Option<&'static str> {
     Some(match code {
+        "renewal_decided" => "The request was already decided.",
+        "renewal_days_required" => "Choose how many days to extend by.",
         "tariff_exists" => "A tariff with this name already exists.",
         "tariff_in_use" => "The tariff is assigned to profiles. Assign them another tariff first.",
         "tariff_without_term" => "This tariff has no access term.",

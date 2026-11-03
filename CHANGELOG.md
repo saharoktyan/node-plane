@@ -61,6 +61,11 @@
   assigned: keep, start or extend the term (renewal), optionally replacing the
   profile's nodes. Backups include tariffs (format v7). Database revision 22
   cannot be read by older controllers.
+- Let members ask to extend access with a term from their profile card in
+  Telegram. Administrators are notified and decide under Requests in
+  Telegram or on the profile card in Workstation: extend by the tariff term
+  or by 7 to 365 days, or decline; the owner is notified either way.
+  Database revision 23 adds the requests, which are not backed up.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

@@ -797,8 +797,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                // Edit, Limits, Tariff, Traffic when collected, and Freeze and Delete for members.
+                // Edit, Limits, Tariff, Renewal while requested, Traffic when collected,
+                // and Freeze and Delete for members.
                 count += 3
+                    + usize::from(card["_summary"]["renewal"]["status"] == "pending")
                     + usize::from(card["_summary"]["traffic"].is_object())
                     + 2 * usize::from(card["_account"]["role"] != "admin");
             }
@@ -1152,6 +1154,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 buttons.push(("Edit", Control::AccessEdit));
                 buttons.push(("Limits", Control::AccessLimits));
                 buttons.push(("Tariff", Control::AccessTariff));
+                if card["_summary"]["renewal"]["status"] == "pending" {
+                    buttons.push(("Renewal", Control::AccessRenewal));
+                }
                 if card["_summary"]["traffic"].is_object() {
                     buttons.push(("Traffic", Control::AccessTraffic));
                 }
@@ -1270,6 +1275,12 @@ fn profile_details(card: &serde_json::Value) -> Vec<String> {
     )];
     if let Some(count) = card["_summary"]["node_count"].as_u64() {
         lines.push(format!("Servers: {count}"));
+    }
+    if let Some(tariff) = card["_summary"]["tariff"]["title"].as_str() {
+        lines.push(format!("Tariff: {tariff}"));
+    }
+    if card["_summary"]["renewal"]["status"] == "pending" {
+        lines.push("Renewal requested".into());
     }
     let operation = &card["operation"];
     if let Some(status) = operation["status"].as_str() {

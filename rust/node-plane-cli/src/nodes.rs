@@ -628,6 +628,10 @@ async fn tariff_view(
             "summary": get(format!("/api/v1/profiles/{profile}/summary")).await?,
             "applied": matches!(command, Command::TariffAssign(..)),
         }),
+        // A decision answers with the profile; show the decided request.
+        Command::RenewalApprove(id, ..) | Command::RenewalReject(id) => {
+            get(format!("/api/v1/renewal-requests/{id}")).await?
+        }
         _ => value,
     })
 }

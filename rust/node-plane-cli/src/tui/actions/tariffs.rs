@@ -1,10 +1,10 @@
 //! Tariffs in Workstation: the catalog under Policies, one tariff, and the
-//! tariff of one profile opened from its card.
+//! tariff and renewal request of one profile opened from its card.
 use super::super::*;
 use crate::controller::{Command, TariffDraft};
 use crate::tariffs::{
     access_label, expiry_hint, expiry_label, limit_lines, next_expiry, next_term, region_chosen,
-    term_label, toggle_all, toggle_region,
+    renewal_days, term_label, toggle_all, toggle_region,
 };
 
 impl App {
@@ -35,12 +35,40 @@ impl App {
         self.controller_command(Command::TariffChoices(id));
     }
 
+    pub(in crate::tui) fn open_renewal(&mut self, id: uuid::Uuid) {
+        if !self.actions_enabled() {
+            return;
+        }
+        let profile = self.form.saved.as_ref().map(|p| p.id);
+        if self.controller.profile != profile {
+            self.controller = crate::controller::Browser {
+                profile,
+                ..Default::default()
+            };
+        }
+        self.controller_navigation_revision = self.controller_navigation_revision.wrapping_add(1);
+        self.controller.scope = None;
+        self.controller.tariff_assign = None;
+        self.controller.renewal = Some(serde_json::json!({"id":id}));
+        self.controller.selected = 0;
+        self.controller_viewport.set(0);
+        self.controller_section = Some(ControllerSection::Policies);
+        self.screen = Screen::Controller;
+        self.quick_focus = false;
+        self.controller_sidebar = false;
+        self.error.clear();
+        self.controller_command(Command::Renewal(id));
+    }
+
     /// Whether a tariff view is shown instead of the section it opened from.
     pub(in crate::tui) fn tariff_view_open(&self) -> bool {
         let state = &self.controller;
         state.scope.is_none()
             && state.defaults_input.is_none()
-            && (state.tariff_assign.is_some() || state.tariff.is_some() || state.tariffs.is_some())
+            && (state.renewal.is_some()
+                || state.tariff_assign.is_some()
+                || state.tariff.is_some()
+                || state.tariffs.is_some())
     }
 
     fn open_tariff_id(&self) -> Option<(uuid::Uuid, u64)> {
@@ -170,6 +198,27 @@ impl App {
                     draft.key,
                 ))
             }
+            Control::ControllerRenewalApprove(_) | Control::ControllerRenewalReject => {
+                let renewal = state.renewal.as_ref().filter(|r| r["status"] == "pending");
+                let Some(id) = renewal
+                    .and_then(|r| r["id"].as_str())
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                else {
+                    return true;
+                };
+                match control {
+                    Control::ControllerRenewalApprove(days) => {
+                        let request = renewal.unwrap();
+                        let revision = request["profile_revision"].as_u64();
+                        revision
+                            .filter(|_| renewal_days(request).contains(&days))
+                            .map(|revision| {
+                                Command::RenewalApprove(id, days, revision, uuid::Uuid::new_v4())
+                            })
+                    }
+                    _ => Some(Command::RenewalReject(id)),
+                }
+            }
             _ => return false,
         };
         if let Some(command) = command {
@@ -189,6 +238,12 @@ impl App {
             if let Some((id, _)) = self.open_tariff_id() {
                 self.controller_command(Command::Tariff(id));
             }
+            return true;
+        }
+        if state.renewal.take().is_some() {
+            self.controller_section = None;
+            self.screen = Screen::Access;
+            self.controller.selected = 0;
             return true;
         }
         if state.tariff_assign.is_some() {
@@ -238,6 +293,9 @@ impl App {
     pub(in crate::tui) fn tariff_view(&self) -> (String, Vec<(String, Control)>) {
         let state = &self.controller;
         let back = ("Back".to_string(), Control::ControllerBack);
+        if let Some(request) = &state.renewal {
+            return renewal_view(request, back);
+        }
         if let Some(open) = &state.tariff_assign {
             return self.profile_tariff_view(open, back);
         }
@@ -401,4 +459,49 @@ impl App {
         controls.push(back);
         (text, controls)
     }
+}
+
+/// A renewal request and its decision, as the bot shows it.
+fn renewal_view(
+    request: &serde_json::Value,
+    back: (String, Control),
+) -> (String, Vec<(String, Control)>) {
+    if !request["status"].is_string() {
+        return ("Please wait".into(), vec![back]);
+    }
+    let day = |value: &serde_json::Value| {
+        value
+            .as_str()
+            .map_or("—".to_string(), |v| v.chars().take(10).collect())
+    };
+    let mut text = format!(
+        "Renewal request · {}\nAccess until: {}\nTariff: {}\nRequested: {}",
+        request["display_name"].as_str().unwrap_or(""),
+        day(&request["profile_expires_at"]),
+        request["tariff"]["title"].as_str().unwrap_or("No tariff"),
+        request["created_at"].as_str().map_or(String::new(), |at| at
+            .chars()
+            .take(16)
+            .collect::<String>()
+            .replace('T', " "))
+    );
+    let mut controls = Vec::new();
+    match request["status"].as_str() {
+        Some("pending") => {
+            for days in renewal_days(request) {
+                controls.push((
+                    format!("Extend by {days} days"),
+                    Control::ControllerRenewalApprove(days),
+                ));
+            }
+            controls.push(("Decline".into(), Control::ControllerRenewalReject));
+        }
+        Some("approved") => text.push_str(&format!(
+            "\n\nAccess extended until {}.",
+            day(&request["expires_at"])
+        )),
+        _ => text.push_str("\n\nThe request was declined."),
+    }
+    controls.push(back);
+    (text, controls)
 }

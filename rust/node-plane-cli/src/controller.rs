@@ -74,6 +74,11 @@ pub enum Command {
     TariffChoices(String),
     /// Assigns, relinks or removes a profile's tariff at a profile revision.
     TariffAssign(String, Value, u64, Uuid),
+    /// A renewal request with its profile's term, revision and tariff.
+    Renewal(Uuid),
+    /// Extends by days at the profile revision seen in the request.
+    RenewalApprove(Uuid, u64, u64, Uuid),
+    RenewalReject(Uuid),
     Backups,
     BackupCatalog(usize),
     BackupDetail(Uuid),
@@ -175,6 +180,24 @@ impl Command {
             Self::TariffDelete(id, _) => {
                 (Method::DELETE, format!("/api/v1/tariffs/{id}"), None, None)
             }
+            Self::Renewal(id) => (
+                Method::GET,
+                format!("/api/v1/renewal-requests/{id}"),
+                None,
+                None,
+            ),
+            Self::RenewalApprove(id, days, _, key) => (
+                Method::POST,
+                format!("/api/v1/renewal-requests/{id}/approve"),
+                Some(json!({"days":days})),
+                Some(*key),
+            ),
+            Self::RenewalReject(id) => (
+                Method::POST,
+                format!("/api/v1/renewal-requests/{id}/reject"),
+                None,
+                None,
+            ),
             Self::TariffAssign(profile, body, _, key) => (
                 Method::PUT,
                 format!("/api/v1/profiles/{profile}/tariff"),
@@ -458,7 +481,8 @@ pub fn tariff_revision(command: &Command) -> Option<u64> {
     match command {
         Command::TariffSave(_, _, revision)
         | Command::TariffDelete(_, revision)
-        | Command::TariffAssign(_, _, revision, _) => Some(*revision),
+        | Command::TariffAssign(_, _, revision, _)
+        | Command::RenewalApprove(_, _, revision, _) => Some(*revision),
         _ => None,
     }
 }
@@ -509,6 +533,8 @@ pub struct Browser {
     /// A profile's tariff being chosen: `tariffs`, `profile`, `summary`.
     pub tariff_assign: Option<Value>,
     pub tariff_draft: Option<TariffDraft>,
+    /// The renewal request being decided, opened from a profile card.
+    pub renewal: Option<Value>,
     pub versions: Option<Value>,
     pub components: Option<Value>,
     pub update_result: Option<Value>,
@@ -740,6 +766,14 @@ impl Browser {
                 if !matches!(&command, Command::TariffSave(..)) {
                     self.selected = 0;
                 }
+            }
+            Command::Renewal(_) | Command::RenewalApprove(..) | Command::RenewalReject(_) => {
+                // A late answer after the request was closed.
+                if self.renewal.is_none() {
+                    return;
+                }
+                self.renewal = Some(value);
+                self.selected = 0;
             }
             Command::TariffChoices(ref profile) | Command::TariffAssign(ref profile, ..) => {
                 // A late answer for a profile that is no longer shown.

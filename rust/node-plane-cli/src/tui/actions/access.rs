@@ -289,6 +289,13 @@ impl App {
                 self.open_profile_tariff(id, title);
                 None
             }
+            Control::AccessRenewal => {
+                let card = self.access.card.as_ref()?;
+                let id = card["_summary"]["renewal"]["id"].as_str()?;
+                let id = uuid::Uuid::parse_str(id).ok()?;
+                self.open_renewal(id);
+                None
+            }
             Control::AccessDeviceConfirm => {
                 if let Some(devices) = &self.access.devices
                     && let (Some(card), Some(key)) =
@@ -680,6 +687,7 @@ impl App {
                         | Control::AccessDeviceConfirm
                         | Control::AccessLimits
                         | Control::AccessTariff
+                        | Control::AccessRenewal
                         | Control::AccessTraffic
                         | Control::AccessTrafficPage(_)
                         | Control::AccessDevicePage(_)

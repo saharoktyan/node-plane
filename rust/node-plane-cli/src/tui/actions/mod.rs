@@ -299,6 +299,7 @@ impl App {
             | Control::AccessDeviceConfirm
             | Control::AccessLimits
             | Control::AccessTariff
+            | Control::AccessRenewal
             | Control::AccessTraffic
             | Control::AccessTrafficPage(..)
             | Control::AccessDevicePage(..)
@@ -379,6 +380,8 @@ impl App {
             | Control::ControllerTariffExpiry
             | Control::ControllerTariffAccess
             | Control::ControllerTariffApply
+            | Control::ControllerRenewalApprove(..)
+            | Control::ControllerRenewalReject
             | Control::ControllerQuotaAnchor
             | Control::ControllerQuotaTimezone
             | Control::ControllerPolicyToggle(..)

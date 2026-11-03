@@ -90,6 +90,10 @@ A tariff is a named set of limits with an access term and nodes. Create and edit
 
 Editing a tariff never changes a profile's term or nodes. Removing a tariff from a profile stops its limits and keeps the term and nodes. A tariff assigned to profiles cannot be deleted. Administrators' profiles may have a tariff for its limits but keep their unlimited term and access to every node.
 
+### Renewal requests
+
+A member whose access has a term sees **Extend access** on their profile card in Telegram. The request goes to administrators as a notice with the decision buttons and waits under **Requests → Renewal requests**; in Workstation a profile with a pending request shows **Renewal** on its card. An administrator extends by the profile's tariff term or, without one, by 7 to 365 days, or declines. The term is added after the remaining time, or from now when access has expired. One request per profile waits at a time, and the owner gets a service notification with the outcome. Requests are not part of backups.
+
 ## Roles, blocking and freezing
 
 An administrator role grants management permissions. Change a role only for someone who should manage the installation.

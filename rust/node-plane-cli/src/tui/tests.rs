@@ -9101,6 +9101,52 @@ fn profile_tariff_is_chosen_with_its_term_and_nodes_and_back_returns_to_the_card
 }
 
 #[test]
+fn renewal_is_decided_from_the_profile_card_with_offered_days() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    let id = "22222222-2222-4222-8222-222222222222";
+    app.access.card = Some(serde_json::json!({"id":"p1","display_name":"Anna",
+        "_summary":{"renewal":{"id":id,"status":"pending"}}}));
+    app.activate(Control::AccessRenewal);
+    assert!(matches!(app.screen, Screen::Controller));
+    assert!(matches!(scoped_request(&mut app), Command::Renewal(_)));
+    let request = serde_json::json!({"id":id,"status":"pending","profile_revision":6,
+        "display_name":"Anna","tariff":{"title":"Basic","duration_days":30},
+        "created_at":"2026-11-03T10:00:00+00:00"});
+    let uuid = uuid::Uuid::parse_str(id).unwrap();
+    app.controller.apply(Command::Renewal(uuid), request);
+    assert!(
+        app.controller_controls()
+            == [
+                Control::ControllerRenewalApprove(30),
+                Control::ControllerRenewalReject,
+                Control::ControllerBack
+            ]
+    );
+    // Days that are not offered send nothing.
+    app.activate(Control::ControllerRenewalApprove(45));
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::ControllerRenewalApprove(30));
+    assert!(matches!(
+        scoped_request(&mut app),
+        Command::RenewalApprove(_, 30, 6, _)
+    ));
+    app.controller.apply(
+        Command::RenewalApprove(uuid, 30, 6, uuid::Uuid::new_v4()),
+        serde_json::json!({"id":id,"status":"approved","expires_at":"2027-01-01T00:00:00+00:00"}),
+    );
+    assert!(
+        app.tariff_view()
+            .0
+            .contains("Access extended until 2027-01-01.")
+    );
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Access));
+    assert!(app.controller.renewal.is_none());
+}
+
+#[test]
 fn tariff_card_changes_term_nodes_and_limits_and_back_returns_to_it() {
     use crate::controller::Command;
     use crate::policy_scope::Scope;

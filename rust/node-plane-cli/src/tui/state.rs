@@ -118,6 +118,8 @@ pub(super) enum Control {
     ControllerTariffExpiry,
     ControllerTariffAccess,
     ControllerTariffApply,
+    ControllerRenewalApprove(u64),
+    ControllerRenewalReject,
     ControllerQuotaAnchor,
     ControllerQuotaTimezone,
     ControllerAlerts,
@@ -261,6 +263,7 @@ pub(super) enum Control {
     /// Limits of the open profile card or device card.
     AccessLimits,
     AccessTariff,
+    AccessRenewal,
     /// Traffic by server of the open profile card, and its pages.
     AccessTraffic,
     AccessTrafficPage(bool),
