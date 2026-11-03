@@ -84,7 +84,9 @@ class OperationRepository:
         if scoped_targets is not None:
             targets = targets & scoped_targets
         now = datetime.now(timezone.utc)
-        active = not profile['frozen'] and (profile['expires_at'] is None or datetime.fromisoformat(profile['expires_at']) > now)
+        from .quotas import blocked
+        active = (not profile['frozen'] and (profile['expires_at'] is None or datetime.fromisoformat(profile['expires_at']) > now)
+                  and not blocked(conn, profile_id))
         conn.execute("""INSERT INTO backend_profile_identities(profile_id, xray_uuid, xray_short_id)
             VALUES (?, ?, ?) ON CONFLICT(profile_id) DO NOTHING""", (profile_id, str(uuid4()), secrets.token_hex(8)))
         identity = conn.execute('SELECT xray_uuid, xray_short_id FROM backend_profile_identities WHERE profile_id = ?', (profile_id,)).fetchone()

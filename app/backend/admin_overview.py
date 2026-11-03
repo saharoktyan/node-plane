@@ -21,7 +21,9 @@ class AdminOverviewService:
             from .access_requests import AccessRequestService
             requests_enabled = AccessRequestService._policy(conn)['enabled']
             nodes = conn.execute('SELECT key, title, region, flag, enabled FROM backend_nodes ORDER BY region, title, key').fetchall()
-            profiles = conn.execute('''SELECT p.frozen, p.expires_at, d.profile_id AS deleting
+            from .quotas import BLOCKED_SQL
+            profiles = conn.execute(f'''SELECT p.frozen, p.expires_at, d.profile_id AS deleting,
+                {BLOCKED_SQL} AS quota_blocked
                 FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id''').fetchall()
             pending_requests = conn.execute("SELECT COUNT(*) AS n FROM backend_access_requests WHERE status = 'pending'").fetchone()['n']
             problem_keys = {row['node_key'] for row in conn.execute('''
@@ -45,7 +47,7 @@ class AdminOverviewService:
             meta = {row['key']: row['value'] for row in conn.execute(
                 "SELECT key,value FROM schema_meta WHERE key IN ('updates_update_available','updates_remote_version','updates_last_checked_at','updates_last_status','updates_branch')").fetchall()}
         now = datetime.now(timezone.utc)
-        active = sum(not p['deleting'] and not p['frozen'] and
+        active = sum(not p['deleting'] and not p['frozen'] and not p['quota_blocked'] and
             (p['expires_at'] is None or datetime.fromisoformat(p['expires_at']) > now)
             for p in profiles)
         return {

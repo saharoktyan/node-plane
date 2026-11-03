@@ -34,9 +34,32 @@ def _device_active(conn, system, delivery):
                              (system['device_id'],)).fetchone())
 
 
+def _period_open(conn, system, delivery):
+    # Dedup keys of quota events end with the period they belong to.
+    period_id = system['dedup_key'].rsplit(':', 1)[-1]
+    return conn.execute('SELECT 1 FROM backend_quota_periods WHERE id=? AND closed_at IS NULL',
+                        (period_id,)).fetchone() is not None
+
+
+def _quota_lifted(conn, system, delivery):
+    from .quotas import blocked
+    return _period_open(conn, system, delivery) and not blocked(conn, system['profile_id'])
+
+
+def _gigabytes(value):
+    return f'{value / 10 ** 9:.1f} GB'
+
+
 KINDS = {
     'access_expired': Kind(_access_expired_current,
                            lambda payload, title: f'Your access to {title} has expired.'),
+    'quota_warning': Kind(_period_open, lambda payload, title: (
+        f"You have used {payload['percent']}% of your {title} traffic: "
+        f"{_gigabytes(payload['used_bytes'])} of {_gigabytes(payload['limit_bytes'])}.")),
+    'quota_exhausted': Kind(_period_open, lambda payload, title: (
+        f"Your {title} traffic of {_gigabytes(payload['limit_bytes'])} is used up"
+        + ('; access is suspended until the next reset.' if payload['suspended'] else '.'))),
+    'quota_reset': Kind(_quota_lifted, lambda payload, title: f'Your {title} traffic was reset; access is restored.'),
     'connection_evicted': Kind(_device_active, lambda payload, title: (
         f"Device {payload['device']} connected to {payload['node']} from another network; "
         'the earlier connection was disconnected.')),

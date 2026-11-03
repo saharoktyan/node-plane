@@ -280,6 +280,8 @@ class MigrationsPostgresTests(unittest.TestCase):
             # Current code records operations; r0017 later finds the table in place.
             from backend.device_credentials import create_schema
             create_schema(conn)
+            from backend.quotas import create_schema as create_quota_schema
+            create_quota_schema(conn)
             actor = Actor(Principal('migration',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin)
             OperationRepository.record(conn,actor,profile,set())
             conn.execute('''INSERT INTO backend_traffic_usage
@@ -349,6 +351,8 @@ class MigrationsPostgresTests(unittest.TestCase):
             # Current code records operations; r0017 later finds the table in place.
             from backend.device_credentials import create_schema
             create_schema(conn)
+            from backend.quotas import create_schema as create_quota_schema
+            create_quota_schema(conn)
             OperationRepository.record(conn,Actor(Principal('local',PrincipalKind.SERVICE,ADMIN_PERMISSIONS),admin),profile,set())
             task = dict(conn.execute('SELECT * FROM backend_operation_tasks LIMIT 1').fetchone())
             conn.execute('DELETE FROM backend_schema_revisions')

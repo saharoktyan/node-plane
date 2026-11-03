@@ -38,6 +38,8 @@ class TrafficPostgresTests(unittest.TestCase):
             DeviceRepository.create_schema(conn)
             from backend.device_credentials import create_schema
             create_schema(conn)
+            from backend.quotas import create_schema as create_quota_schema
+            create_quota_schema(conn)
             conn.execute('CREATE TABLE backend_system_settings (key TEXT PRIMARY KEY, value TEXT)')
             conn.execute("INSERT INTO backend_accounts VALUES ('admin')")
             conn.execute("INSERT INTO backend_nodes VALUES ('node')")

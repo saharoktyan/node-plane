@@ -79,6 +79,9 @@ class ConfigIssuanceService:
             raise AccessDenied('profile_frozen')
         if profile['expires_at'] and datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc):
             raise AccessDenied('profile_expired')
+        from .quotas import blocked
+        if blocked(conn, profile_id):
+            raise AccessDenied('quota_exhausted')
         if node is None or not node['enabled'] or node['desired_revision'] != node['applied_revision']:
             raise AccessDenied('node_settings_pending', 409)
         if conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key = ? AND status IN ('awaiting_executor', 'running', 'blocked')", (node_key,)).fetchone():

@@ -217,6 +217,37 @@ class DeviceNameInput(BaseModel):
     display_name: Annotated[StrictStr, Field(min_length=1, max_length=256)]
 
 
+class QuotaPeriodOutput(BaseModel):
+    id: UUID
+    start: str
+    end: str | None
+    uplink_bytes: int
+    downlink_bytes: int
+    used_bytes: int
+    blocked: bool
+    warned_at: str | None
+    exhausted_at: str | None
+    closed_at: str | None
+    close_reason: str | None
+
+
+class QuotaOutput(BaseModel):
+    limit_bytes: int | None
+    reset: Literal['calendar_month', 'monthly_anchor', 'interval', 'none']
+    interval_days: int
+    on_exhausted: Literal['freeze', 'notify']
+    timezone: str
+    anchor_at: str | None
+    anchor_revision: int
+    period: QuotaPeriodOutput | None
+    history: list[QuotaPeriodOutput]
+
+
+class QuotaAnchorInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    anchor_at: Annotated[StrictStr, Field(min_length=10, max_length=64)]
+
+
 class DeviceRotateInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     protocol: Literal['xray', 'awg'] = 'xray'
@@ -265,6 +296,8 @@ class MemberProfileSummary(BaseModel):
     display_name: str
     frozen: bool
     expired: bool
+    # Access suspended until the traffic quota resets.
+    quota_suspended: bool = False
     expires_at: str | None
     created_at: str | None
     nodes: list[MemberProfileNode]
@@ -1135,6 +1168,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT id FROM backend_devices LIMIT 1').fetchone()
                 conn.execute('SELECT device_id,runtime_name FROM backend_device_credentials LIMIT 1').fetchone()
                 conn.execute('SELECT slot_id,runtime_name FROM backend_retired_peers LIMIT 1').fetchone()
+                conn.execute('SELECT id,blocked FROM backend_quota_periods LIMIT 1').fetchone()
+                conn.execute('SELECT profile_id,anchor_at FROM backend_quota_state LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_nodes LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_grants LIMIT 1').fetchone()
                 conn.execute('SELECT command_key FROM backend_profile_commands LIMIT 1').fetchone()
@@ -1568,6 +1603,26 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def profile(profile_id: UUID, response: Response, current=Depends(actor)):
         result = profiles.get(current, str(profile_id))
         response.headers['ETag'] = '"' + str(result['desired_revision']) + '"'
+        return result
+
+    @app.get('/api/v1/profiles/{profile_id}/quota', response_model=QuotaOutput)
+    def profile_quota(profile_id: UUID, response: Response, current=Depends(actor)):
+        result = profiles.quota(current, str(profile_id))
+        response.headers['ETag'] = '"' + str(result['anchor_revision']) + '"'
+        return result
+
+    @app.post('/api/v1/profiles/{profile_id}/quota/reset', response_model=QuotaOutput)
+    def reset_profile_quota(profile_id: UUID, request: Request,
+                            command_key: Annotated[str, Header(alias='Idempotency-Key')], current=Depends(actor)):
+        from .quotas import QuotaService
+        return QuotaService(db).reset(current, header(request, 'Idempotency-Key'), str(profile_id))
+
+    @app.patch('/api/v1/profiles/{profile_id}/quota', response_model=QuotaOutput)
+    def move_profile_quota_anchor(profile_id: UUID, body: QuotaAnchorInput, request: Request,
+                                  response: Response, current=Depends(actor)):
+        from .quotas import QuotaService
+        result = QuotaService(db).move_anchor(current, str(profile_id), body.anchor_at, revision_header(request))
+        response.headers['ETag'] = '"' + str(result['anchor_revision']) + '"'
         return result
 
     @app.get('/api/v1/profiles/{profile_id}/grants', response_model=GrantPage)

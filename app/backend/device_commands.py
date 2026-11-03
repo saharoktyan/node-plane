@@ -80,6 +80,9 @@ class DeviceCommands:
                     raise AccessDenied('profile_frozen')
                 if profile['expires_at'] and datetime.fromisoformat(profile['expires_at'])<=datetime.now(timezone.utc):
                     raise AccessDenied('profile_expired')
+                from .quotas import blocked
+                if blocked(conn,profile_id):
+                    raise AccessDenied('quota_exhausted')
                 # The profile row lock above serializes concurrent creations.
                 limit=device_limit(conn,profile_id)
                 active=conn.execute("SELECT COUNT(*) AS n FROM backend_devices WHERE profile_id=? AND status='active'",

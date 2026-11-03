@@ -352,6 +352,13 @@ class Worker:
         except Exception:
             import logging
             logging.getLogger(__name__).warning('Alert monitor requires attention')
+        from .quotas import QuotaService
+        try:
+            # Before traffic: a finished period closes before new usage accrues.
+            QuotaService(self.executor.db).scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Traffic quotas require attention')
         from .traffic import TrafficService
         try:
             TrafficService(self.executor.db, GrpcIntentDriver(self.channel, timeout=10)).scheduled()

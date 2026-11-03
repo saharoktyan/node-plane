@@ -64,6 +64,19 @@ def choice(*values):
 
 mode = choice(*MODES)
 
+
+def time_zone(value):
+    """An IANA time zone name known to the host; UTC needs no database."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        raise ValueError()
+    if value != 'UTC':
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            raise ValueError() from None
+    return value
+
 # Devices of a profile, shared by every protocol. Checked when a device is
 # created; existing devices above a lowered limit stay (plan, section 4.3).
 register(PolicyKey('devices.max', frozenset({'installation', 'profile'}), frozenset({'global'}),
@@ -78,6 +91,17 @@ register(PolicyKey('connections.window_seconds', frozenset({'installation'}), fr
                    integer(30, 3600), default=120, protocols=frozenset({'xray'})))
 register(PolicyKey('connections.cooldown_seconds', frozenset({'installation'}), frozenset({'global'}),
                    integer(0, 86400), default=300, protocols=frozenset({'xray'})))
+# Traffic quota per profile, uplink and downlink together on every node (plan,
+# section 8). No limit by default; periods are kept by backend.quotas.
+register(PolicyKey('quota.bytes', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   integer(1, 10 ** 15)))
+register(PolicyKey('quota.reset', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   choice('calendar_month', 'monthly_anchor', 'interval', 'none'), default='calendar_month'))
+register(PolicyKey('quota.interval_days', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   integer(1, 366), default=30))
+register(PolicyKey('quota.on_exhausted', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   choice('freeze', 'notify'), default='freeze'))
+register(PolicyKey('quota.timezone', frozenset({'installation'}), frozenset({'global'}), time_zone, default='UTC'))
 register(PolicyKey('xray.bittorrent', frozenset({'installation'}), frozenset({'global'}),
                    choice('allow', 'block'), default='allow', protocols=frozenset({'xray'}),
                    setting='xray_bittorrent'))

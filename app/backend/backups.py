@@ -39,6 +39,8 @@ TABLES = (
     "backend_grants",
     "backend_grant_policies",
     "backend_vpn_policies",
+    "backend_quota_state",
+    "backend_quota_periods",
     "backend_access_requests",
 )
 CLEAR = (
@@ -219,11 +221,11 @@ class BackupService:
             old_vpn_policy = payload['format'] not in ('node-plane-backend-v4', 'node-plane-backend-v5',
                                                        'node-plane-backend-v6')
             old_credentials = payload['format'] not in ('node-plane-backend-v5', 'node-plane-backend-v6')
-            old_retired = payload['format'] != 'node-plane-backend-v6'
+            before_v6 = payload['format'] != 'node-plane-backend-v6'
             expected_tables = (set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set())
                 - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set())
                 - ({'backend_device_credentials'} if old_credentials else set())
-                - ({'backend_retired_peers'} if old_retired else set()))
+                - ({'backend_retired_peers', 'backend_quota_state', 'backend_quota_periods'} if before_v6 else set()))
             if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
                                          'node-plane-backend-v4', 'node-plane-backend-v5', 'node-plane-backend-v6'
                                          ) or set(payload['tables']) != expected_tables:
@@ -284,10 +286,14 @@ class BackupService:
                 tables['backend_devices']['rows'].extend(devices)
                 tables['backend_device_credentials'] = {'columns': list(device_credentials.TABLE_COLUMNS),
                                                         'rows': credentials}
-            if old_retired:
+            if before_v6:
                 # No AWG key had been reissued before this format.
                 from .device_credentials import RETIRED_PEER_COLUMNS
                 payload['tables']['backend_retired_peers'] = {'columns': list(RETIRED_PEER_COLUMNS), 'rows': []}
+                # Nor had traffic quotas.
+                from .quotas import PERIOD_COLUMNS, STATE_COLUMNS
+                payload['tables']['backend_quota_state'] = {'columns': list(STATE_COLUMNS), 'rows': []}
+                payload['tables']['backend_quota_periods'] = {'columns': list(PERIOD_COLUMNS), 'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -578,7 +584,8 @@ class BackupService:
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
                 elif table in {"backend_devices", "backend_profile_identities", "backend_device_credentials",
-                               "backend_retired_peers", "backend_grants", "backend_grant_policies"}:
+                               "backend_retired_peers", "backend_grants", "backend_grant_policies",
+                               "backend_quota_state", "backend_quota_periods"}:
                     rows = [r for r in rows if r['profile_id'] not in deleted_profiles]
                 elif table == "backend_vpn_policies":
                     deleted_devices = {d['id'] for d in conn.execute('SELECT id,profile_id FROM backend_devices').fetchall()

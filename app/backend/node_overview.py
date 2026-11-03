@@ -21,8 +21,9 @@ class NodeOverviewService:
                 raise AccessDenied('resource_not_found', 404)
             settings_tasks = conn.execute('''SELECT * FROM backend_node_settings_tasks
                 WHERE node_key = ? ORDER BY revision DESC, id DESC''', (node_key,)).fetchall()
-            grants = conn.execute('''SELECT g.profile_id, g.protocol, p.frozen, p.expires_at,
-                p.desired_revision, d.profile_id AS deleting
+            from .quotas import BLOCKED_SQL
+            grants = conn.execute(f'''SELECT g.profile_id, g.protocol, p.frozen, p.expires_at,
+                p.desired_revision, d.profile_id AS deleting, {BLOCKED_SQL} AS quota_blocked
                 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
                 LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
                 WHERE g.node_key = ?''', (node_key,)).fetchall()
@@ -91,7 +92,7 @@ class NodeOverviewService:
                 continue
             peer_tasks = [latest.get((grant['profile_id'],grant['protocol'],peer)) for peer in peers]
             expires_at = grant['expires_at']
-            active = not grant['frozen'] and not grant['deleting'] and (
+            active = not grant['frozen'] and not grant['deleting'] and not grant['quota_blocked'] and (
                 expires_at is None or datetime.fromisoformat(expires_at) > now)
             expected_action = 'ensure' if active and node['enabled'] else 'delete'
             if not peer_tasks or any(task is None or task['desired_revision'] != grant['desired_revision'] for task in peer_tasks):

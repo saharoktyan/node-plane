@@ -266,6 +266,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
         del payload['tables']['backend_retired_peers']
+        del payload['tables']['backend_quota_state']
+        del payload['tables']['backend_quota_periods']
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -288,6 +290,8 @@ class BackendBackupsTests(unittest.TestCase):
         payload = json.loads(path.read_bytes())
         del payload['tables']['backend_device_credentials']
         del payload['tables']['backend_retired_peers']
+        del payload['tables']['backend_quota_state']
+        del payload['tables']['backend_quota_periods']
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -313,6 +317,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
         del payload['tables']['backend_retired_peers']
+        del payload['tables']['backend_quota_state']
+        del payload['tables']['backend_quota_periods']
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
         converted = self.service._load(backup_id)

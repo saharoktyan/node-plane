@@ -45,13 +45,15 @@ def create_schema(conn):
 def node_snapshot(conn, node_key, now=None):
     """Limited VLESS clients of active devices with a grant on this node."""
     now = now or datetime.now(timezone.utc)
-    rows = conn.execute('''SELECT d.id AS device_id, p.expires_at, c.runtime_name
+    from .quotas import BLOCKED_SQL
+    rows = conn.execute(f'''SELECT d.id AS device_id, p.expires_at, c.runtime_name
         FROM backend_devices d
         JOIN backend_device_credentials c ON c.device_id=d.id AND c.protocol='xray'
         JOIN backend_profiles p ON p.id=d.profile_id
         JOIN backend_grants g ON g.profile_id=p.id AND g.node_key=? AND g.protocol='xray'
         LEFT JOIN backend_accounts a ON a.id=p.owner_account_id
-        WHERE d.status='active' AND p.frozen=0 AND (p.owner_account_id IS NULL OR a.status='approved')
+        WHERE d.status='active' AND p.frozen=0 AND NOT {BLOCKED_SQL}
+        AND (p.owner_account_id IS NULL OR a.status='approved')
         AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions x WHERE x.profile_id=p.id)
         ORDER BY c.runtime_name''', (node_key,)).fetchall()
     clients = []

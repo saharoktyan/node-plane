@@ -149,6 +149,8 @@ class ProfileRepository:
         TrafficService(self.db).initialize_schema()
         from .connection_limits import ConnectionLimits
         ConnectionLimits(self.db).initialize_schema()
+        from .quotas import QuotaService
+        QuotaService(self.db).initialize_schema()
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
 
@@ -245,6 +247,8 @@ class ProfileRepository:
                 FROM backend_grants g JOIN backend_nodes n ON n.key = g.node_key
                 WHERE g.profile_id = ? ORDER BY n.region, n.title, n.key, g.protocol''',
                 (profile_id,)).fetchall()
+            from .quotas import blocked
+            suspended = blocked(conn, profile_id)
             activity = conn.execute('''SELECT COUNT(*) AS issued_count,
                 MAX(created_at) AS last_issued_at FROM backend_config_issuances
                 WHERE profile_id = ? AND status = 'succeeded' ''',
@@ -258,6 +262,7 @@ class ProfileRepository:
             'frozen': bool(profile['frozen']), 'expires_at': profile['expires_at'],
             'expired': bool(profile['expires_at'] and
                 datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc)),
+            'quota_suspended': suspended,
             'created_at': profile['created_at'], 'nodes': list(nodes.values()),
             'node_count': len(nodes), 'protocol_count': len(rows),
             'xray_count': sum(row['protocol'] == 'xray' for row in rows),
@@ -266,9 +271,10 @@ class ProfileRepository:
             'last_issued_at': activity['last_issued_at']}
 
     def available_nodes(self, account_id, *, after, limit, profile_id=None):
+        from .quotas import BLOCKED_SQL
         now = datetime.now(timezone.utc).isoformat()
         with self.db.connect() as conn:
-            rows = conn.execute('''SELECT n.key, n.title, n.region, n.flag, n.protocols_json, n.xray_transports_json
+            rows = conn.execute(f'''SELECT n.key, n.title, n.region, n.flag, n.protocols_json, n.xray_transports_json
                 FROM backend_nodes n WHERE n.enabled = 1 AND n.key > ?
                 AND n.desired_revision = n.applied_revision
                 AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key = n.key)
@@ -278,16 +284,16 @@ class ProfileRepository:
                     AND t.status IN ('awaiting_executor', 'running', 'blocked'))
                 AND EXISTS (
                     SELECT 1 FROM backend_grants g JOIN backend_profiles p ON p.id = g.profile_id
-                    WHERE g.node_key = n.key AND p.owner_account_id = ? AND p.frozen = 0
+                    WHERE g.node_key = n.key AND p.owner_account_id = ? AND p.frozen = 0 AND NOT {BLOCKED_SQL}
                     AND (CAST(? AS TEXT) IS NULL OR p.id = ?)
                     AND n.protocols_json LIKE ('%' || '"' || g.protocol || '"' || '%')
                     AND (p.expires_at IS NULL OR p.expires_at > ?)) ORDER BY n.key LIMIT ?''',
                                 (after, account_id, profile_id, profile_id, now, limit)).fetchall()
             output = []
             for node in rows:
-                grants = conn.execute('''SELECT DISTINCT g.protocol FROM backend_grants g
+                grants = conn.execute(f'''SELECT DISTINCT g.protocol FROM backend_grants g
                     JOIN backend_profiles p ON p.id = g.profile_id
-                    WHERE g.node_key = ? AND p.owner_account_id = ? AND p.frozen = 0
+                    WHERE g.node_key = ? AND p.owner_account_id = ? AND p.frozen = 0 AND NOT {BLOCKED_SQL}
                     AND (CAST(? AS TEXT) IS NULL OR p.id = ?)
                     AND (p.expires_at IS NULL OR p.expires_at > ?)''',
                     (node['key'], account_id, profile_id, profile_id, now)).fetchall()
@@ -347,6 +353,12 @@ class ProfileService:
         return {'items': [{**item, 'networks': networks.get(item['id'])}
                           for item in DeviceRepository(self.repository.db).list_for_profile(profile_id)],
                 'device_limit': limit}
+
+    def quota(self, actor, profile_id):
+        self.get(actor, profile_id)
+        from .quotas import overview
+        with self.repository.db.connect() as conn:
+            return overview(conn, profile_id)
 
     def grants(self, actor, profile_id):
         self.get(actor, profile_id)

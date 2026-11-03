@@ -296,6 +296,8 @@ class TrafficService:
                 key,
             )
             return
+        from .quotas import accrue
+        accrue(conn, key[0], *increments)
         conn.execute('''INSERT INTO backend_node_traffic
             (node_key,protocol,period_month,uplink_bytes,downlink_bytes,tracked_since,last_sample_at)
             VALUES (?,?,?,?,?,?,?) ON CONFLICT(node_key,protocol) DO UPDATE SET

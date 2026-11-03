@@ -27,6 +27,13 @@
   and administrators are alerted when one device is disconnected often (a
   shared link). The controller reads events and per-device network counts with
   the new `ObserveSessions` agent call and never stores addresses.
+- Add traffic quotas per profile (`quota.*` VPN policies): a limit for uplink
+  and downlink together on every node, reset monthly on the 1st, monthly on the
+  assignment day, every N days or never, in the installation time zone.
+  Exhaustion suspends access until the next reset or only notifies; a quota
+  suspension is separate from an administrator's freeze. Owners are notified
+  at 80% and 100% and after a reset. Administrators can reset a period now and
+  move its anchor. Database revision 20 cannot be read by older controllers.
 - Reissue a device's AWG key in Telegram and Workstation: the device gets a
   new AWG peer with keys from the node, and the old peer is revoked from every
   node. Workstation can also reissue the VLESS key; its device list shows the

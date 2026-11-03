@@ -88,6 +88,35 @@ class DevicesPostgresTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT events_sequence FROM backend_node_admission").fetchone()
                              ['events_sequence'], 2)
 
+    def test_traffic_quota_suspends_and_keeps_one_open_period_on_postgres(self):
+        from datetime import datetime, timezone
+        from backend import quotas
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
+            conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')", (profile_id,))
+            conn.execute("""INSERT INTO backend_vpn_policies(id,subject_kind,key,value_json,updated_at)
+                VALUES ('quota','installation','quota.bytes','1000','now')""")
+        DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+            profile_id=profile_id, revision=1, display_name='Phone')
+        service = quotas.QuotaService(self.db)
+        now = datetime(2026, 3, 10, tzinfo=timezone.utc)
+        service.scheduled(now)
+        with self.db.transaction() as conn:
+            quotas.accrue(conn, profile_id, 600, 600)
+        self.assertEqual(service.scheduled(now), 1)
+        self.assertEqual(service.scheduled(now), 0)
+        with self.db.connect() as conn:
+            self.assertTrue(quotas.blocked(conn, profile_id))
+            actions = {row['action'] for row in conn.execute('''SELECT t.action FROM backend_operation_tasks t
+                JOIN backend_operations o ON o.id=t.operation_id WHERE o.profile_id=? AND o.desired_revision=(
+                    SELECT desired_revision FROM backend_profiles WHERE id=?)''', (profile_id, profile_id)).fetchall()}
+        self.assertEqual(actions, {'delete'})
+        with self.assertRaises(Exception):
+            with self.db.transaction() as conn:
+                conn.execute("""INSERT INTO backend_quota_periods(id,profile_id,period_start)
+                    VALUES ('second',?,'2026-03-01')""", (profile_id,))
+
     def test_awg_key_reissue_revokes_the_old_peer_on_postgres(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
         with self.db.transaction() as conn:
@@ -274,6 +303,8 @@ class DevicesPostgresTests(unittest.TestCase):
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
         del payload['tables']['backend_retired_peers']
+        del payload['tables']['backend_quota_state']
+        del payload['tables']['backend_quota_periods']
         payload['format'] = 'node-plane-backend-v1'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
