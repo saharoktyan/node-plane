@@ -1104,7 +1104,8 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         *((Section(tr(locale, 'profile.admin.status_title'),
             rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()),
-        *_policy_sections(locale, profile_id, await _vpn_policies(backend, user_id, profile_id)))
+        *_policy_sections(locale, profile_id, await _vpn_policies(backend, user_id, profile_id)),
+        *await _quota_section(locale, profile_id, backend, user_id))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1125,6 +1126,15 @@ async def _device_limit_policy(backend, user_id, profile_id):
 
 def _device_limit_key(policy):
     return next((item for item in policy.get('keys', ()) if item['key'] == 'devices.max'), None)
+
+
+async def _quota_section(locale, profile_id, backend, user_id):
+    from .admin_quotas import profile_section
+    try:
+        quota = await backend.request('GET', f'/api/v1/profiles/{profile_id}/quota', telegram_user_id=user_id)
+    except BackendError:
+        return ()
+    return profile_section(locale, profile_id, quota)
 
 
 def _policy_sections(locale, profile_id, policy):

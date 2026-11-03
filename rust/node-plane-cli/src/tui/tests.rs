@@ -3271,6 +3271,61 @@ fn connection_limit_toggles_cycle_presets_and_store_defaults_as_no_value() {
 }
 
 #[test]
+fn quota_toggles_cycle_presets_including_no_limit() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.activate(Control::ControllerSection(ControllerSection::Policies));
+    app.nodes_requested.take();
+    let gib = 1u64 << 30;
+    let null = serde_json::Value::Null;
+    for (key, current, default, next) in [
+        (
+            "quota.bytes",
+            null.clone(),
+            null.clone(),
+            serde_json::json!(10 * gib),
+        ),
+        (
+            "quota.bytes",
+            serde_json::json!(500 * gib),
+            null.clone(),
+            null.clone(),
+        ),
+        (
+            "quota.reset",
+            serde_json::json!("none"),
+            serde_json::json!("calendar_month"),
+            null.clone(),
+        ),
+        (
+            "quota.on_exhausted",
+            serde_json::json!("freeze"),
+            serde_json::json!("freeze"),
+            serde_json::json!("notify"),
+        ),
+    ] {
+        app.controller.apply(
+            crate::controller::Command::Policies,
+            serde_json::json!({"traffic":{"enabled":true},"requests":{"enabled":true},
+                "vpn":{"keys":[{"key":key,"value":null,"revision":2,"default":default,"effective":current}]}}),
+        );
+        let control = match key {
+            "quota.bytes" => Control::ControllerPolicyToggle("quota.bytes"),
+            "quota.reset" => Control::ControllerPolicyToggle("quota.reset"),
+            _ => Control::ControllerPolicyToggle("quota.on_exhausted"),
+        };
+        assert!(app.controller_controls().contains(&control));
+        app.activate(control);
+        assert!(
+            matches!(&app.nodes_requested.take(), Some(crate::nodes::Command::Controller(_,
+            crate::controller::Command::VpnPolicySave(value, _))) if value["changes"][0]["key"] == key
+                && value["changes"][0]["value"] == next),
+            "{key}: {current} -> {next}"
+        );
+    }
+}
+
+#[test]
 fn open_sidebar_label_keeps_accent_after_wheel_scroll() {
     let mut app = test_profile_app();
     app.activate(Control::Action(Action::Install));

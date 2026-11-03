@@ -33,7 +33,9 @@
   Exhaustion suspends access until the next reset or only notifies; a quota
   suspension is separate from an administrator's freeze. Owners are notified
   at 80% and 100% and after a reset. Administrators can reset a period now and
-  move its anchor. Database revision 20 cannot be read by older controllers.
+  move its anchor. Settings are in Telegram (installation and profile) and
+  Workstation (installation); members see usage on their profile card.
+  Database revision 20 cannot be read by older controllers.
 - Reissue a device's AWG key in Telegram and Workstation: the device gets a
   new AWG peer with keys from the node, and the old peer is revoked from every
   node. Workstation can also reissue the VLESS key; its device list shows the

@@ -298,6 +298,8 @@ class MemberProfileSummary(BaseModel):
     expired: bool
     # Access suspended until the traffic quota resets.
     quota_suspended: bool = False
+    # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted.
+    quota: dict[str, int | str | None] | None = None
     expires_at: str | None
     created_at: str | None
     nodes: list[MemberProfileNode]

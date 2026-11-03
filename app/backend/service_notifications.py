@@ -46,18 +46,13 @@ def _quota_lifted(conn, system, delivery):
     return _period_open(conn, system, delivery) and not blocked(conn, system['profile_id'])
 
 
-def _gigabytes(value):
-    return f'{value / 10 ** 9:.1f} GB'
-
-
 KINDS = {
     'access_expired': Kind(_access_expired_current,
                            lambda payload, title: f'Your access to {title} has expired.'),
     'quota_warning': Kind(_period_open, lambda payload, title: (
-        f"You have used {payload['percent']}% of your {title} traffic: "
-        f"{_gigabytes(payload['used_bytes'])} of {_gigabytes(payload['limit_bytes'])}.")),
+        f"You have used {payload['percent']}% of your {title} traffic: {payload['used']} of {payload['limit']}.")),
     'quota_exhausted': Kind(_period_open, lambda payload, title: (
-        f"Your {title} traffic of {_gigabytes(payload['limit_bytes'])} is used up"
+        f"Your {title} traffic of {payload['limit']} is used up"
         + ('; access is suspended until the next reset.' if payload['suspended'] else '.'))),
     'quota_reset': Kind(_quota_lifted, lambda payload, title: f'Your {title} traffic was reset; access is restored.'),
     'connection_evicted': Kind(_device_active, lambda payload, title: (

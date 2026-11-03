@@ -166,6 +166,14 @@ class QuotaServiceTests(unittest.TestCase):
         self.assertFalse(self.open_period()['blocked'])
         self.assertEqual(self.latest_actions(), {'delete'})
 
+    def test_a_profile_can_be_exempt_from_the_installation_quota(self):
+        self.policy('quota.bytes', 1000)
+        self.policy('quota.bytes', 0, profile=True)
+        self.tick()
+        self.assertIsNone(self.open_period())
+        quota = self.client.get(f'/api/v1/profiles/{self.profile}/quota', headers=self.headers_for()).json()
+        self.assertIsNone(quota['limit_bytes'])
+
     def test_removing_the_quota_closes_the_period_and_restores_access(self):
         self.policy('quota.bytes', 1000)
         self.tick()

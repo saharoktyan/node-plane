@@ -247,8 +247,9 @@ class ProfileRepository:
                 FROM backend_grants g JOIN backend_nodes n ON n.key = g.node_key
                 WHERE g.profile_id = ? ORDER BY n.region, n.title, n.key, g.protocol''',
                 (profile_id,)).fetchall()
-            from .quotas import blocked
+            from .quotas import blocked, overview
             suspended = blocked(conn, profile_id)
+            quota = overview(conn, profile_id)
             activity = conn.execute('''SELECT COUNT(*) AS issued_count,
                 MAX(created_at) AS last_issued_at FROM backend_config_issuances
                 WHERE profile_id = ? AND status = 'succeeded' ''',
@@ -263,6 +264,9 @@ class ProfileRepository:
             'expired': bool(profile['expires_at'] and
                 datetime.fromisoformat(profile['expires_at']) <= datetime.now(timezone.utc)),
             'quota_suspended': suspended,
+            'quota': None if quota['limit_bytes'] is None or quota['period'] is None else {
+                'limit_bytes': quota['limit_bytes'], 'used_bytes': quota['period']['used_bytes'],
+                'period_end': quota['period']['end'], 'on_exhausted': quota['on_exhausted']},
             'created_at': profile['created_at'], 'nodes': list(nodes.values()),
             'node_count': len(nodes), 'protocol_count': len(rows),
             'xray_count': sum(row['protocol'] == 'xray' for row in rows),

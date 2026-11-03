@@ -3533,3 +3533,53 @@ CATALOG['ru'].update({
     'devices.rotate_awg': 'Новый ключ AWG',
     'devices.rotate_awg_warning': 'Устройство получит новый ключ AmneziaWG; старые конфиги AmneziaWG перестанут работать, когда ноды применят изменение. Получите конфиг заново. Ссылки VLESS не меняются.',
 })
+
+CATALOG['en'].update({
+    'quota.title': 'Traffic quota', 'quota.configure': 'Configure', 'quota.none': 'No limit',
+    'quota.inherit': 'As installation ({value})', 'quota.days': '{days} days',
+    'quota.field.limit': 'Limit per period', 'quota.field.reset': 'Reset', 'quota.field.days': 'Interval',
+    'quota.field.exhausted': 'When used up', 'quota.field.tz': 'Time zone',
+    'quota.reset.calendar_month': 'On the 1st', 'quota.reset.monthly_anchor': 'Monthly on the start day',
+    'quota.reset.interval': 'Every N days', 'quota.reset.none': 'Never',
+    'quota.exhausted.freeze': 'Suspend access', 'quota.exhausted.notify': 'Only notify',
+    'quota.hint': 'Limits uplink and downlink together on all servers, per profile. Usage is counted from traffic collection, so it can go over the limit by up to one collection interval. Changes to the reset take effect from the next reset; a new limit applies at once.',
+    'quota.profile_hint': 'Overrides the installation quota for this profile. No limit exempts it.',
+    'quota.period': 'Current period', 'quota.usage': '{used} of {limit}', 'quota.until': 'until {date}',
+    'quota.suspended': 'access suspended',
+    'quota.reset_now': 'Reset now', 'quota.reset_title': 'Reset the traffic quota?',
+    'quota.reset_warning': 'A new period starts now with zero usage and ends at the next regular reset. Suspended access is restored.',
+    'profile.quota_suspended': 'Traffic used up',
+    'notification.quota_warning.title': 'Traffic almost used up',
+    'notification.quota_warning.body': 'You have used {percent}% of your {service} traffic: {used} of {limit}.',
+    'notification.quota_exhausted.title': 'Traffic used up',
+    'notification.quota_exhausted.body': 'Your {service} traffic of {limit} is used up.',
+    'notification.quota_exhausted.body_suspended': 'Your {service} traffic of {limit} is used up. Access is suspended until the next reset.',
+    'notification.quota_reset.title': 'Traffic reset',
+    'notification.quota_reset.body': 'Your {service} traffic was reset; access is restored.',
+})
+CATALOG['ru'].update({
+    'quota.title': 'Квота трафика', 'quota.configure': 'Настроить', 'quota.none': 'Без лимита',
+    'quota.inherit': 'Как в установке ({value})', 'quota.days': '{days} дн.',
+    'quota.field.limit': 'Лимит на период', 'quota.field.reset': 'Сброс', 'quota.field.days': 'Интервал',
+    'quota.field.exhausted': 'При исчерпании', 'quota.field.tz': 'Часовой пояс',
+    'quota.reset.calendar_month': '1-го числа', 'quota.reset.monthly_anchor': 'Ежемесячно в день начала',
+    'quota.reset.interval': 'Каждые N дней', 'quota.reset.none': 'Без сброса',
+    'quota.exhausted.freeze': 'Приостановить доступ', 'quota.exhausted.notify': 'Только уведомить',
+    'quota.hint': 'Ограничивает входящий и исходящий трафик вместе на всех серверах, для каждого профиля. Расход считается по сбору трафика, поэтому лимит можно превысить не больше чем на один интервал сбора. Изменения сброса действуют со следующего сброса, новый лимит — сразу.',
+    'quota.profile_hint': 'Заменяет квоту установки для этого профиля. «Без лимита» освобождает профиль от квоты.',
+    'quota.period': 'Текущий период', 'quota.usage': '{used} из {limit}', 'quota.until': 'до {date}',
+    'quota.suspended': 'доступ приостановлен',
+    'quota.reset_now': 'Сбросить сейчас', 'quota.reset_title': 'Сбросить квоту трафика?',
+    'quota.reset_warning': 'Новый период начнётся сейчас с нулевым расходом и закончится при следующем плановом сбросе. Приостановленный доступ восстановится.',
+    'profile.quota_suspended': 'Трафик исчерпан',
+    'notification.quota_warning.title': 'Трафик почти исчерпан',
+    'notification.quota_warning.body': 'Вы использовали {percent}% трафика {service}: {used} из {limit}.',
+    'notification.quota_exhausted.title': 'Трафик исчерпан',
+    'notification.quota_exhausted.body': 'Трафик {service} ({limit}) исчерпан.',
+    'notification.quota_exhausted.body_suspended': 'Трафик {service} ({limit}) исчерпан. Доступ приостановлен до следующего сброса.',
+    'notification.quota_reset.title': 'Трафик сброшен',
+    'notification.quota_reset.body': 'Трафик {service} сброшен, доступ восстановлен.',
+})
+
+CATALOG['en']['action.error.quota'] = 'Your traffic is used up. Access returns after the next reset.'
+CATALOG['ru']['action.error.quota'] = 'Трафик исчерпан. Доступ вернётся после следующего сброса.'

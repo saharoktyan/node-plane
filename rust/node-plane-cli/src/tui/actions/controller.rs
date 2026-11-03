@@ -464,7 +464,11 @@ impl App {
                 None
             }
             Control::ControllerPolicyToggle(
-                choice @ ("connections.mode" | "connections.max_sources"),
+                choice @ ("connections.mode"
+                | "connections.max_sources"
+                | "quota.bytes"
+                | "quota.reset"
+                | "quota.on_exhausted"),
             ) => {
                 if let Some(policy) = self
                     .controller
@@ -474,7 +478,7 @@ impl App {
                 {
                     self.controller_command(crate::controller::Command::VpnPolicySave(
                         serde_json::json!({"changes":[{"key":choice,
-                            "value":next_connection_limit(choice, policy),
+                            "value":next_preset(choice, policy),
                             "revision":policy["revision"]}]}),
                         uuid::Uuid::new_v4(),
                     ));
@@ -1800,6 +1804,48 @@ impl App {
                             Control::ControllerPolicyToggle("connections.max_sources"),
                         ));
                     }
+                    if let Some(policy) = vpn_policy(value, "quota.bytes") {
+                        items.push((
+                            format!(
+                                "Traffic quota: {}",
+                                policy["effective"]
+                                    .as_u64()
+                                    .filter(|bytes| *bytes > 0)
+                                    .map_or_else(
+                                        || "No limit".to_string(),
+                                        |bytes| format!("{} GiB", bytes / GIB)
+                                    )
+                            ),
+                            Control::ControllerPolicyToggle("quota.bytes"),
+                        ));
+                    }
+                    if let Some(policy) = vpn_policy(value, "quota.reset") {
+                        items.push((
+                            format!(
+                                "Quota reset: {}",
+                                match policy["effective"].as_str() {
+                                    Some("monthly_anchor") => "Monthly on the start day",
+                                    Some("interval") => "Every N days",
+                                    Some("none") => "Never",
+                                    _ => "On the 1st",
+                                }
+                            ),
+                            Control::ControllerPolicyToggle("quota.reset"),
+                        ));
+                    }
+                    if let Some(policy) = vpn_policy(value, "quota.on_exhausted") {
+                        items.push((
+                            format!(
+                                "When quota is used up: {}",
+                                if policy["effective"] == "notify" {
+                                    "Only notify"
+                                } else {
+                                    "Suspend access"
+                                }
+                            ),
+                            Control::ControllerPolicyToggle("quota.on_exhausted"),
+                        ));
+                    }
                 } else {
                     items.push((
                         "Please wait".into(),
@@ -1890,14 +1936,22 @@ fn vpn_policy<'a>(policies: &'a serde_json::Value, key: &str) -> Option<&'a serd
         .find(|item| item["key"] == key)
 }
 
-/// The next preset of a `connections.*` policy, as in the Telegram bot. It
-/// wraps around, and a value set elsewhere moves to the first preset. The
-/// default is stored as no value.
-fn next_connection_limit(key: &str, policy: &serde_json::Value) -> serde_json::Value {
-    let presets = if key == "connections.mode" {
-        serde_json::json!(["off", "observe", "enforce"])
-    } else {
-        serde_json::json!([1, 2, 3, 5])
+const GIB: u64 = 1 << 30;
+
+/// The next preset of a `connections.*` or `quota.*` policy, as in the
+/// Telegram bot. It wraps around, and a value set elsewhere moves to the
+/// first preset. The default is stored as no value.
+fn next_preset(key: &str, policy: &serde_json::Value) -> serde_json::Value {
+    let presets = match key {
+        "connections.mode" => serde_json::json!(["off", "observe", "enforce"]),
+        "connections.max_sources" => serde_json::json!([1, 2, 3, 5]),
+        "quota.bytes" => {
+            serde_json::json!([null, 10 * GIB, 50 * GIB, 100 * GIB, 200 * GIB, 500 * GIB])
+        }
+        "quota.reset" => {
+            serde_json::json!(["calendar_month", "monthly_anchor", "interval", "none"])
+        }
+        _ => serde_json::json!(["freeze", "notify"]),
     };
     let presets = presets.as_array().cloned().unwrap_or_default();
     let next = presets

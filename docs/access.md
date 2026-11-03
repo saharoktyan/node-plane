@@ -54,6 +54,18 @@ When a device is disconnected, its owner receives a service notification, at mos
 
 Xray needs its online statistics and routing API for this. Applying node settings turns them on.
 
+## Traffic quotas
+
+A traffic quota limits uplink and downlink together across all servers of a profile within a period. Set it in Telegram → Settings → VPN → Traffic quota for the installation, override it in a profile's Edit screen, or use Workstation → Node Plane Settings → Policies. Traffic collection must be on.
+
+- **Limit per period** (`quota.bytes`): no limit by default. A profile can choose **No limit** to be exempt from the installation quota.
+- **Reset** (`quota.reset`): on the 1st of each month; monthly on the start day (the last day of shorter months); every N days (`quota.interval_days`); or never, for a one-off allowance. Periods follow the installation time zone (`quota.timezone`, UTC by default).
+- **When used up** (`quota.on_exhausted`): suspend access until the next reset (default) or only notify.
+
+The start day is when the profile first got a quota; an administrator can move it with the API. Changes to the reset take effect from the next reset, and the current usage stays; a new limit applies at once, so raising it restores suspended access. **Reset now** in the profile's quota screen starts a new period immediately and restores suspended access.
+
+A quota suspension is separate from freezing: a new period lifts only the quota suspension, never an administrator's freeze. Owners receive service notifications at 80% and when the quota is used up, and after a reset that restored access. Usage is counted from traffic collection, so a profile can exceed its limit by up to one collection interval.
+
 ## Roles, blocking and freezing
 
 An administrator role grants management permissions. Change a role only for someone who should manage the installation.

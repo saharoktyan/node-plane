@@ -40,6 +40,15 @@ BLOCKED_SQL = '''EXISTS (SELECT 1 FROM backend_quota_periods q
     WHERE q.profile_id=p.id AND q.closed_at IS NULL AND q.blocked=1)'''
 
 
+def size_label(value):
+    """Bytes in binary units, as the bot shows traffic."""
+    amount = float(value)
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB'):
+        if amount < 1024 or unit == 'TiB':
+            return f'{amount:.1f} {unit}'
+        amount /= 1024
+
+
 def create_schema(conn):
     from db.migration_revisions.r0020_traffic_quotas import upgrade
     upgrade(conn)
@@ -122,7 +131,7 @@ def overview(conn, profile_id):
                          (profile_id,)).fetchone()
     history = conn.execute('''SELECT * FROM backend_quota_periods WHERE profile_id=? AND closed_at IS NOT NULL
         ORDER BY period_start DESC,id DESC LIMIT ?''', (profile_id, HISTORY)).fetchall()
-    return {'limit_bytes': values['quota.bytes'], 'reset': values['quota.reset'],
+    return {'limit_bytes': values['quota.bytes'] or None, 'reset': values['quota.reset'],
             'interval_days': values['quota.interval_days'], 'on_exhausted': values['quota.on_exhausted'],
             'timezone': values['quota.timezone'],
             'anchor_at': state['anchor_at'] if state else None, 'anchor_revision': state['revision'] if state else 0,
@@ -174,7 +183,8 @@ def _anchor(conn, profile_id, now):
 def _evaluate(conn, profile_id, values, row, now):
     """Warnings, exhaustion and the suspension for the open period."""
     limit, used = values['quota.bytes'], row['uplink_bytes'] + row['downlink_bytes']
-    payload = {'used_bytes': used, 'limit_bytes': limit, 'period_end': row['period_end']}
+    payload = {'used_bytes': used, 'limit_bytes': limit, 'period_end': row['period_end'],
+               'used': size_label(used), 'limit': size_label(limit)}
     if used >= limit * WARN_PERCENT // 100 and row['warned_at'] is None:
         conn.execute('UPDATE backend_quota_periods SET warned_at=? WHERE id=?', (now.isoformat(), row['id']))
         if used < limit:
@@ -215,7 +225,7 @@ class QuotaService:
         """One worker pass for a profile; True when its access changed."""
         values = effective(conn, profile_id=profile_id, keys=KEYS)
         row = _open(conn, profile_id)
-        if values['quota.bytes'] is None:
+        if not values['quota.bytes']:
             if row is not None:
                 _close(conn, row, 'quota_removed', now)
                 return bool(row['blocked'])
@@ -267,7 +277,7 @@ class QuotaService:
                     raise AccessDenied('idempotency_conflict', 409)
                 return overview(conn, profile_id)
             values = effective(conn, profile_id=profile_id, keys=[*KEYS, 'quota.timezone'])
-            if values['quota.bytes'] is None:
+            if not values['quota.bytes']:
                 raise AccessDenied('quota_not_set', 409)
             row = _open(conn, profile_id)
             if row is not None:

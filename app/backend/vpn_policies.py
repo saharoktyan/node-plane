@@ -92,9 +92,10 @@ register(PolicyKey('connections.window_seconds', frozenset({'installation'}), fr
 register(PolicyKey('connections.cooldown_seconds', frozenset({'installation'}), frozenset({'global'}),
                    integer(0, 86400), default=300, protocols=frozenset({'xray'})))
 # Traffic quota per profile, uplink and downlink together on every node (plan,
-# section 8). No limit by default; periods are kept by backend.quotas.
+# section 8). No limit by default; 0 exempts a profile from the installation
+# quota. Periods are kept by backend.quotas.
 register(PolicyKey('quota.bytes', frozenset({'installation', 'profile'}), frozenset({'global'}),
-                   integer(1, 10 ** 15)))
+                   integer(0, 10 ** 15)))
 register(PolicyKey('quota.reset', frozenset({'installation', 'profile'}), frozenset({'global'}),
                    choice('calendar_month', 'monthly_anchor', 'interval', 'none'), default='calendar_month'))
 register(PolicyKey('quota.interval_days', frozenset({'installation', 'profile'}), frozenset({'global'}),

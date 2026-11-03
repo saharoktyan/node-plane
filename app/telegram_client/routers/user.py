@@ -426,12 +426,15 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         details = False
     nodes, page_index, pages = server_page(summary['nodes'], page_index)
     status_key = ('profile.frozen' if summary['frozen'] else
-                  'profile.expired' if summary['expired'] else 'profile.active')
+                  'profile.expired' if summary['expired'] else
+                  'profile.quota_suspended' if summary.get('quota_suspended') else 'profile.active')
     status = tr(locale, status_key)
     facts = (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value'))
+    quota = summary.get('quota')
     access = Section(tr(locale, 'account.rich.access'), tables=(Table(facts, (
         (tr(locale, 'account.rich.status'), status),
-        (tr(locale, 'account.rich.expiry'), summary['expires_at'][:10] + ' UTC' if summary.get('expires_at') else tr(locale, 'profile.layout.unlimited')))),))
+        (tr(locale, 'account.rich.expiry'), summary['expires_at'][:10] + ' UTC' if summary.get('expires_at') else tr(locale, 'profile.layout.unlimited')),
+        *(((tr(locale, 'quota.title'), quota_text(quota, locale)),) if quota else ()))),))
     if not details:
         traffic = profile_traffic_section(summary, locale)
         compact_access = Section(access.title, tables=(Table(facts, (
@@ -470,6 +473,12 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
         (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True,
         breadcrumbs=profile_path),
         [[button(user_id, tr(locale, 'back'), 'account_profile', profile_id, back_to)]], state, message_id)
+
+
+def quota_text(quota, locale):
+    """Used traffic against the quota, with the next reset if any."""
+    text = tr(locale, 'quota.usage', used=_traffic_bytes(quota['used_bytes']), limit=_traffic_bytes(quota['limit_bytes']))
+    return text + (' · ' + tr(locale, 'quota.until', date=quota['period_end'][:10]) if quota.get('period_end') else '')
 
 
 def profile_traffic_section(summary, locale):
@@ -1149,8 +1158,10 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         if exc.code in {'access_requests_disabled', 'request_already_pending'}:
             await show_home(chat_id, user_id, bot, backend, state, message_id)
             return
-        if exc.code in {'profile_frozen', 'profile_expired', 'grant_revoked',
-                        'account_disabled', 'permission_denied'}:
+        if exc.code == 'quota_exhausted':
+            cause = 'quota'
+        elif exc.code in {'profile_frozen', 'profile_expired', 'grant_revoked',
+                          'account_disabled', 'permission_denied'}:
             cause = 'access'
         elif exc.status == 404:
             cause = 'missing'

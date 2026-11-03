@@ -24,9 +24,11 @@ def notification_content(item, locale):
     if is_service(item):
         kind = item['notification_kind']
         values = {**(item.get('payload') or {}), 'service': item['service_title']}
+        # An exhausted quota either suspended access or only reports it.
+        body = 'body_suspended' if kind == 'quota_exhausted' and values.get('suspended') else 'body'
         return (tr(locale, f'notification.{kind}.title'), (
             tr(locale, 'notification.from', sender='System'),
-            tr(locale, f'notification.{kind}.body', **values),
+            tr(locale, f'notification.{kind}.{body}', **values),
         ))
     sender = item.get('sender_username')
     return (tr(locale, 'announce.notification'),
