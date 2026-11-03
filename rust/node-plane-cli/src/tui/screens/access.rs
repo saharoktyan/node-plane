@@ -420,16 +420,37 @@ pub(in crate::tui) fn draw_access_devices(
             Line::from(text(&card["display_name"])),
             Line::from(format!("Status: {}", text(&card["status"]))),
         ];
-        if devices.delete_key.is_some() {
-            lines.push(Line::from("Delete this device and revoke its access?"));
+        if let Some(networks) = card["networks"].as_object() {
+            lines.push(Line::from(format!(
+                "VLESS networks now: {} of {}",
+                networks
+                    .get("active")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                networks
+                    .get("limit")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            )));
+        }
+        if devices.confirming() {
+            lines.push(Line::from(device_question(Some(devices))));
             buttons = vec![
-                ("Delete", Control::AccessDeviceConfirm),
+                (
+                    if devices.rotate_key.is_some() {
+                        "Reissue"
+                    } else {
+                        "Delete"
+                    },
+                    Control::AccessDeviceConfirm,
+                ),
                 ("Cancel", Control::AccessBack),
             ];
         } else {
             if card["status"] == "active" {
                 buttons.extend([
                     ("Rename", Control::AccessDeviceEdit),
+                    ("Reissue key", Control::AccessDeviceRotate),
                     ("Delete", Control::AccessDeviceDelete),
                 ]);
             }
@@ -446,8 +467,17 @@ pub(in crate::tui) fn draw_access_devices(
             sections[1],
         );
     } else {
+        let count = devices
+            .items
+            .iter()
+            .filter(|item| item["status"] == "active")
+            .count();
         let status = if !app.error.is_empty() {
             app.error.clone()
+        } else if let Some(limit) = devices.limit
+            && devices.operation.is_null()
+        {
+            format!("Devices: {count} of {limit}")
         } else if !devices.operation.is_null() {
             format!("Access changes: {}", text(&devices.operation["status"]))
         } else {
@@ -644,7 +674,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             .access
             .devices
             .as_ref()
-            .is_some_and(|devices| devices.delete_key.is_some());
+            .is_some_and(|devices| devices.confirming());
     let right = if confirmation {
         let popup = centered(right, 78, 12);
         frame.render_widget(Clear, popup);
@@ -705,7 +735,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             )
         } else {
             (
-                "Delete this device and revoke its access?",
+                device_question(app.access.devices.as_ref()),
                 Control::AccessDeviceConfirm,
             )
         };
@@ -1195,4 +1225,12 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
     }
     draw_access_buttons(frame, app, sections[2], &buttons, hits);
+}
+
+fn device_question(devices: Option<&crate::access::Devices>) -> &'static str {
+    if devices.is_some_and(|devices| devices.rotate_key.is_some()) {
+        "Reissue this device's VLESS key? Its current VLESS links stop working; AWG configurations do not change."
+    } else {
+        "Delete this device and revoke its access?"
+    }
 }

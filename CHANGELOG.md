@@ -27,6 +27,8 @@
   and administrators are alerted when one device is disconnected often (a
   shared link). The controller reads events and per-device network counts with
   the new `ObserveSessions` agent call and never stores addresses.
+- Reissue a device's VLESS key in Workstation; its device list shows the
+  device limit and each limited device's current VLESS networks.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

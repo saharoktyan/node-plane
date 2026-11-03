@@ -509,9 +509,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                     || app.access.decision.is_some()
                     || app.access.account_action.is_some()
                     || app.access.profile_action.is_some()
-                    || app.access.devices.as_ref().is_some_and(|devices| {
-                        devices.editor.is_some() || devices.delete_key.is_some()
-                    })))
+                    || app
+                        .access
+                        .devices
+                        .as_ref()
+                        .is_some_and(|devices| devices.editor.is_some() || devices.confirming())))
             && !(matches!(app.screen, Screen::Nodes)
                 && app.nodes.editor.as_ref().is_some_and(|editor| {
                     editor.review.is_some() || editor.tab == crate::node_editor::Tab::AwgParameters

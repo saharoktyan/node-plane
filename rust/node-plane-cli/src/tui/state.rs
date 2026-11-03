@@ -234,6 +234,7 @@ pub(super) enum Control {
     AccessDeviceName,
     AccessDeviceSave,
     AccessDeviceDelete,
+    AccessDeviceRotate,
     AccessDeviceConfirm,
     AccessDevicePage(bool),
     AccessExpiryMenu,

@@ -294,6 +294,7 @@ impl App {
             | Control::AccessDeviceName
             | Control::AccessDeviceSave
             | Control::AccessDeviceDelete
+            | Control::AccessDeviceRotate
             | Control::AccessDeviceConfirm
             | Control::AccessDevicePage(..)
             | Control::AccessDurationCustom

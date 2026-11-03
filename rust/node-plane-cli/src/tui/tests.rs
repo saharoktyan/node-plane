@@ -2007,6 +2007,51 @@ fn device_delete_requires_confirmation_and_back_does_not_leave_profile() {
     assert_eq!(app.access.card.as_ref().unwrap()["id"], "profile");
 }
 #[test]
+fn device_key_reissue_requires_confirmation_and_posts_the_rotate_command() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Profiles;
+    app.access.card = Some(serde_json::json!({"id":"profile", "desired_revision":8}));
+    app.access.apply(
+        crate::access::Command::Devices("profile".into()),
+        serde_json::json!({"profile":{"id":"profile", "desired_revision":8},"devices":{"device_limit":2,
+            "items":[{"id":"device", "display_name":"Phone", "revision":3, "status":"active",
+                "networks":{"active":1,"blocked":0,"limit":1}}]}}),
+    );
+    assert_eq!(app.access.devices.as_ref().unwrap().limit, Some(2));
+    app.nodes_requested = None;
+    app.activate(Control::AccessDeviceItem(0));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let screen = format!("{:?}", terminal.backend().buffer());
+    assert!(screen.contains("VLESS networks now: 1 of 1"));
+    assert!(app.access_controls().contains(&Control::AccessDeviceRotate));
+    app.activate(Control::AccessDeviceRotate);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::AccessBack);
+    assert!(app.access.devices.as_ref().unwrap().rotate_key.is_none());
+    app.activate(Control::AccessDeviceRotate);
+    app.activate(Control::AccessDeviceConfirm);
+    let Some(crate::nodes::Command::Access(command)) = app.nodes_requested.take() else {
+        panic!()
+    };
+    let (method, path, body, key) = command.request();
+    assert_eq!(method, hyper::Method::POST);
+    assert_eq!(path, "/api/v1/profiles/profile/devices/device/rotate");
+    assert!(body.is_none());
+    assert_eq!(key, app.access.devices.as_ref().unwrap().rotate_key);
+    let crate::access::Command::DeviceMutate {
+        revision, delete, ..
+    } = command
+    else {
+        panic!()
+    };
+    assert_eq!((revision, delete), (3, false));
+}
+
+#[test]
 fn duration_menu_keeps_draft_and_unlimited_does_not_submit_it() {
     let mut app = test_profile_app();
     app.screen = Screen::Access;
@@ -8470,6 +8515,8 @@ fn inputs_handle_ctrl_w_and_ctrl_backspace_word_deletion() {
             key: uuid::Uuid::new_v4(),
         }),
         delete_key: None,
+        rotate_key: None,
+        limit: None,
         page: 0,
     });
     app.hits = vec![Hit {

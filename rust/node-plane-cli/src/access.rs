@@ -57,6 +57,8 @@ pub enum Command {
         revision: u64,
         name: String,
         delete: bool,
+        /// Reissue the device's VLESS key instead of renaming it.
+        rotate: bool,
         key: Uuid,
     },
     List(Tab),
@@ -119,6 +121,18 @@ impl Command {
                 format!("/api/v1/profiles/{profile}/devices"),
                 None,
                 None,
+            ),
+            Self::DeviceMutate {
+                profile,
+                device: Some(device),
+                rotate: true,
+                key,
+                ..
+            } => (
+                hyper::Method::POST,
+                format!("/api/v1/profiles/{profile}/devices/{device}/rotate"),
+                None,
+                Some(*key),
             ),
             Self::DeviceMutate {
                 profile,
@@ -442,9 +456,17 @@ pub struct Devices {
     pub card: Option<Value>,
     pub editor: Option<DeviceEditor>,
     pub delete_key: Option<Uuid>,
+    pub rotate_key: Option<Uuid>,
+    /// Effective `devices.max`; None means no limit.
+    pub limit: Option<u64>,
     pub page: usize,
 }
 impl Devices {
+    /// A delete or key reissue waits for confirmation.
+    pub fn confirming(&self) -> bool {
+        self.delete_key.is_some() || self.rotate_key.is_some()
+    }
+
     pub fn edit(&mut self, new: bool) {
         let source = if new { None } else { self.card.clone() };
         self.editor = Some(DeviceEditor {
@@ -482,6 +504,7 @@ impl Devices {
             revision,
             name: editor.name.clone(),
             delete: false,
+            rotate: false,
             key: editor.key,
         })
     }
@@ -827,6 +850,8 @@ impl Browser {
                     card: None,
                     editor: None,
                     delete_key: None,
+                    rotate_key: None,
+                    limit: value["devices"]["device_limit"].as_u64(),
                     page: 0,
                 });
                 if !value["result"].is_null() {
@@ -1089,6 +1114,8 @@ mod tests {
             card: Some(json!({"id":"device", "display_name":"Phone", "revision":3})),
             editor: None,
             delete_key: None,
+            rotate_key: None,
+            limit: None,
             page: 0,
         };
         devices.edit(true);

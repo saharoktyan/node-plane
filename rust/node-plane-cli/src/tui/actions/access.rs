@@ -236,9 +236,17 @@ impl App {
                 self.access.selected = 0;
                 None
             }
+            Control::AccessDeviceRotate => {
+                if let Some(devices) = &mut self.access.devices {
+                    devices.rotate_key = Some(uuid::Uuid::new_v4());
+                }
+                self.access.selected = 0;
+                None
+            }
             Control::AccessDeviceConfirm => {
                 if let Some(devices) = &self.access.devices
-                    && let (Some(card), Some(key)) = (&devices.card, devices.delete_key)
+                    && let (Some(card), Some(key)) =
+                        (&devices.card, devices.delete_key.or(devices.rotate_key))
                     && let Some(revision) = card["revision"].as_u64()
                 {
                     self.access_command(crate::access::Command::DeviceMutate {
@@ -246,7 +254,8 @@ impl App {
                         device: card["id"].as_str().map(str::to_owned),
                         revision,
                         name: String::new(),
-                        delete: true,
+                        delete: devices.delete_key.is_some(),
+                        rotate: devices.rotate_key.is_some(),
                         key,
                     });
                 }
@@ -480,7 +489,10 @@ impl App {
                 self.error.clear();
                 self.access.selected = 0;
                 if let Some(devices) = &mut self.access.devices {
-                    if devices.editor.take().is_some() || devices.delete_key.take().is_some() {
+                    if devices.editor.take().is_some()
+                        || devices.delete_key.take().is_some()
+                        || devices.rotate_key.take().is_some()
+                    {
                         return None;
                     }
                     if devices.card.take().is_some() {
@@ -612,6 +624,7 @@ impl App {
                         | Control::AccessDeviceName
                         | Control::AccessDeviceSave
                         | Control::AccessDeviceDelete
+                        | Control::AccessDeviceRotate
                         | Control::AccessDeviceConfirm
                         | Control::AccessDevicePage(_)
                         | Control::AccessDurationCustom

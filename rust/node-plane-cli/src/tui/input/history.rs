@@ -82,7 +82,7 @@ impl App {
                 let detail = if let Some(devices) = &state.devices {
                     if devices.editor.is_some() {
                         "device-editor"
-                    } else if devices.delete_key.is_some() {
+                    } else if devices.confirming() {
                         "device-delete"
                     } else if devices.card.is_some() {
                         "device-card"
