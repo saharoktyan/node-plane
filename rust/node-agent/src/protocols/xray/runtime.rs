@@ -61,7 +61,7 @@ impl AgentState {
         let script = self.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
         let config = self.node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
         let image = self
-            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044");
+            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0");
         let output = Command::new(script)
             .args([
                 config,

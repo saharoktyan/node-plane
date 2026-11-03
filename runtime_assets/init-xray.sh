@@ -8,7 +8,7 @@ TCP_PORT="${4:-443}"
 XHTTP_PORT="${5:-8443}"
 PATH_PREFIX="${6:-/assets}"
 FLOW="${7:-xtls-rprx-vision}"
-IMAGE="${8:-ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044}"
+IMAGE="${8:-ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0}"
 
 if [[ -z "$PUBLIC_HOST" ]]; then
   echo "PUBLIC_HOST is required" >&2
