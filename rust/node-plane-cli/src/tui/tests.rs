@@ -5792,6 +5792,56 @@ fn node_diagnostics_scrolls_all_checks_without_truncation() {
 }
 
 #[test]
+fn node_diagnostics_show_the_live_observation_below_the_checks() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Nodes;
+    app.nodes_sidebar = false;
+    app.nodes.card = Some(browser_node("lv1", "Europe"));
+    app.nodes.diagnostics = Some((
+        serde_json::json!({"checks":[{"id":"runtime_version","status":"ok"}],"observation":{
+            "checked_at":"2026-11-03T10:00:00.123+00:00","response_ms":42,"docker":true,
+            "agent_version":"0.5.0","runtime_version":"0.5.0","desired_runtime_version":"0.5.1",
+            "runtime_drift":true,"settings_pending":true,"applied_revision":3,"desired_revision":4,
+            "protocols":[{"protocol":"xray","installed":true,"running":false,"config_valid":null,
+                "ports":[{"transport":"tcp","network":"tcp","port":443}]}],
+            "host_metrics":{"cpu_used_percent":12.5,"ram_used_percent":50,"ram_total_bytes":2147483648_u64,
+                "ram_available_bytes":1073741824_u64,"disk_free_percent":75,"load1":0.5,"load5":0.25,
+                "load15":0.1,"cpus":2,"uptime_seconds":90061}}}),
+        serde_json::json!({"items":[],"total":0}),
+    ));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 60)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let text: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        })
+        .collect();
+    let text = text.join("\n");
+    for expected in [
+        "Checked 2026-11-03 10:00:00 UTC · 42 ms",
+        "OK · Docker",
+        "Settings revision 3 of 4 applied",
+        "Runtime files differ from the controller",
+        "VLESS",
+        "Failed · Running",
+        "Warning · Config valid",
+        "Ports: TCP / TCP 443",
+        "CPU: 12.5%",
+        "RAM: 50% · 1.0 GiB / 2.0 GiB",
+        "Disk: 25%",
+        "Load: 0.5 / 0.25 / 0.1 · 2 CPUs",
+        "Uptime: 1d 1h 1m",
+        "Agent: 0.5.0",
+        "Expected runtime: 0.5.1",
+    ] {
+        assert!(text.contains(expected), "{expected} missing in\n{text}");
+    }
+}
+
+#[test]
 fn new_profile_provisions_account_in_a_dialog_and_preserves_identity_on_back() {
     let mut app = test_profile_app();
     app.open_access();

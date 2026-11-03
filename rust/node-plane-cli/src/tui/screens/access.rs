@@ -1289,7 +1289,7 @@ fn profile_details(card: &serde_json::Value) -> Vec<String> {
     lines
 }
 
-fn traffic_size(bytes: u64) -> String {
+pub(in crate::tui) fn traffic_size(bytes: u64) -> String {
     let mut amount = bytes as f64;
     for unit in ["B", "KiB", "MiB", "GiB", "TiB"] {
         if amount < 1024.0 || unit == "TiB" {

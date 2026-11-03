@@ -438,7 +438,7 @@ pub(in crate::tui) fn draw_node_diagnostics(
         };
         let content = Layout::vertical([Constraint::Length(diagnostic_height), Constraint::Min(1)])
             .split(rows[0]);
-        let lines = if let Some(error) = facts["error_code"].as_str() {
+        let mut lines = if let Some(error) = facts["error_code"].as_str() {
             vec![
                 Line::from(format!(
                     "Unavailable · {}",
@@ -506,6 +506,9 @@ pub(in crate::tui) fn draw_node_diagnostics(
             ))))
             .collect()
         };
+        if facts["observation"].is_object() {
+            lines.extend(observation_lines(&facts["observation"]));
+        }
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let maximum = paragraph
             .line_count(content[0].width)
@@ -1419,6 +1422,184 @@ pub(in crate::tui) fn wizard_controls(wizard: &crate::node_wizard::Wizard) -> Ve
     }
     controls.extend(buttons.into_iter().map(|(_, c)| c));
     controls
+}
+
+/// The live server observation behind the checks: services, ports,
+/// resources and versions, as the bot shows them after a server check.
+pub(in crate::tui) fn observation_lines(observation: &serde_json::Value) -> Vec<Line<'static>> {
+    use super::access::traffic_size;
+    let heading = |text: &str| {
+        Line::from(Span::styled(
+            text.to_owned(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
+    };
+    let fact = |value: &serde_json::Value| match value.as_bool() {
+        Some(true) => "ok",
+        Some(false) => "failed",
+        None => "unknown",
+    };
+    let mut lines = vec![
+        Line::default(),
+        heading("Server"),
+        Line::from(format!(
+            "Checked {} UTC · {} ms",
+            observation["checked_at"]
+                .as_str()
+                .map_or("—".into(), |at| at
+                    .chars()
+                    .take(19)
+                    .collect::<String>()
+                    .replace('T', " ")),
+            observation["response_ms"].as_u64().unwrap_or(0)
+        )),
+    ];
+    let protocols = observation["protocols"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if !protocols.is_empty() {
+        lines.push(status_line(fact(&observation["docker"]), "Docker".into()));
+    }
+    if observation["settings_pending"] == true {
+        lines.push(status_line(
+            "warning",
+            format!(
+                "Settings revision {} of {} applied",
+                observation["applied_revision"].as_u64().unwrap_or(0),
+                observation["desired_revision"].as_u64().unwrap_or(0)
+            ),
+        ));
+    }
+    if !protocols.is_empty() && observation["runtime_drift"] == true {
+        lines.push(status_line(
+            "warning",
+            "Runtime files differ from the controller".into(),
+        ));
+    }
+    if protocols.is_empty() {
+        lines.push(Line::from("Agent only: no VPN protocols on this server"));
+    }
+    for item in protocols {
+        let name = match item["protocol"].as_str().unwrap_or("") {
+            "xray" => "VLESS",
+            "awg" => "AmneziaWG",
+            other => other,
+        };
+        lines.push(heading(name));
+        for (key, label) in [
+            ("installed", "Installed"),
+            ("running", "Running"),
+            ("config_valid", "Config valid"),
+        ] {
+            lines.push(status_line(fact(&item[key]), label.into()));
+        }
+        let ports: Vec<String> = item["ports"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .iter()
+            .map(|port| {
+                format!(
+                    "{} / {} {}",
+                    port["transport"].as_str().unwrap_or("").to_uppercase(),
+                    port["network"].as_str().unwrap_or("").to_uppercase(),
+                    port["port"].as_u64().map_or("—".into(), |p| p.to_string())
+                )
+            })
+            .collect();
+        if !ports.is_empty() {
+            lines.push(Line::from(format!("Ports: {}", ports.join(" · "))));
+        }
+    }
+    let metrics = &observation["host_metrics"];
+    lines.push(heading("Resources"));
+    lines.push(Line::from(format!(
+        "CPU: {}",
+        metrics["cpu_used_percent"]
+            .as_f64()
+            .map_or("unavailable".into(), |v| format!("{v}%"))
+    )));
+    for (key, label, total, free) in [
+        (
+            "ram_used_percent",
+            "RAM",
+            "ram_total_bytes",
+            "ram_available_bytes",
+        ),
+        (
+            "disk_free_percent",
+            "Disk",
+            "disk_total_bytes",
+            "disk_free_bytes",
+        ),
+    ] {
+        let Some(percent) = metrics[key].as_f64() else {
+            continue;
+        };
+        let used = if key == "disk_free_percent" {
+            100.0 - percent
+        } else {
+            percent
+        };
+        let mut value = format!("{label}: {used}%");
+        if let (Some(total), Some(free)) = (metrics[total].as_f64(), metrics[free].as_f64())
+            && total > 0.0
+            && free <= total
+        {
+            value += &format!(
+                " · {} / {}",
+                traffic_size((total - free) as u64),
+                traffic_size(total as u64)
+            );
+        }
+        lines.push(Line::from(value));
+    }
+    if metrics["load1"].is_number() {
+        let load: Vec<String> = ["load1", "load5", "load15"]
+            .iter()
+            .map(|key| metrics[*key].as_f64().map_or("—".into(), |v| v.to_string()))
+            .collect();
+        lines.push(Line::from(format!(
+            "Load: {} · {} CPUs",
+            load.join(" / "),
+            metrics["cpus"]
+                .as_f64()
+                .map_or("—".into(), |v| v.to_string())
+        )));
+    }
+    if let Some(seconds) = metrics["uptime_seconds"].as_f64() {
+        let minutes = seconds as u64 / 60;
+        lines.push(Line::from(format!(
+            "Uptime: {}d {}h {}m",
+            minutes / 1440,
+            minutes / 60 % 24,
+            minutes % 60
+        )));
+    }
+    lines.push(heading("Versions"));
+    let version = |key: &str| {
+        observation[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("—")
+            .to_owned()
+    };
+    lines.push(Line::from(format!("Agent: {}", version("agent_version"))));
+    lines.push(Line::from(format!(
+        "Runtime: {}",
+        version("runtime_version")
+    )));
+    if observation["desired_runtime_version"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
+    {
+        lines.push(Line::from(format!(
+            "Expected runtime: {}",
+            version("desired_runtime_version")
+        )));
+    }
+    lines
 }
 
 pub(in crate::tui) fn status_line(status: &str, label: String) -> Line<'static> {

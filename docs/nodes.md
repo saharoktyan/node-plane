@@ -38,6 +38,8 @@ Server cards include monthly traffic when available, with total, VLESS and AWG u
 
 Use the node's diagnostics/recovery actions for agent connectivity, runtime health and blocked operations. **Refresh** refreshes the card and current operation. Accepted work continues after you leave the screen.
 
+When the agent answers, the checks are followed by the live server observation — the same data as **Probe** on the Telegram server card: Docker, each protocol's installed/running/config state and ports, CPU, RAM, disk, load and uptime, and the agent, runtime and expected runtime versions. In Workstation it is under the checks in **Diagnostic & recovery** on the server card.
+
 A blocked outcome may be uncertain. Read the error and recovery choices before starting another setup or reinstall. Keep the existing command journals; they help determine what already ran.
 
 ## Remove a node
