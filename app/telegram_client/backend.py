@@ -89,6 +89,9 @@ class BackendClient:
     async def backup_job(self,user_id,job_id):
         return await self.request('GET',f'/api/v1/system/backups/jobs/{job_id}',telegram_user_id=user_id)
 
+    async def renewal_requests(self, user_id, offset=0):
+        return await self.request('GET', f'/api/v1/renewal-requests?offset={offset}', telegram_user_id=user_id)
+
     async def backup_export(self, user_id, backup_id) -> bytes:
         return await self.request('GET', f'/api/v1/system/backups/catalog/{backup_id}/export',
                                   telegram_user_id=user_id, binary=True)

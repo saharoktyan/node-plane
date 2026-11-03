@@ -431,10 +431,15 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
     status = tr(locale, status_key)
     facts = (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value'))
     quota = summary.get('quota')
+    renewal_pending = (summary.get('renewal') or {}).get('status') == 'pending'
     access = Section(tr(locale, 'account.rich.access'), tables=(Table(facts, (
         (tr(locale, 'account.rich.status'), status),
         (tr(locale, 'account.rich.expiry'), summary['expires_at'][:10] + ' UTC' if summary.get('expires_at') else tr(locale, 'profile.layout.unlimited')),
+        *(((tr(locale, 'renewal.member.title'), tr(locale, 'renewal.member.pending')),) if renewal_pending else ()),
         *(((tr(locale, 'quota.title'), quota_text(quota, locale)),) if quota else ()))),))
+    # An owner of access with a term may ask to extend it once at a time.
+    renew = ([button(user_id, tr(locale, 'renewal.member.ask'), 'renewal_request', profile_id, back_to)]
+             if summary.get('expires_at') and not renewal_pending else None)
     if not details:
         traffic = profile_traffic_section(summary, locale)
         compact_access = Section(access.title, tables=(Table(facts, (
@@ -442,6 +447,8 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
             (tr(locale, 'admin.nodes'), str(summary.get('node_count', len(summary['nodes'])))))),))
         compact_traffic = Section(traffic.title, traffic.lines) if traffic else None
         rows = [] if expired else [[button(user_id, tr(locale, 'account.details'), 'account_details', profile_id, back_to)]]
+        if renew:
+            rows.insert(0, renew)
         rows.append([button(user_id, tr(locale, 'back'), back_to)])
         await render(bot, chat_id, Screen(tr(locale, 'account.profile_title'),
             (summary['display_name'],), sections=(compact_access, *((compact_traffic,) if compact_traffic else ())),
@@ -1103,6 +1110,14 @@ async def user_action_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
             await show_account_profile(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, username=query.from_user.username,
                 back_to=action.args[1], details=True)
+        elif action.name == 'renewal_request':
+            request = await backend.request('POST', f'/api/v1/me/profiles/{action.args[0]}/renewal',
+                                            telegram_user_id=user_id, command=True)
+            await show_account_profile(chat_id, user_id, message_id, action.args[0],
+                bot, backend, state, username=query.from_user.username, back_to=action.args[1])
+            if request.get('created'):
+                from .admin_renewals import notify_admins
+                await notify_admins(bot, backend, request['id'])
         elif action.name == 'account_nodes_page':
             await show_account_profile(chat_id, user_id, message_id, action.args[0],
                 bot, backend, state, username=query.from_user.username,

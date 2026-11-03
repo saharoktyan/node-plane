@@ -26,6 +26,8 @@ def notification_content(item, locale):
         values = {**(item.get('payload') or {}), 'service': item['service_title']}
         # An exhausted quota suspended access, limited speed or only reports it.
         body = 'body'
+        if kind == 'renewal_approved':
+            values['date'] = values.get('expires_at', '')[:10]
         if kind == 'quota_exhausted' and values.get('suspended'):
             body = 'body_suspended'
         elif kind == 'quota_exhausted' and values.get('throttled'):

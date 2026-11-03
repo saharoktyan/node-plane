@@ -146,6 +146,8 @@ async def render_request_page(chat_id: int, user_id: int, message_id: int,
         callback_data=ReviewCallback(request_id=item['id']).pack())] for item in page['items']]
     if navigation:
         rows.append(navigation)
+    from .admin_renewals import entry_rows
+    rows.extend(await entry_rows(backend, user_id, locale))
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
         callback_data='admin_menu')])
     await render(bot, chat_id, Screen(tr(locale, 'requests.title'), tuple(lines),

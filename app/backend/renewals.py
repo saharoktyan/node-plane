@@ -91,7 +91,7 @@ class RenewalRequests:
             replay = conn.execute('SELECT * FROM backend_renewal_requests WHERE account_id=? AND create_key=?',
                                   (actor.account.id, command_key)).fetchone()
             if replay is not None:
-                return public(replay)
+                return {**public(replay), 'created': False}
             # The lock serializes requests of one profile.
             profile = conn.execute('''UPDATE backend_profiles SET desired_revision=desired_revision
                 WHERE id=? AND owner_account_id=?
@@ -105,30 +105,44 @@ class RenewalRequests:
             pending = conn.execute("SELECT * FROM backend_renewal_requests WHERE profile_id=? AND status='pending'",
                                    (profile_id,)).fetchone()
             if pending is not None:
-                return public(pending)
+                return {**public(pending), 'created': False}
             row = {'id': str(uuid4()), 'created_at': datetime.now(timezone.utc).isoformat()}
             conn.execute('''INSERT INTO backend_renewal_requests(id,profile_id,account_id,create_key,status,created_at)
                 VALUES (?,?,?,?,'pending',?)''', (row['id'], profile_id, actor.account.id, command_key, row['created_at']))
-            return public(conn.execute('SELECT * FROM backend_renewal_requests WHERE id=?', (row['id'],)).fetchone())
+            created = conn.execute('SELECT * FROM backend_renewal_requests WHERE id=?', (row['id'],)).fetchone()
+            return {**public(created), 'created': True}
+
+    # A request with what an administrator decides on: the profile's term,
+    # revision and tariff.
+    DETAIL = '''SELECT r.*, p.display_name, p.expires_at AS profile_expires_at,
+        p.desired_revision, t.title AS tariff_title, t.duration_days
+        FROM backend_renewal_requests r JOIN backend_profiles p ON p.id=r.profile_id
+        LEFT JOIN backend_profile_tariffs a ON a.profile_id=p.id
+        LEFT JOIN backend_tariffs t ON t.id=a.tariff_id'''
+
+    @staticmethod
+    def _detail(row):
+        return {**public(row), 'display_name': row['display_name'], 'profile_expires_at': row['profile_expires_at'],
+                'profile_revision': row['desired_revision'],
+                'tariff': None if row['tariff_title'] is None else {'title': row['tariff_title'],
+                                                                    'duration_days': row['duration_days']}}
 
     def pending(self, actor, offset=0, limit=20):
         require_permission(actor, 'profiles.manage')
         with self.db.connect() as conn:
             total = conn.execute("SELECT COUNT(*) AS count FROM backend_renewal_requests WHERE status='pending'"
                                  ).fetchone()['count']
-            rows = conn.execute('''SELECT r.*, p.display_name, p.expires_at AS profile_expires_at,
-                p.desired_revision, t.title AS tariff_title, t.duration_days
-                FROM backend_renewal_requests r JOIN backend_profiles p ON p.id=r.profile_id
-                LEFT JOIN backend_profile_tariffs a ON a.profile_id=p.id
-                LEFT JOIN backend_tariffs t ON t.id=a.tariff_id
-                WHERE r.status='pending' ORDER BY r.created_at, r.id LIMIT ? OFFSET ?''',
-                (limit, offset)).fetchall()
-        return {'total': total, 'offset': offset, 'items': [
-            {**public(row), 'display_name': row['display_name'], 'profile_expires_at': row['profile_expires_at'],
-             'profile_revision': row['desired_revision'],
-             'tariff': None if row['tariff_title'] is None else {'title': row['tariff_title'],
-                                                                 'duration_days': row['duration_days']}}
-            for row in rows]}
+            rows = conn.execute(self.DETAIL + " WHERE r.status='pending' ORDER BY r.created_at, r.id LIMIT ? OFFSET ?",
+                                (limit, offset)).fetchall()
+        return {'total': total, 'offset': offset, 'items': [self._detail(row) for row in rows]}
+
+    def get(self, actor, request_id):
+        require_permission(actor, 'profiles.manage')
+        with self.db.connect() as conn:
+            row = conn.execute(self.DETAIL + ' WHERE r.id=?', (str(request_id),)).fetchone()
+        if row is None:
+            raise AccessDenied('resource_not_found', 404)
+        return self._detail(row)
 
     def reject(self, actor, request_id):
         require_permission(actor, 'profiles.manage')

@@ -20,6 +20,7 @@ from .routers import admin_quotas
 from .routers import admin_speed_limits
 from .routers import admin_policy_overrides
 from .routers import admin_tariffs
+from .routers import admin_renewals
 from .routers import admin_node_policies
 from .routers import admin_installation_defaults
 from .routers import navigation
@@ -70,6 +71,7 @@ async def main() -> None:
             dispatcher.include_router(admin_speed_limits.router)
             dispatcher.include_router(admin_policy_overrides.router)
             dispatcher.include_router(admin_tariffs.router)
+            dispatcher.include_router(admin_renewals.router)
             dispatcher.include_router(admin_node_policies.router)
             dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)

@@ -39,7 +39,10 @@ class RenewalTests(fixture.Fixture, unittest.TestCase):
         key = str(uuid4())
         first = self.ask(key)
         self.assertEqual(first.status_code, 201, first.text)
-        self.assertEqual(self.ask(key).json(), first.json())
+        self.assertTrue(first.json()['created'])
+        self.assertEqual(self.ask(key).json(), {**first.json(), 'created': False})
+        detail = self.client.get(f"/api/v1/renewal-requests/{first.json()['id']}", headers=self.headers_for()).json()
+        self.assertEqual((detail['status'], detail['tariff']), ('pending', None))
         # A second request returns the pending one.
         self.assertEqual(self.ask().json()['id'], first.json()['id'])
         listed = self.client.get('/api/v1/renewal-requests', headers=self.headers_for()).json()

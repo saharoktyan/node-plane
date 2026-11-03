@@ -112,3 +112,60 @@ class InheritTextTests(IsolatedAsyncioTestCase):
         self.assertEqual(tariffs.inherit_text('en', {'tariff': 2}, 5, label, 'devlimit.inherit'), 'As tariff (2)')
         self.assertEqual(tariffs.inherit_text('en', {'tariff': None}, 5, label, 'devlimit.inherit'),
                          'As installation (5)')
+
+
+class RenewalScreenTests(IsolatedAsyncioTestCase):
+    setUp = fixture.ProfileRichTests.setUp
+
+    async def test_member_asks_once_and_administrators_are_told_about_new_requests(self):
+        from telegram_client.routers import admin_renewals, user
+        summary = {'profile_id': 'p1', 'display_name': 'Alice', 'frozen': False, 'expired': False,
+                   'expires_at': '2026-12-01T00:00:00+00:00', 'nodes': [], 'renewal': None}
+        backend = SimpleNamespace(member_profile_summary=AsyncMock(return_value=summary),
+                                  request=AsyncMock(return_value={'id': 'r1', 'created': True}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
+        entry = next(b for row in draw.call_args.args[3] for b in row if b.text == 'Extend access')
+        action = user.actions[entry.callback_data.removeprefix('u:')]
+        self.assertEqual((action.name, action.args), ('renewal_request', ('p1', 'home')))
+        summary['renewal'] = {'status': 'pending'}
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
+        self.assertNotIn('Extend access', [b.text for row in draw.call_args.args[3] for b in row])
+        self.assertIn(('Renewal', 'Requested, waiting for an administrator'),
+                      draw.call_args.args[2].sections[0].tables[0].rows)
+        # Access without a term offers no renewal.
+        summary.update(expires_at=None, renewal=None)
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_account_profile(123, 123, 77, 'p1', self.bot, backend, self.state)
+        self.assertNotIn('Extend access', [b.text for row in draw.call_args.args[3] for b in row])
+        self.assertEqual([b.callback_data for row in admin_renewals.decision_rows('en', {'id': 'r1',
+            'tariff': {'duration_days': 30}}) for b in row], ['rnw_ok:r1:30', 'rnw_no:r1'])
+
+    async def test_decisions_use_the_seen_revision_and_offered_days(self):
+        from telegram_client.routers import admin_renewals
+        item = {'id': 'r1', 'status': 'pending', 'profile_revision': 9, 'tariff': None,
+                'display_name': 'Alice', 'profile_expires_at': None, 'created_at': '2026-11-03T10:00:00'}
+        calls = []
+
+        async def request(method, path, **kwargs):
+            calls.append((method, path, kwargs.get('body'), kwargs.get('revision')))
+            if path.endswith('/approve'):
+                item.update(status='approved', expires_at='2027-01-01T00:00:00+00:00')
+            return item
+        backend = SimpleNamespace(request=AsyncMock(side_effect=request))
+        self.query.data = 'rnw_ok:r1:45'  # not offered
+        with patch.object(admin_renewals, 'render', new_callable=AsyncMock):
+            await admin_renewals.decide_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual([c[0] for c in calls], ['GET'])
+        self.query.data = 'rnw_ok:r1:30'
+        with patch.object(admin_renewals, 'render', new_callable=AsyncMock) as draw:
+            await admin_renewals.decide_cb(self.query, self.bot, backend, self.state)
+        self.assertIn(('POST', '/api/v1/renewal-requests/r1/approve', {'days': 30}, 9), calls)
+        self.assertIn('Access extended until 2027-01-01.', draw.call_args.args[2].lines)
+        # A decided request is not decided again.
+        self.query.data = 'rnw_no:r1'
+        calls.clear()
+        with patch.object(admin_renewals, 'render', new_callable=AsyncMock):
+            await admin_renewals.decide_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual([c[0] for c in calls], ['GET'])

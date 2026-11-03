@@ -2189,6 +2189,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from .renewals import RenewalRequests
         return RenewalRequests(db).pending(current, offset)
 
+    @app.get('/api/v1/renewal-requests/{request_id}')
+    def renewal_request(request_id: UUID, current=Depends(actor)):
+        from .renewals import RenewalRequests
+        return RenewalRequests(db).get(current, request_id)
+
     @app.post('/api/v1/renewal-requests/{request_id}/approve', response_model=ProfileCommandOutput)
     def approve_renewal(request_id: UUID, body: RenewalApproveInput, request: Request, response: Response,
                         command_key: Annotated[str, Header(alias='Idempotency-Key')],
