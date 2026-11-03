@@ -683,6 +683,9 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
         "agent_firewall_failed" => {
             "Could not allow the controller through the agent server firewall. Check UFW and retry setup."
         }
+        "runtime_owner_conflict" => {
+            "This server already runs the VPN runtime of another node, for example from another installation. Nothing was changed; check the server address."
+        }
         "agent_journal_owner_conflict" => {
             "The agent belongs to another active node. Check the server address and its registry entry."
         }

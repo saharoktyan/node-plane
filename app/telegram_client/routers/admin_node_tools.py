@@ -353,7 +353,9 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state)
              f"{min(stages.index(phase) + 1, 3)}/3 · {tr(locale, label)}")
     if job.get('waiting_for_agent'):
         lines += (tr(locale, 'node_tools.waiting_agent'),)
-    if job['status'] == 'blocked':
+    if job['status'] == 'failed' and job.get('error_code') == 'runtime_owner_conflict':
+        lines += (tr(locale, 'recovery.cause.runtime_owner_conflict'),)
+    elif job['status'] in {'blocked', 'failed'}:
         lines += (error(locale, BackendError(job.get('error_code') or 'bootstrap_unconfirmed', 409)),)
         if job.get('error_code'):
             lines += (job['error_code'],)
@@ -414,6 +416,8 @@ async def show_job(chat_id, user_id, message_id, job, bot, state, backend=None):
             lines.append(tr(locale, 'node_tools.firewall_unmanaged'))
     elif job['status'] == 'blocked':
         lines.append(tr(locale, 'node_tools.blocked'))
+    elif result.get('error_code') == 'runtime_owner_conflict':
+        lines.append(tr(locale, 'recovery.cause.runtime_owner_conflict'))
     rows = []
     sections = []
     if result.get('ports') and job['status'] == 'succeeded':

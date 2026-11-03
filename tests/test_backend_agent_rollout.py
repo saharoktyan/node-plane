@@ -282,6 +282,28 @@ class BackendAgentRolloutTests(TestCase):
             write_stage(progress_path(task['id']), task['id'], 'agent_firewall')
             self.assertEqual(service.resume_preflight(actor, task['id'])['status'], 'awaiting_executor')
 
+    def test_a_runtime_of_another_node_stops_rollout_before_any_change(self):
+        from backend.authorization import Actor, Principal, PrincipalKind
+        from backend.installation_progress import progress_path, write_stage
+        from backend.recovery import overview
+        actor = Actor(Principal('admin', PrincipalKind.ACCOUNT,
+            frozenset({'nodes.manage', 'maintenance.manage'})), self.admin)
+        self.node()
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
+        service = AgentRolloutService(self.db)
+        task = service.request(actor, 'lv1', str(uuid4()), transport='ssh', ssh_target='root@lv1.example')
+        with TemporaryDirectory() as shared, patch.dict(os.environ,
+                {'NODE_PLANE_SHARED_DIR': shared, 'NODE_PLANE_APP_DIR': '/opt/node-plane/current'}):
+            write_stage(progress_path(task['id']), task['id'], 'check_ssh')
+            with patch('backend.agent_rollout.subprocess.run', return_value=SimpleNamespace(returncode=1, stdout='',
+                    stderr="RUNTIME_OWNER_CONFLICT: lv1 already runs the VPN runtime of node 'ger2'; nothing was changed.")):
+                service.run_one()
+            row = service.get(actor, task['id'])
+            self.assertEqual(row['failure_code'], 'runtime_owner_conflict')
+            item = next(item for item in overview(self.db, actor)['items'] if item['id'] == task['id'])
+            self.assertIn('resume', item['actions'])
+
     def test_release_binary_unavailable_failure_is_exposed_from_script_output(self):
         service = AgentRolloutService(self.db)
         for stderr in (

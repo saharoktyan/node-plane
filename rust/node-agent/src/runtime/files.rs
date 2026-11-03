@@ -12,7 +12,29 @@ use crate::agent::v1::{
 use crate::state::AgentState;
 
 impl AgentState {
+    /// Refuses to touch a VPN runtime that node.env assigns to another node,
+    /// for example one left by another installation. Nothing is written.
+    pub(crate) fn ensure_runtime_owner(&self) -> Result<(), Status> {
+        if !Path::new(&self.config.node_env_path).exists() {
+            return Ok(());
+        }
+        let owner = self.node_env_value("SERVER_KEY", "");
+        if owner == self.config.node_key {
+            return Ok(());
+        }
+        let owner: String = owner
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+            .take(64)
+            .collect();
+        Err(Status::failed_precondition(format!(
+            "runtime_owner_conflict: {}",
+            if owner.is_empty() { "unknown" } else { &owner }
+        )))
+    }
+
     pub(crate) fn sync_node_env(&self, content: &str) -> Result<SyncNodeEnvResponse, Status> {
+        self.ensure_runtime_owner()?;
         let _guard = self.guard_fenced_maintenance()?;
         let path = Path::new(&self.config.node_env_path);
         let Some(parent) = path.parent() else {
@@ -77,6 +99,7 @@ impl AgentState {
         &self,
         request: SyncRuntimeFilesRequest,
     ) -> Result<SyncRuntimeFilesResponse, Status> {
+        self.ensure_runtime_owner()?;
         // Code and container assets may still be upgraded. Existing protocol
         // config and node.env must not be replaced around the revision fence.
         let xray_config = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
@@ -138,5 +161,56 @@ impl AgentState {
                 .to_string();
         }
         default.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::agent::v1::{RuntimeFileSpec, SyncRuntimeFilesRequest};
+    use crate::config::AgentConfig;
+    use crate::state::AgentState;
+    use std::fs;
+
+    #[test]
+    fn a_runtime_of_another_node_is_never_written() {
+        let root = std::env::temp_dir().join(format!("np-owner-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("runtime")).unwrap();
+        let node_env = root.join("node.env");
+        let state = AgentState::new(AgentConfig {
+            node_key: "de1".into(),
+            runtime_root: root.join("runtime").display().to_string(),
+            node_env_path: node_env.display().to_string(),
+            ..AgentConfig::default()
+        });
+        let request = || SyncRuntimeFilesRequest {
+            files: vec![RuntimeFileSpec {
+                path: "/opt/node-plane-runtime/VERSION".into(),
+                content: "0.5.0\n".into(),
+                mode: "0644".into(),
+            }],
+        };
+        // A fresh server has no node.env: files may be written.
+        state.sync_runtime_files(request()).unwrap();
+        for (content, owner) in [
+            ("SERVER_KEY=ger2\n", "ger2"),
+            ("XRAY_CONFIG=/x\n", "unknown"),
+            ("SERVER_KEY='$(touch x)'\n", "touchx"),
+        ] {
+            fs::write(&node_env, content).unwrap();
+            fs::write(root.join("runtime/VERSION"), "0.3.9\n").unwrap();
+            let error = state.sync_runtime_files(request()).unwrap_err();
+            assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+            assert_eq!(error.message(), format!("runtime_owner_conflict: {owner}"));
+            assert_eq!(
+                fs::read_to_string(root.join("runtime/VERSION")).unwrap(),
+                "0.3.9\n"
+            );
+            assert!(state.sync_node_env("SERVER_KEY=de1\n").is_err());
+            assert_eq!(fs::read_to_string(&node_env).unwrap(), content);
+        }
+        fs::write(&node_env, "SERVER_KEY=\"de1\"\n").unwrap();
+        state.sync_runtime_files(request()).unwrap();
+        let _ = fs::remove_dir_all(root);
     }
 }

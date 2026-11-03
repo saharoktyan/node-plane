@@ -238,10 +238,31 @@ def managed_ports():
     return owned
 
 
+OWNED_ACTIONS = {'cleanup_runtime', 'bootstrap', 'reinstall_clean', 'reinstall_keep',
+                 'sync_env', 'sync_xray', 'sync_runtime', 'regenerate_entropy'}
+OWNER_CONFLICT_EXIT = 3
+
+
+class OwnerConflict(Exception):
+    """node.env assigns the runtime to another node; nothing was changed."""
+
+
+def runtime_owner(env_path=Path('/etc/node-plane/node.env')):
+    """SERVER_KEY of node.env, parsed without running it: the file may
+    belong to another installation."""
+    import shlex
+    owner = ''
+    for line in Path(env_path).read_text().splitlines():
+        name, sep, value = line.strip().partition('=')
+        if sep and name == 'SERVER_KEY':
+            try:
+                owner = (shlex.split(value) or [''])[0]
+            except ValueError:
+                owner = ''
+    return owner
+
+
 def run(action, intent, lock_fd):
-    if action in {'cleanup_runtime', 'bootstrap', 'reinstall_clean', 'reinstall_keep',
-                  'sync_env', 'sync_xray', 'sync_runtime', 'regenerate_entropy'}:
-        intents.verify_node_runtime_owner(intent)
     if action == 'cleanup_runtime':
         remove_protocol_runtime(lock_fd, intent['protocols'])
         return {'cleaned': True}
@@ -435,6 +456,12 @@ def execute(action, command_id, intent, recover=False, path='/etc/node-plane/pro
         raise ValueError('invalid node operation intent')
     if intent['command_id'] != command_id:
         raise ValueError('command identity mismatch')
+    if action in OWNED_ACTIONS and not resolving and not recover:
+        # Before the journal or any file exists: a refusal leaves no command
+        # with an unknown outcome behind.
+        owner = runtime_owner()
+        if owner != intent['node_key']:
+            raise OwnerConflict(re.sub(r'[^A-Za-z0-9_.-]', '', owner)[:64] or 'unknown')
     fingerprint = hashlib.sha256(json.dumps({'action': action, 'intent': intent}, sort_keys=True).encode()).hexdigest()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -499,5 +526,8 @@ if __name__ == '__main__':
     try:
         action, identity, raw, recover = sys.argv[1:]
         print(json.dumps(execute(action, identity, json.loads(raw), recover == 'true')))
+    except OwnerConflict as conflict:
+        sys.stderr.write(f'runtime_owner_conflict: {conflict}\n')
+        raise SystemExit(OWNER_CONFLICT_EXIT)
     except Exception:
         raise SystemExit('node operation requires reconciliation')

@@ -318,3 +318,36 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue(self.service.run_one())
         self.assertFalse(self.service.run_one())
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_node_jobs').fetchone()[0],1)
+
+
+class RuntimeOwnerTests(unittest.TestCase):
+    setUp = BootstrapTests.setUp
+    queue = BootstrapTests.queue
+
+    def test_a_runtime_of_another_node_fails_setup_without_a_block(self):
+        import grpc
+        import json
+
+        class Refused(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.FAILED_PRECONDITION
+
+            def details(self):
+                return 'runtime_owner_conflict: ger2'
+
+        def refuse(*args, **kwargs):
+            raise Refused()
+        parent = self.queue()
+        for _ in range(3):
+            self.service.run_one()
+        child = self.service.get(self.actor, parent['id'])['child_id']
+        NodeOperations(self.db, SimpleNamespace(node_action=refuse)).run_one()
+        with self.db.connect() as conn:
+            job = conn.execute('SELECT status,result_json FROM backend_node_jobs WHERE id=?', (child,)).fetchone()
+        self.assertEqual((job['status'], json.loads(job['result_json'])),
+                         ('failed', {'error_code': 'runtime_owner_conflict', 'owner': 'ger2'}))
+        self.service.run_one()
+        current = self.service.get(self.actor, parent['id'])
+        self.assertEqual((current['status'], current['error_code']), ('failed', 'runtime_owner_conflict'))
+        from backend.recovery import overview
+        self.assertEqual(overview(self.db, self.actor)['items'], [])

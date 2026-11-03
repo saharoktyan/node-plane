@@ -408,6 +408,8 @@ def failure_code(error):
         if error.code() == grpc.StatusCode.FAILED_PRECONDITION:
             if error.details() in {'no node-agent target configured', 'agent not configured'}:
                 return 'node_agent_unconfigured'
+            if (error.details() or '').startswith('runtime_owner_conflict: '):
+                return 'runtime_owner_conflict'
             return 'journal_unconfirmed'
     if isinstance(error, TimeoutError):
         return 'operation_timeout'

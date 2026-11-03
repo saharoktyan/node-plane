@@ -1267,6 +1267,19 @@ PY
       failed=$((failed + 1))
       continue
     fi
+    # Before anything on the host changes: a VPN runtime of another node, for
+    # example from another installation, is never adopted or overwritten.
+    local runtime_owner owner_status=0
+    runtime_owner="$(agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- '${server_key}'" < <(runtime_owner_script))" || owner_status=$?
+    if [[ $owner_status -eq 3 ]]; then
+      echo "RUNTIME_OWNER_CONFLICT: ${server_key} already runs the VPN runtime of node '${runtime_owner//[^A-Za-z0-9_.-]/}'; nothing was changed." >&2
+      failed=$((failed + 1))
+      continue
+    elif [[ $owner_status -ne 0 ]]; then
+      echo "SSH_PREREQUISITES_FAILED: Could not check the VPN runtime owner on ${server_key}." >&2
+      failed=$((failed + 1))
+      continue
+    fi
 
     set_step "configure agent firewall for ${server_key}"
     if ! agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- '${AGENT_PORT}'" < <(agent_firewall_script); then

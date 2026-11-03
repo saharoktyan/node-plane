@@ -71,3 +71,30 @@ sudo ufw allow proto tcp from "$controller_ip" to any port "$port" comment 'Node
 echo "Agent TCP port ${port} allowed from controller ${controller_ip}."
 FIREWALL
 }
+
+# Read-only: whose VPN runtime the server already runs. Prints the owning
+# node key and exits 3 when node.env names another node; changes nothing.
+# node.env is parsed, never sourced: it may belong to another installation.
+runtime_owner_script() {
+  cat <<'OWNER'
+set -euo pipefail
+env="${2:-/etc/node-plane/node.env}"
+sudo test -e "$env" || exit 0
+owner="$(sudo cat "$env" | python3 -c '
+import shlex, sys
+owner = ""
+for line in sys.stdin:
+    name, sep, value = line.strip().partition("=")
+    if sep and name == "SERVER_KEY":
+        try:
+            owner = (shlex.split(value) or [""])[0]
+        except ValueError:
+            owner = ""
+print(owner)
+')"
+if [ "$owner" != "${1:-}" ]; then
+  printf '%s\n' "${owner:-unknown}"
+  exit 3
+fi
+OWNER
+}

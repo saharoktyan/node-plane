@@ -1,5 +1,6 @@
 """Durable backend node installation and maintenance jobs."""
 import json
+import re
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -207,6 +208,13 @@ class NodeOperations:
             self._finish(row, result)
         except Exception as error:
             from .recovery import failure_code
+            code = failure_code(error)
+            # The node refused a VPN runtime of another node before changing
+            # anything: a known outcome, not one to recover.
+            status, result = 'blocked', {'error_code': code}
+            if code == 'runtime_owner_conflict':
+                owner = re.sub(r'[^A-Za-z0-9_.-]', '', error.details().partition(': ')[2])[:64]
+                status, result = 'failed', {'error_code': code, 'owner': owner or 'unknown'}
             with self.db.transaction() as conn:
-                conn.execute("UPDATE backend_node_jobs SET status = 'blocked',result_json=? WHERE id = ? AND status = 'running'", (json.dumps({'error_code': failure_code(error)}), row['id']))
+                conn.execute("UPDATE backend_node_jobs SET status = ?,result_json=? WHERE id = ? AND status = 'running'", (status, json.dumps(result), row['id']))
         return True

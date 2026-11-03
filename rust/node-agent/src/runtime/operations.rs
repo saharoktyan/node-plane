@@ -68,7 +68,10 @@ impl AgentState {
         })
         .await
         .map_err(|_| Status::internal("node operation worker unavailable"))?
-        .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
+        .map_err(|status| {
+            owner_conflict(status.message())
+                .unwrap_or_else(|| Status::failed_precondition("node operation needs attention"))
+        })?;
         let mut value: Value = serde_json::from_str(&output)
             .map_err(|_| Status::internal("invalid node operation response"))?;
         if inspect
@@ -84,6 +87,21 @@ impl AgentState {
             payload_json: value.to_string(),
         })
     }
+}
+
+/// The script refused a VPN runtime of another node before changing
+/// anything; this outcome is certain, unlike other failures.
+fn owner_conflict(message: &str) -> Option<Status> {
+    let (_, owner) = message.split_once("failed: runtime_owner_conflict: ")?;
+    let owner: String = owner
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        .take(64)
+        .collect();
+    Some(Status::failed_precondition(format!(
+        "runtime_owner_conflict: {}",
+        if owner.is_empty() { "unknown" } else { &owner }
+    )))
 }
 
 pub(crate) fn read_operation_progress(directory: &Path, command_id: &str) -> Value {
@@ -121,6 +139,16 @@ pub(crate) fn read_operation_progress(directory: &Path, command_id: &str) -> Val
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_an_owner_refusal_keeps_its_reason() {
+        let status = super::owner_conflict(
+            "backend-node-operation.py failed: runtime_owner_conflict: ger2\n",
+        )
+        .unwrap();
+        assert_eq!(status.message(), "runtime_owner_conflict: ger2");
+        assert!(super::owner_conflict("backend-node-operation.py failed: boom").is_none());
+    }
+
     #[test]
     fn progress_lookup_is_bounded_read_only_and_checks_command_identity() {
         let directory = std::env::temp_dir().join(format!(

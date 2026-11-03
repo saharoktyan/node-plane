@@ -2070,7 +2070,8 @@ async def show_rollout_status(chat_id, user_id, message_id, task_id, bot, backen
         lines.append(tr(locale, 'nodes.rollout.ssh_prerequisites'))
     if task.get('failure_code') == 'agent_firewall_failed':
         lines.append(tr(locale, 'nodes.rollout.agent_firewall_failed'))
-    if task.get('failure_code') in {'agent_journal_owner_conflict', 'agent_previous_node_retired'}:
+    if task.get('failure_code') in {'agent_journal_owner_conflict', 'agent_previous_node_retired',
+                                    'runtime_owner_conflict'}:
         lines.append(tr(locale, 'recovery.cause.' + task['failure_code']))
     if task.get('failure_code') in {'ssh_authentication', 'ssh_host_key'}:
         lines.append(tr(locale, 'nodes.rollout.' + task['failure_code']))

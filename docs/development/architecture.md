@@ -43,7 +43,7 @@ Root access remains a privileged trust boundary. Audit attributes actions but ca
 
 The controller installation manifest identifies owned directories, services and local database resources. Node removal captures configured runtime, agent, TLS and journal paths against a host identity. Full retirement requires independent verification of the captured resources.
 
-Delete managed containers by verified identity and mounts. Preserve shared host packages, Docker, unrelated containers/images, firewall rules and unrelated SSH keys. Registry-only retirement records unverified host state. An agent-only registration does not acquire ownership of pre-existing VPN runtime. Full removal stops before remote cleanup if that runtime is present or its absence cannot be confirmed; it does not silently adopt or delete it.
+Delete managed containers by verified identity and mounts. Preserve shared host packages, Docker, unrelated containers/images, firewall rules and unrelated SSH keys. Registry-only retirement records unverified host state. An agent-only registration does not acquire ownership of pre-existing VPN runtime. A server whose node.env names another node, for example one left by another installation, is refused before anything on it changes: the agent rollout checks it right after SSH access, the agent refuses to write runtime files or node.env for it, and node operations check it before journaling a command. Such a refusal is a known outcome: the operation fails with `runtime_owner_conflict` instead of blocking. Full removal stops before remote cleanup if that runtime is present or its absence cannot be confirmed; it does not silently adopt or delete it.
 
 ## Persistence and compatibility
 

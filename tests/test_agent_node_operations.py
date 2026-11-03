@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 SPEC = importlib.util.spec_from_file_location('node_operations', Path(__file__).resolve().parents[1] / 'runtime_assets/backend-node-operation.py')
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+RUNTIME_OWNER = MODULE.runtime_owner
 
 
 class AgentNodeOperationTests(unittest.TestCase):
@@ -104,7 +105,7 @@ class AgentNodeOperationTests(unittest.TestCase):
         policy.start()
         self.addCleanup(policy.stop)
         self.path = Path(self.temp.name) / 'journal.sqlite3'
-        owner = patch.object(MODULE.intents, 'verify_node_runtime_owner')
+        owner = patch.object(MODULE, 'runtime_owner', return_value='n1')
         self.owner_check = owner.start()
         self.addCleanup(owner.stop)
         self.intent = {'node_key': 'n1', 'command_id': 'job1', 'revision': 2,
@@ -112,6 +113,25 @@ class AgentNodeOperationTests(unittest.TestCase):
 
     def execute(self, action='reinstall_clean', recover=False):
         return MODULE.execute(action, 'job1', self.intent, recover, self.path)
+
+    def test_a_runtime_of_another_node_is_refused_before_the_journal(self):
+        self.owner_check.return_value = 'ger2'
+        with patch.object(MODULE, 'run') as run:
+            with self.assertRaises(MODULE.OwnerConflict) as refused:
+                self.execute('bootstrap')
+        self.assertEqual(str(refused.exception), 'ger2')
+        run.assert_not_called()
+        self.assertFalse(self.path.exists())
+        self.assertFalse(Path(str(self.path) + '.lock').exists())
+
+    def test_the_owner_is_parsed_without_running_node_env(self):
+        env = Path(self.temp.name) / 'node.env'
+        marker = Path(self.temp.name) / 'ran'
+        env.write_text(f"XRAY_CONFIG=/x\nSERVER_KEY='ger2'\nAWG=$(touch {marker})\n")
+        self.assertEqual(RUNTIME_OWNER(env), 'ger2')
+        env.write_text('XRAY_CONFIG=/x\n')
+        self.assertEqual(RUNTIME_OWNER(env), '')
+        self.assertFalse(marker.exists())
 
     def test_first_protocol_install_and_both_reinstalls_use_firewall_settings_path(self):
         for action in ('bootstrap', 'reinstall_keep', 'reinstall_clean'):

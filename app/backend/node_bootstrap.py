@@ -118,7 +118,8 @@ class NodeBootstrapService:
                 adopted = False
             if row['child_id']:
                 table = 'backend_agent_rollouts' if row['child_kind'] == 'agent-rollouts' else 'backend_node_jobs'
-                child = conn.execute(f'SELECT status FROM {table} WHERE id=?', (row['child_id'],)).fetchone()
+                result = 'result_json' if table == 'backend_node_jobs' else 'NULL AS result_json'
+                child = conn.execute(f'SELECT status,{result} FROM {table} WHERE id=?', (row['child_id'],)).fetchone()
         if adopted:
             self._change(row, status='running', child=row['child_id'], kind=row['child_kind'])
             return True
@@ -146,7 +147,10 @@ class NodeBootstrapService:
                     self._change(row, status='blocked', child=row['child_id'], kind=row['child_kind'], error='child_operation_blocked')
                     return True
                 return False
-            if child['status'] != 'succeeded':
+            if child['status'] == 'failed':
+                code = json.loads(child['result_json'] or '{}').get('error_code') or 'child_operation_failed'
+                self._change(row, status='failed', child=row['child_id'], kind=row['child_kind'], error=code)
+            elif child['status'] != 'succeeded':
                 self._change(row, status='superseded', error='child_operation_superseded')
             elif row['phase'] == 'protocols':
                 self._change(row, phase='done', status='succeeded')
@@ -191,7 +195,6 @@ class NodeBootstrapService:
                 facts = self.driver.inspect_node_services(row['node_key'])
             except Exception:
                 raise AccessDenied('node_agent_unavailable', 503) from None
-            import json
             protocols = json.loads(node['protocols_json'])
             if protocols and all(facts.get(p + '_config_valid') is True and
                                  facts.get(p + '_running') is True for p in protocols):

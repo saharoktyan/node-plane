@@ -134,7 +134,8 @@ class AgentRolloutService:
         return bool(row['status'] == 'blocked' and node and not abandoned and failure
                     and (failure['code'] in {'release_binary_unavailable', 'rust_required'}
                          or progress and progress['stage'] == 'check_ssh'
-                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites'}
+                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites',
+                                                 'runtime_owner_conflict'}
                          or progress and progress['stage'] == 'agent_firewall'
                          and failure['code'] == 'agent_firewall_failed'
                          or progress and progress['stage'] == 'archive_journals'
@@ -266,6 +267,8 @@ class AgentRolloutService:
             self._failure_code = 'ssh_prerequisites'
         elif 'AGENT_FIREWALL_FAILED:' in output:
             self._failure_code = 'agent_firewall_failed'
+        elif 'RUNTIME_OWNER_CONFLICT:' in output:
+            self._failure_code = 'runtime_owner_conflict'
         elif 'AGENT_JOURNAL_OWNER_CONFLICT:' in output:
             self._failure_code = 'agent_journal_owner_conflict'
         return result.returncode == 0

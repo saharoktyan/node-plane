@@ -1024,6 +1024,11 @@ pub(in crate::tui) fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits:
                     format!(" · {}", operation.error)
                 }
             )));
+            if operation.error == "runtime_owner_conflict" {
+                lines.push(Line::from(crate::workstation::recovery_reason(
+                    &operation.error,
+                )));
+            }
             lines.push(Line::from(operation.id.to_string()));
         }
         if let Some(facts) = &node.services {

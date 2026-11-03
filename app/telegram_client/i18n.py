@@ -755,6 +755,7 @@ CATALOG = {
         'operation.no_targets': 'нет целей', 'operation.awaiting_executor': 'в очереди',
         'operation.running': 'в работе', 'operation.succeeded': 'успешно',
         'operation.blocked': 'ошибка', 'operation.superseded': 'заменено новой операцией',
+        'operation.failed': 'не выполнено',
         'role.member': 'пользователь', 'role.admin': 'администратор',
     },
     'en': {
@@ -1510,6 +1511,7 @@ CATALOG = {
         'operation.no_targets': 'no targets', 'operation.awaiting_executor': 'queued',
         'operation.running': 'running', 'operation.succeeded': 'succeeded',
         'operation.blocked': 'blocked', 'operation.superseded': 'superseded',
+        'operation.failed': 'failed',
         'role.member': 'member', 'role.admin': 'admin',
     },
 }
@@ -2816,6 +2818,7 @@ CATALOG['en'].update({
     'recovery.cause.ssh_prerequisites': 'The SSH user needs root or passwordless sudo; systemd and sha256sum must be installed.',
     'recovery.cause.agent_firewall_failed': 'Could not allow the controller through the agent server firewall. Check UFW and retry setup.',
     'recovery.cause.agent_journal_owner_conflict': 'The agent belongs to another active node. Check the server address and its registry entry.',
+    'recovery.cause.runtime_owner_conflict': 'This server already runs the VPN runtime of another node, for example from another installation. Nothing was changed. Check the server address; remove that runtime there before setting up this node.',
     'recovery.cause.agent_previous_node_retired': 'The previous node was removed. Resume setup to archive its journals and bind this node.',
     'recovery.agent_setup_retryable': 'Previous ownership confirmed: the old node was removed. Resume setup for this operation.',
     'recovery.cause.node_agent_identity_mismatch': 'The agent reports another node key. Check the server address and setup recovery.',
@@ -2874,6 +2877,7 @@ CATALOG['ru'].update({
     'recovery.cause.ssh_prerequisites': 'SSH-пользователю нужен root или sudo без пароля; на сервере нужны systemd и sha256sum.',
     'recovery.cause.agent_firewall_failed': 'Не удалось разрешить подключение контроллера в файрволе сервера агента. Проверьте UFW и повторите установку.',
     'recovery.cause.agent_journal_owner_conflict': 'Агент принадлежит другой действующей ноде. Проверьте адрес сервера и его запись в реестре.',
+    'recovery.cause.runtime_owner_conflict': 'На этом сервере уже работает VPN другой ноды, например из другой установки. Ничего не изменено. Проверьте адрес сервера; уберите тот VPN там, прежде чем настраивать эту ноду.',
     'recovery.cause.agent_previous_node_retired': 'Предыдущая нода удалена. Продолжите установку, чтобы архивировать её журналы и подключить новую ноду.',
     'recovery.agent_setup_retryable': 'Проверка завершена: старая нода удалена. Теперь доступно продолжение установки.',
     'recovery.cause.node_agent_identity_mismatch': 'Агент сообщает другой ключ ноды. Проверьте адрес сервера и восстановление установки.',
