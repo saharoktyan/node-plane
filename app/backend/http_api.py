@@ -357,7 +357,7 @@ class RecoveryItemOutput(BaseModel):
     status: str
     node_key: str
     error_code: str
-    actions: list[Literal['cancel', 'recheck', 'resolve', 'resume', 'retry', 'abort']]
+    actions: list[Literal['cancel', 'recheck', 'resolve', 'resume', 'retry', 'abort', 'force']]
     phase: str = ''
     subject_id: str = ''
     related_id: str = ''

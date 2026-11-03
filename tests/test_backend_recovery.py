@@ -32,6 +32,10 @@ class RecoveryTests(TestCase):
         controller=self.client.get('/api/v1/system/recovery?node_key=',headers=headers)
         self.assertEqual(controller.status_code,200,controller.text)
         self.assertEqual(controller.json()['total'],1)
+        # Blocked node jobs offer forced recovery; the route must list it.
+        node=self.client.get('/api/v1/system/recovery?node_key=test-node',headers=headers)
+        self.assertEqual(node.status_code,200,node.text)
+        self.assertIn('force',node.json()['items'][0]['actions'])
 
     def test_group_pagination_does_not_split_one_node_into_multiple_entries(self):
         self.service()
