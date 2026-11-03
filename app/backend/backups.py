@@ -46,6 +46,7 @@ TABLES = (
     "backend_access_requests",
 )
 CLEAR = (
+    "backend_renewal_requests",
     "backend_telegram_menu_refresh",
     "backend_account_deletions",
     "backend_account_menu_refresh",

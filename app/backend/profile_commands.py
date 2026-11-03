@@ -61,7 +61,7 @@ class ProfileCommands:
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
         require_permission(actor, 'grants.manage' if action in {'grants', 'policy'} else 'profiles.manage')
-        if action not in {'create', 'edit', 'grants', 'policy', 'delete', 'tariff'}:
+        if action not in {'create', 'edit', 'grants', 'policy', 'delete', 'tariff', 'renew'}:
             raise ValueError('unknown profile command')
         values = values or {}
         fingerprint = hashlib.sha256(json.dumps({'action': action, 'profile_id': profile_id,
@@ -206,6 +206,12 @@ class ProfileCommands:
                         from .grant_policies import validate, store, materialize
                         store(conn, profile_id, validate(conn, policy))
                         materialize(conn, profile_id)
+                    cursor = conn.execute('''UPDATE backend_profiles SET expires_at = ?,
+                        desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id''',
+                        (expires_at, profile_id, revision))
+                elif action == 'renew':
+                    from .renewals import approve
+                    expires_at = approve(conn, actor, profile_id, row['expires_at'], values)
                     cursor = conn.execute('''UPDATE backend_profiles SET expires_at = ?,
                         desired_revision = desired_revision + 1 WHERE id = ? AND desired_revision = ? RETURNING id''',
                         (expires_at, profile_id, revision))

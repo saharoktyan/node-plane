@@ -305,6 +305,8 @@ class MemberProfileSummary(BaseModel):
     quota_suspended: bool = False
     # The profile's tariff: id, title, duration_days, assigned_at.
     tariff: dict[str, str | int | None] | None = None
+    # The latest renewal request: id, status, created_at, decided_at, days, expires_at.
+    renewal: dict[str, str | int | None] | None = None
     # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted,
     # throttled_kbit (speed while throttled, else None).
     quota: dict[str, int | str | None] | None = None
@@ -835,6 +837,11 @@ class ProfileTariffInput(BaseModel):
     tariff_id: UUID | None
     expiry: Literal['keep', 'start', 'extend'] = 'keep'
     apply_access: StrictBool = False
+
+
+class RenewalApproveInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    days: StrictInt | None = None
 
 
 class GrantsInput(BaseModel):
@@ -2171,6 +2178,34 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='tariff',
             profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump(mode='json'))
         return mutation_response(response, result)
+
+    @app.post('/api/v1/me/profiles/{profile_id}/renewal', status_code=201)
+    def request_renewal(profile_id: UUID, request: Request, current=Depends(actor)):
+        from .renewals import RenewalRequests
+        return RenewalRequests(db).request(current, str(profile_id), header(request, 'Idempotency-Key'))
+
+    @app.get('/api/v1/renewal-requests')
+    def renewal_requests(offset: int = Query(default=0, ge=0, le=1000000), current=Depends(actor)):
+        from .renewals import RenewalRequests
+        return RenewalRequests(db).pending(current, offset)
+
+    @app.post('/api/v1/renewal-requests/{request_id}/approve', response_model=ProfileCommandOutput)
+    def approve_renewal(request_id: UUID, body: RenewalApproveInput, request: Request, response: Response,
+                        command_key: Annotated[str, Header(alias='Idempotency-Key')],
+                        if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
+        with db.connect() as conn:
+            row = conn.execute('SELECT profile_id FROM backend_renewal_requests WHERE id=?', (str(request_id),)).fetchone()
+        if row is None:
+            raise AccessDenied('resource_not_found', 404)
+        values = {'request_id': str(request_id), **({'days': body.days} if body.days is not None else {})}
+        result = profile_commands.execute(current, header(request, 'Idempotency-Key'), action='renew',
+            profile_id=row['profile_id'], revision=revision_header(request), values=values)
+        return mutation_response(response, result)
+
+    @app.post('/api/v1/renewal-requests/{request_id}/reject')
+    def reject_renewal(request_id: UUID, current=Depends(actor)):
+        from .renewals import RenewalRequests
+        return RenewalRequests(db).reject(current, request_id)
 
     @app.delete('/api/v1/profiles/{profile_id}', response_model=ProfileCommandOutput)
     def delete_profile(profile_id: UUID, request: Request, response: Response,

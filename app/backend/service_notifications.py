@@ -46,6 +46,10 @@ def _quota_lifted(conn, system, delivery):
     return _period_open(conn, system, delivery) and not blocked(conn, system['profile_id'])
 
 
+def _always(conn, system, delivery):
+    return True
+
+
 KINDS = {
     'access_expired': Kind(_access_expired_current,
                            lambda payload, title: f'Your access to {title} has expired.'),
@@ -55,6 +59,9 @@ KINDS = {
         f"Your {title} traffic of {payload['limit']} is used up"
         + ('; access is suspended until the next reset.' if payload['suspended'] else '.'))),
     'quota_reset': Kind(_quota_lifted, lambda payload, title: f'Your {title} traffic was reset; access is restored.'),
+    'renewal_approved': Kind(_always, lambda payload, title: (
+        f"Your {title} access was extended until {payload['expires_at'][:10]}.")),
+    'renewal_rejected': Kind(_always, lambda payload, title: f'Your request to extend {title} access was declined.'),
     'connection_evicted': Kind(_device_active, lambda payload, title: (
         f"Device {payload['device']} connected to {payload['node']} from another network; "
         'the earlier connection was disconnected.')),
