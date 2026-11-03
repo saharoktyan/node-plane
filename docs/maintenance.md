@@ -14,6 +14,8 @@ Review an update and start it. Progress shows component steps. **Update results*
 
 A controller update can restart the bot. Reopen Updates if progress is interrupted. A confirmed rollback ends with `rolled_back` and releases the update lock; fix the cause and start a new update. If the outcome is uncertain, use Operations before attempting another update.
 
+Updating a node's runtime also brings its VPN containers to the images of that release. A container that runs another image is redeployed, with rollback if the new one does not start; its current VPN connections drop. A node counts as updated only when its containers run the release images. `XRAY_DOCKER_IMAGE` or `AWG_DOCKER_IMAGE` in `/etc/node-plane/node.env` is kept as an override, unless it is the default of an earlier release: then it is removed and the node follows releases.
+
 A core-only controller update can run while node tasks are queued or blocked. Their dispatch pauses until the update finishes; running tasks still prevent an update. Whole-stack updates require the node queues to be clear.
 
 For a direct server check:

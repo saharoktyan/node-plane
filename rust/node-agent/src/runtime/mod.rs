@@ -4,5 +4,6 @@ pub(crate) mod command;
 pub(crate) mod diagnostics;
 pub(crate) mod facts;
 pub(crate) mod files;
+pub(crate) mod images;
 pub(crate) mod node_settings;
 pub(crate) mod operations;

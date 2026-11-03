@@ -60,8 +60,8 @@ impl AgentState {
     pub(crate) fn get_backend_xray_public(&self) -> Result<agent::v1::BackendXrayPublic, Status> {
         let script = self.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
         let config = self.node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
-        let image = self
-            .node_env_value("XRAY_DOCKER_IMAGE", "ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0");
+        let image = crate::runtime::images::Kind::Xray
+            .resolve(&self.node_env_value("XRAY_DOCKER_IMAGE", ""));
         let output = Command::new(script)
             .args([
                 config,

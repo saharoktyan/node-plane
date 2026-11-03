@@ -19,6 +19,15 @@ def same_commit(actual, desired):
             and desired != 'unknown' and (actual.startswith(desired) or desired.startswith(actual)))
 
 
+def stale_images(observation):
+    """VPN containers that do not run the image their runtime selects, or
+    None when the node did not report them (older runtime, Docker unreachable)."""
+    images = observation.get('images')
+    if not isinstance(images, dict):
+        return None
+    return sorted(kind for kind, item in images.items() if not (isinstance(item, dict) and item.get('current') is True))
+
+
 def has_vpn_runtime(conn, node_key):
     from .nodes import NodeService, applied_protocols
     node = conn.execute(NodeService._select() + ' WHERE n.key=?', (node_key,)).fetchone()
@@ -36,13 +45,20 @@ class UpdateService:
         self.observation_cache = observation_cache if observation_cache is not None else {}
 
     def _verify_commit(self, read, field, expected):
-        """Allow restarted services to become reachable; never replay installation."""
+        """Allow restarted services to become reachable; never replay installation.
+
+        A runtime is current only when its VPN containers also run the
+        images it selects, not by the commit of its files alone."""
         failure = 'update_version_mismatch'
         for attempt in range(5):
             try:
-                if same_commit(read().get(field), expected):
+                observation = read()
+                if not same_commit(observation.get(field), expected):
+                    failure = 'update_version_mismatch'
+                elif field == 'runtime_commit' and stale_images(observation) != []:
+                    failure = 'update_images_mismatch'
+                else:
                     return True, None
-                failure = 'update_version_mismatch'
             except Exception:
                 failure = 'update_verification_unavailable'
             if attempt < 4:
@@ -143,10 +159,13 @@ class UpdateService:
                 item = dict(node)
                 try:
                     facts = self.driver.inspect_node_services(node['key'])
+                    # An older runtime does not report images; its commit already differs.
+                    stale = stale_images(facts) or []
                     item.update(agent_status='current' if same_commit(facts.get('agent_commit'), APP_COMMIT) else 'required',
                         agent_commit=facts.get('agent_commit'), agent_version=facts.get('agent_version'),
-                        runtime_status='current' if same_commit(facts.get('runtime_commit'), APP_COMMIT) else 'required',
-                        runtime_commit=facts.get('runtime_commit'), runtime_version=facts.get('runtime_version'))
+                        runtime_status='current' if same_commit(facts.get('runtime_commit'), APP_COMMIT) and not stale else 'required',
+                        runtime_commit=facts.get('runtime_commit'), runtime_version=facts.get('runtime_version'),
+                        stale_images=stale)
                 except Exception:
                     item.update(agent_status='unknown', runtime_status='unknown')
                 if not node['vpn_runtime_installed']:

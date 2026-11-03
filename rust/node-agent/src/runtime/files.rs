@@ -140,28 +140,35 @@ impl AgentState {
     }
 
     pub(crate) fn node_env_value(&self, key: &str, default: &str) -> String {
-        let Ok(raw) = fs::read_to_string(&self.config.node_env_path) else {
-            return default.to_string();
+        fs::read_to_string(&self.config.node_env_path)
+            .ok()
+            .and_then(|raw| env_value(&raw, key))
+            .unwrap_or_else(|| default.to_string())
+    }
+}
+
+/// `key` of a node.env text, without running it.
+pub(crate) fn env_value(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = trimmed.split_once('=') else {
+            continue;
         };
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            let Some((name, value)) = trimmed.split_once('=') else {
-                continue;
-            };
-            if name.trim() != key {
-                continue;
-            }
-            return value
+        if name.trim() != key {
+            continue;
+        }
+        return Some(
+            value
                 .trim()
                 .trim_matches('"')
                 .trim_matches('\'')
-                .to_string();
-        }
-        default.to_string()
+                .to_string(),
+        );
     }
+    None
 }
 
 #[cfg(test)]

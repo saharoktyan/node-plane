@@ -54,6 +54,7 @@ impl AgentState {
             });
         }
         let inspect = req.action == "inspect";
+        let sync_runtime = req.action == "sync_runtime";
         let state = self.clone();
         let output = tokio::task::spawn_blocking(move || {
             state.run_runtime_command(
@@ -81,6 +82,20 @@ impl AgentState {
             )
         {
             metrics.extend(cpu.iter().map(|(key, value)| (key.clone(), value.clone())));
+        }
+        if inspect {
+            // Unknown (null) when Docker cannot be inspected.
+            value["images"] = self
+                .container_images()
+                .ok()
+                .and_then(|images| serde_json::to_value(images).ok())
+                .unwrap_or(Value::Null);
+        }
+        if sync_runtime {
+            let state = self.clone();
+            value["images"] = tokio::task::spawn_blocking(move || state.refresh_container_images())
+                .await
+                .map_err(|_| Status::internal("node operation worker unavailable"))??;
         }
         Ok(RuntimeCommandResponse {
             summary: "backend node operation completed".into(),

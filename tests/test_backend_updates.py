@@ -43,7 +43,7 @@ class BackendUpdateTests(TestCase):
             confirm_collected_update=Mock(return_value=True),
             refresh_update_run_state=Mock(return_value={'last_run_status': 'success', 'last_run_unit': 'test-update'}))
         self.driver = SimpleNamespace(binary_info=Mock(return_value={'commit': 'a' * 40}),
-            inspect_node_services=Mock(return_value={'agent_commit': 'a' * 40, 'runtime_commit': 'a' * 40}), **driver)
+            inspect_node_services=Mock(return_value={'agent_commit': 'a' * 40, 'runtime_commit': 'a' * 40, 'images': {}}), **driver)
         def schedule(**kwargs):
             identity = kwargs.get('stack_job_id') or kwargs.get('launch_job_id')
             unit = f"node-plane-update-{identity}" if identity else 'test-update'
@@ -211,9 +211,33 @@ class BackendUpdateTests(TestCase):
         self.assertEqual(self.db.connection.execute('SELECT action FROM backend_node_jobs WHERE id=?', (item['child_id'],)).fetchone()['action'], 'sync_runtime')
         self.db.connection.execute("UPDATE backend_node_jobs SET status='succeeded'")
         service.driver.inspect_node_services.return_value['runtime_commit'] = 'a' * 40
+        service.driver.inspect_node_services.return_value['images'] = {
+            'awg': {'image': 'node-plane-amnezia-awg:3.1.20260828', 'current': True}}
         service.run_one()
         service.run_one()
         self.assertEqual(service.get(self.actor, job['id'])['status'], 'succeeded')
+
+    def test_runtime_is_current_only_when_its_containers_run_its_images(self):
+        service = self.service()
+        self.node()
+        self.db.connection.execute("UPDATE backend_nodes SET protocols_json=? WHERE key='lv1'", ('["xray"]',))
+        self.db.connection.commit()
+        stale = {'agent_commit': 'a' * 40, 'runtime_commit': 'a' * 40,
+                 'images': {'xray': {'image': 'ghcr.io/xtls/xray-core:26.10.29', 'current': False}}}
+        service.driver.inspect_node_services.return_value = stale
+        with patch('config.APP_COMMIT', 'a' * 40):
+            value = service.rollout_overview(self.actor)
+        self.assertTrue(value['runtimes_required'])
+        self.assertEqual(value['nodes'][0]['stale_images'], ['xray'])
+        with patch('time.sleep'):
+            self.assertEqual(service._verify_commit(lambda: stale, 'runtime_commit', 'a' * 40),
+                             (False, 'update_images_mismatch'))
+            # A runtime that cannot report its containers is not confirmed.
+            unknown = {'runtime_commit': 'a' * 40, 'images': None}
+            self.assertEqual(service._verify_commit(lambda: unknown, 'runtime_commit', 'a' * 40),
+                             (False, 'update_images_mismatch'))
+            current = {'runtime_commit': 'a' * 40, 'images': {}}
+            self.assertEqual(service._verify_commit(lambda: current, 'runtime_commit', 'a' * 40), (True, None))
 
     def test_agent_restart_verification_retries_reads_without_replaying_install(self):
         service = self.service()

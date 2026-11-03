@@ -728,6 +728,9 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
             "The installer does not match the saved update. Its result must be confirmed before continuing."
         }
         "update_version_mismatch" => "The installed version differs from the requested version.",
+        "update_images_mismatch" => {
+            "A VPN container does not run the image of the installed runtime."
+        }
         "update_verification_unavailable" => "The controller update outcome could not be verified.",
         _ => "The operation outcome is unconfirmed.",
     }
@@ -868,7 +871,7 @@ async fn update(
     };
     if !record.dispatch_started {
         let description = format!(
-            "Update the entire stack on {} to {} ({})?\n\nBackend, worker, driver and Telegram client are updated together, followed by node agents and runtimes. The backend manages rollback if a controller component fails.\n\nOperation: {}",
+            "Update the entire stack on {} to {} ({})?\n\nBackend, worker, driver and Telegram client are updated together, followed by node agents and runtimes. A server whose VPN container image changes restarts that container, and its current VPN connections drop. The backend manages rollback if a controller component fails.\n\nOperation: {}",
             request.host, record.intent.target_ref, record.intent.branch, record.id
         );
         let description = if !request.tag.trim().is_empty() {

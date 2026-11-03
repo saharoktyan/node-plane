@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Runtime updates now bring existing VPN containers to the release images:
+  the node agent drops image pins that earlier releases wrote into node.env
+  (other values stay as overrides) and redeploys containers running another
+  image. A runtime counts as current only when its containers run the release
+  images; update confirmations warn that redeployed containers drop current
+  connections.
 - Run Xray from the Node Plane fork image (`ghcr.io/saharoktyan/xray-core`,
   based on upstream v26.10.31), which can close a VLESS user's established
   connections through the Xray API.
