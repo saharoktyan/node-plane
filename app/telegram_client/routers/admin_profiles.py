@@ -1104,12 +1104,22 @@ async def show_profile_edit_menu(chat_id: int, user_id: int, message_id: int,
                 callback_data=f'prof_expiry:{profile_id}'),),)),
         *((Section(tr(locale, 'profile.admin.status_title'),
             rows=(_status_buttons(profile, locale),)),) if not owner_admin else ()),
+        *await _tariff_section(locale, profile_id, owner_admin, backend, user_id),
         *_policy_sections(locale, profile_id, await _vpn_policies(backend, user_id, profile_id)),
         *await _quota_section(locale, profile_id, backend, user_id))
     await render(bot, chat_id, Screen(tr(locale, 'profile.layout.edit'), sections=sections,
         embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=AdminProfileCallback(profile_id=profile_id).pack())]], state, message_id)
+
+
+async def _tariff_section(locale, profile_id, owner_admin, backend, user_id):
+    from .admin_tariffs import profile_section
+    try:
+        summary = await backend.request('GET', f'/api/v1/profiles/{profile_id}/summary', telegram_user_id=user_id)
+    except BackendError:
+        return ()
+    return profile_section(locale, profile_id, summary, owner_admin)
 
 
 async def _vpn_policies(backend, user_id, profile_id):
