@@ -88,6 +88,28 @@ class DevicesPostgresTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT events_sequence FROM backend_node_admission").fetchone()
                              ['events_sequence'], 2)
 
+    def test_awg_key_reissue_revokes_the_old_peer_on_postgres(self):
+        profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('node','Node','Europe','[\"awg\"]')")
+            conn.execute("INSERT INTO backend_grants VALUES (?,'node','awg')", (profile_id,))
+        created = DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='create',
+            profile_id=profile_id, revision=1, display_name='Phone')
+        device = created['device']
+        with self.db.connect() as conn:
+            old = conn.execute('SELECT runtime_name FROM backend_devices WHERE id=?', (device['id'],)).fetchone()['runtime_name']
+        result = DeviceCommands(self.db).execute(self.actor, str(uuid4()), action='rotate', profile_id=profile_id,
+            device_id=device['id'], revision=device['revision'], protocol='awg')
+        with self.db.connect() as conn:
+            retired = conn.execute('SELECT slot_id,runtime_name FROM backend_retired_peers').fetchall()
+            tasks = {row['device_id']: (row['action'], json.loads(row['intent_json'])['runtime_name'])
+                     for row in conn.execute('SELECT device_id,action,intent_json FROM backend_operation_tasks WHERE operation_id=?',
+                                             (result['operation_id'],)).fetchall()}
+        self.assertEqual([row['runtime_name'] for row in retired], [old])
+        self.assertEqual(tasks[retired[0]['slot_id']], ('delete', old))
+        self.assertEqual(tasks[device['id']][0], 'ensure')
+        self.assertNotEqual(tasks[device['id']][1], old)
+
     def test_concurrent_custom_devices_share_parent_revision_fence(self):
         profile_id = ProfileRepository(self.db).create_profile(runtime_name='alice', display_name='Alice')
         start = threading.Barrier(2)
@@ -251,6 +273,7 @@ class DevicesPostgresTests(unittest.TestCase):
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
+        del payload['tables']['backend_retired_peers']
         payload['format'] = 'node-plane-backend-v1'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

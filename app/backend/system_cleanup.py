@@ -499,7 +499,8 @@ class SystemCleanupService:
                 kept["backend_profiles"] = [dict(r) for r in conn.execute(
                     "SELECT * FROM backend_profiles WHERE owner_account_id=?", (actor_id,)).fetchall()]
                 profile_ids = {r['id'] for r in kept['backend_profiles']}
-                for table in ('backend_devices', 'backend_profile_identities', 'backend_device_credentials'):
+                for table in ('backend_devices', 'backend_profile_identities', 'backend_device_credentials',
+                              'backend_retired_peers'):
                     kept[table] = [dict(r) for r in conn.execute(f"SELECT * FROM {table}").fetchall()
                         if r['profile_id'] in profile_ids]
                 kept["backend_credentials"] = [
@@ -553,6 +554,7 @@ class SystemCleanupService:
                 "backend_devices",
                 "backend_profile_identities",
                 "backend_device_credentials",
+                "backend_retired_peers",
             ):
                 for row in kept.get(table, []):
                     columns = list(row)

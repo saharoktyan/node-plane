@@ -114,7 +114,8 @@ class OperationRepository:
         for node_key, protocol in actionable_targets:
             node = conn.execute('SELECT enabled FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             action = 'ensure' if active and node is not None and node['enabled'] and (node_key, protocol) in current_targets else 'delete'
-            peers = (conn.execute('SELECT * FROM backend_devices WHERE profile_id=? ORDER BY id', (profile_id,)).fetchall()
+            peers = ([*conn.execute('SELECT * FROM backend_devices WHERE profile_id=? ORDER BY id', (profile_id,)).fetchall(),
+                      *device_credentials.retired_awg_peers(conn, profile_id)]
                      if protocol == 'awg' else xray_peers)
             for peer in peers:
                 peer_action = action if peer['status'] == 'active' else 'delete'

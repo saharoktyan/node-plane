@@ -27,8 +27,12 @@
   and administrators are alerted when one device is disconnected often (a
   shared link). The controller reads events and per-device network counts with
   the new `ObserveSessions` agent call and never stores addresses.
-- Reissue a device's VLESS key in Workstation; its device list shows the
-  device limit and each limited device's current VLESS networks.
+- Reissue a device's AWG key in Telegram and Workstation: the device gets a
+  new AWG peer with keys from the node, and the old peer is revoked from every
+  node. Workstation can also reissue the VLESS key; its device list shows the
+  device limit and each limited device's current VLESS networks. Database
+  revision 19 cannot be read by older controllers, which would leave reissued
+  peers working.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

@@ -57,8 +57,9 @@ pub enum Command {
         revision: u64,
         name: String,
         delete: bool,
-        /// Reissue the device's VLESS key instead of renaming it.
-        rotate: bool,
+        /// Reissue the device's key for this protocol ("xray" or "awg")
+        /// instead of renaming it.
+        rotate: Option<String>,
         key: Uuid,
     },
     List(Tab),
@@ -125,13 +126,13 @@ impl Command {
             Self::DeviceMutate {
                 profile,
                 device: Some(device),
-                rotate: true,
+                rotate: Some(protocol),
                 key,
                 ..
             } => (
                 hyper::Method::POST,
                 format!("/api/v1/profiles/{profile}/devices/{device}/rotate"),
-                None,
+                Some(json!({"protocol":protocol})),
                 Some(*key),
             ),
             Self::DeviceMutate {
@@ -457,6 +458,8 @@ pub struct Devices {
     pub editor: Option<DeviceEditor>,
     pub delete_key: Option<Uuid>,
     pub rotate_key: Option<Uuid>,
+    /// The pending reissue is for AWG rather than VLESS.
+    pub rotate_awg: bool,
     /// Effective `devices.max`; None means no limit.
     pub limit: Option<u64>,
     pub page: usize,
@@ -504,7 +507,7 @@ impl Devices {
             revision,
             name: editor.name.clone(),
             delete: false,
-            rotate: false,
+            rotate: None,
             key: editor.key,
         })
     }
@@ -851,6 +854,7 @@ impl Browser {
                     editor: None,
                     delete_key: None,
                     rotate_key: None,
+                    rotate_awg: false,
                     limit: value["devices"]["device_limit"].as_u64(),
                     page: 0,
                 });
@@ -1115,6 +1119,7 @@ mod tests {
             editor: None,
             delete_key: None,
             rotate_key: None,
+            rotate_awg: false,
             limit: None,
             page: 0,
         };

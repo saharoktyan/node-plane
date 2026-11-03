@@ -95,7 +95,7 @@ CATALOG = {
         'devices.changed': 'Профиль или устройство изменились. Вернитесь назад и начните заново.',
         'devices.delete_title': 'Удалить {name}?',
         'devices.delete_warning': 'Конфиги AmneziaWG и VLESS этого устройства перестанут работать.',
-        'devices.rotate': 'Перевыпустить ключ',
+        'devices.rotate': 'Новый ключ VLESS',
         'devices.rotate_title': 'Перевыпустить ключ для {name}?',
         'devices.rotate_warning': 'Устройство получит новый ключ VLESS, старые ссылки VLESS перестанут работать. Получите конфиг заново. Конфиги AmneziaWG не меняются.',
         'devices.preparing': 'Подготовка устройства',
@@ -850,7 +850,7 @@ CATALOG = {
         'devices.changed': 'The profile or device changed. Go back and start again.',
         'devices.delete_title': 'Delete {name}?',
         'devices.delete_warning': 'This device’s AmneziaWG and VLESS configurations will stop working.',
-        'devices.rotate': 'Reissue key',
+        'devices.rotate': 'New VLESS key',
         'devices.rotate_title': 'Reissue the key for {name}?',
         'devices.rotate_warning': 'The device gets a new VLESS key and its old VLESS links stop working. Get the configuration again. AmneziaWG configurations do not change.',
         'devices.preparing': 'Preparing device',
@@ -3524,3 +3524,12 @@ CATALOG['ru'].update({
 
 CATALOG['en']['devices.networks'] = 'VLESS networks now: {active} of {limit}. Connecting from another network disconnects the oldest one.'
 CATALOG['ru']['devices.networks'] = 'Сетей VLESS сейчас: {active} из {limit}. Подключение из новой сети отключает самую старую.'
+
+CATALOG['en'].update({
+    'devices.rotate_awg': 'New AWG key',
+    'devices.rotate_awg_warning': 'The device gets a new AmneziaWG key and its old AmneziaWG configurations stop working once the nodes apply the change. Get the configuration again. VLESS links do not change.',
+})
+CATALOG['ru'].update({
+    'devices.rotate_awg': 'Новый ключ AWG',
+    'devices.rotate_awg_warning': 'Устройство получит новый ключ AmneziaWG; старые конфиги AmneziaWG перестанут работать, когда ноды применят изменение. Получите конфиг заново. Ссылки VLESS не меняются.',
+})

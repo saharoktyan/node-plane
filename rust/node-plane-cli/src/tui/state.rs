@@ -234,7 +234,8 @@ pub(super) enum Control {
     AccessDeviceName,
     AccessDeviceSave,
     AccessDeviceDelete,
-    AccessDeviceRotate,
+    /// Reissue a key; true for AWG, false for VLESS.
+    AccessDeviceRotate(bool),
     AccessDeviceConfirm,
     AccessDevicePage(bool),
     AccessExpiryMenu,

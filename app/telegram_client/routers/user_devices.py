@@ -95,8 +95,9 @@ async def show_card(chat_id, user_id, message_id, profile_id, device_id, bot, ba
     item = await get_device(backend, user_id, profile_id, device_id)
     rows = []
     if item['status'] == 'active':
-        rows.append([user.button(user_id, tr(locale, 'devices.rename'), 'device_rename', profile_id, device_id),
-            user.button(user_id, tr(locale, 'devices.rotate'), 'device_rotate', profile_id, device_id)])
+        rows.append([user.button(user_id, tr(locale, 'devices.rename'), 'device_rename', profile_id, device_id)])
+        rows.append([user.button(user_id, tr(locale, 'devices.rotate'), 'device_rotate', profile_id, device_id),
+            user.button(user_id, tr(locale, 'devices.rotate_awg'), 'device_rotate', profile_id, device_id, 'awg')])
         rows.append([user.button(user_id, tr(locale, 'devices.delete'), 'device_delete', profile_id, device_id)
             .model_copy(update={'style': 'danger'})])
     elif item['status'] == 'deleting':
@@ -276,21 +277,27 @@ async def handle_action(action, query, bot, backend, state):
         await select_device(chat_id, owner, message_id, *args[:3], bot, backend, state,
             target=tuple(args[3:5]) or AWG)
     elif action.name == 'device_rotate':
+        # An optional third argument names the protocol; VLESS by default.
+        protocol = args[2] if len(args) > 2 else 'xray'
         item = await get_device(backend, owner, args[0], args[1])
         if item['status'] != 'active':
             raise BackendError('device_unavailable', 409)
         key = str(uuid4())
         locale = await locale_for(state)
+        suffix = '_awg' if protocol == 'awg' else ''
         await render(bot, chat_id, Screen(tr(locale, 'devices.rotate_title', name=item['display_name']),
-            (tr(locale, 'devices.rotate_warning'),), embedded_buttons=True, navigation=True),
-            [[user.button(owner, tr(locale, 'devices.rotate'), 'device_rotate_confirm', *args,
-                str(item['revision']), key).model_copy(update={'style': 'danger'})],
-             [user.button(owner, tr(locale, 'back'), 'device_card', *args)]], state, message_id)
+            (tr(locale, 'devices.rotate' + suffix + '_warning'),), embedded_buttons=True, navigation=True),
+            [[user.button(owner, tr(locale, 'devices.rotate' + suffix), 'device_rotate_confirm', *args[:2],
+                str(item['revision']), key, *((protocol,) if protocol == 'awg' else ())
+                ).model_copy(update={'style': 'danger'})],
+             [user.button(owner, tr(locale, 'back'), 'device_card', *args[:2])]], state, message_id)
     elif action.name == 'device_rotate_confirm':
         # The key and revision come from the confirmation screen; a replay
         # returns the recorded result instead of rotating again.
+        protocol = args[4] if len(args) > 4 else 'xray'
         await backend.request('POST', f'/api/v1/profiles/{args[0]}/devices/{args[1]}/rotate',
-            telegram_user_id=owner, command=True, command_key=args[3], revision=int(args[2]))
+            telegram_user_id=owner, command=True, command_key=args[3], revision=int(args[2]),
+            **({'body': {'protocol': 'awg'}} if protocol == 'awg' else {}))
         await show_card(chat_id, owner, message_id, args[0], args[1], bot, backend, state)
     elif action.name == 'device_delete':
         item = await get_device(backend, owner, args[0], args[1])

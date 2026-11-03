@@ -285,6 +285,21 @@ class TelegramVlessDeviceTests(IsolatedAsyncioTestCase):
         self.assertEqual(issue.call_args.args[3:7], ('profile', 'node', 'xray', 'xhttp'))
         self.assertEqual(issue.call_args.kwargs['device_id'], 'new')
 
+    async def test_awg_key_reissue_is_confirmed_and_names_the_protocol(self):
+        backend = self.backend([{'id': 'phone', 'display_name': 'Phone', 'status': 'active', 'revision': 5}])
+        with patch.object(user_devices, 'render', new_callable=AsyncMock) as draw:
+            await user_devices.show_card(123, 123, 77, 'profile', 'phone', self.bot, backend, self.state)
+            actions = [user.actions[b.callback_data[2:]] for row in draw.call_args.args[3] for b in row]
+            rotate = next(a for a in actions if a.name == 'device_rotate' and a.args[2:] == ('awg',))
+            await user_devices.handle_action(rotate, self.query, self.bot, backend, self.state)
+        self.assertIn('AmneziaWG', draw.call_args.args[2].lines[0])
+        confirm = user.actions[draw.call_args.args[3][0][0].callback_data[2:]]
+        backend.request.reset_mock()
+        with patch.object(user_devices, 'show_card', new_callable=AsyncMock):
+            await user_devices.handle_action(confirm, self.query, self.bot, backend, self.state)
+        self.assertEqual(backend.request.call_args.kwargs['body'], {'protocol': 'awg'})
+        self.assertEqual(backend.request.call_args.kwargs['revision'], 5)
+
     async def test_card_shows_current_networks_only_for_limited_devices(self):
         for networks, expected in ((None, 1), ({'active': 1, 'blocked': 1, 'limit': 2}, 2)):
             backend = self.backend([{'id': 'phone', 'display_name': 'Phone', 'status': 'active', 'revision': 5,

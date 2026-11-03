@@ -35,6 +35,7 @@ TABLES = (
     "backend_devices",
     "backend_profile_identities",
     "backend_device_credentials",
+    "backend_retired_peers",
     "backend_grants",
     "backend_grant_policies",
     "backend_vpn_policies",
@@ -215,13 +216,17 @@ class BackupService:
             legacy = payload['format'] == 'node-plane-backend-v1'
             from .grant_policies import TABLE_COLUMNS, canonical_region
             old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
-            old_vpn_policy = payload['format'] not in ('node-plane-backend-v4', 'node-plane-backend-v5')
-            old_credentials = payload['format'] != 'node-plane-backend-v5'
+            old_vpn_policy = payload['format'] not in ('node-plane-backend-v4', 'node-plane-backend-v5',
+                                                       'node-plane-backend-v6')
+            old_credentials = payload['format'] not in ('node-plane-backend-v5', 'node-plane-backend-v6')
+            old_retired = payload['format'] != 'node-plane-backend-v6'
             expected_tables = (set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set())
                 - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set())
-                - ({'backend_device_credentials'} if old_credentials else set()))
+                - ({'backend_device_credentials'} if old_credentials else set())
+                - ({'backend_retired_peers'} if old_retired else set()))
             if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
-                                         'node-plane-backend-v4', 'node-plane-backend-v5') or set(payload['tables']) != expected_tables:
+                                         'node-plane-backend-v4', 'node-plane-backend-v5', 'node-plane-backend-v6'
+                                         ) or set(payload['tables']) != expected_tables:
                 raise ValueError()
             if (
                 hashlib.sha256(encoded(payload["tables"])).hexdigest()
@@ -279,6 +284,10 @@ class BackupService:
                 tables['backend_devices']['rows'].extend(devices)
                 tables['backend_device_credentials'] = {'columns': list(device_credentials.TABLE_COLUMNS),
                                                         'rows': credentials}
+            if old_retired:
+                # No AWG key had been reissued before this format.
+                from .device_credentials import RETIRED_PEER_COLUMNS
+                payload['tables']['backend_retired_peers'] = {'columns': list(RETIRED_PEER_COLUMNS), 'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -569,7 +578,7 @@ class BackupService:
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
                 elif table in {"backend_devices", "backend_profile_identities", "backend_device_credentials",
-                               "backend_grants", "backend_grant_policies"}:
+                               "backend_retired_peers", "backend_grants", "backend_grant_policies"}:
                     rows = [r for r in rows if r['profile_id'] not in deleted_profiles]
                 elif table == "backend_vpn_policies":
                     deleted_devices = {d['id'] for d in conn.execute('SELECT id,profile_id FROM backend_devices').fetchall()
@@ -595,7 +604,7 @@ class BackupService:
                 pass
         backup_id = snapshot_id or str(uuid4())
         payload = {
-            "format": "node-plane-backend-v5",
+            "format": "node-plane-backend-v6",
             "created_at": now(),
             "trigger": trigger,
             "app_version": APP_VERSION,

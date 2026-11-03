@@ -217,6 +217,11 @@ class DeviceNameInput(BaseModel):
     display_name: Annotated[StrictStr, Field(min_length=1, max_length=256)]
 
 
+class DeviceRotateInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    protocol: Literal['xray', 'awg'] = 'xray'
+
+
 class DeviceCommandOutput(BaseModel):
     device: DeviceOutput
     profile_revision: int
@@ -1129,6 +1134,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                 conn.execute('SELECT id FROM backend_profiles LIMIT 1').fetchone()
                 conn.execute('SELECT id FROM backend_devices LIMIT 1').fetchone()
                 conn.execute('SELECT device_id,runtime_name FROM backend_device_credentials LIMIT 1').fetchone()
+                conn.execute('SELECT slot_id,runtime_name FROM backend_retired_peers LIMIT 1').fetchone()
                 conn.execute('SELECT key FROM backend_nodes LIMIT 1').fetchone()
                 conn.execute('SELECT profile_id FROM backend_grants LIMIT 1').fetchone()
                 conn.execute('SELECT command_key FROM backend_profile_commands LIMIT 1').fetchone()
@@ -1605,10 +1611,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.post('/api/v1/profiles/{profile_id}/devices/{device_id}/rotate', response_model=DeviceCommandOutput, status_code=202)
     def rotate_device(profile_id: UUID, device_id: UUID, request: Request,
                       response: Response, command_key: Annotated[str, Header(alias='Idempotency-Key')],
-                      current=Depends(actor)):
+                      body: DeviceRotateInput | None = None, current=Depends(actor)):
+        # Without a body the VLESS key is reissued, as before AWG reissue existed.
         result = device_commands.execute(current, header(request, 'Idempotency-Key'),
             action='rotate', profile_id=str(profile_id), device_id=str(device_id),
-            revision=revision_header(request))
+            revision=revision_header(request), protocol=(body or DeviceRotateInput()).protocol)
         response.headers['ETag'] = '"' + str(result['device']['revision']) + '"'
         return result
 

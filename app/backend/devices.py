@@ -114,3 +114,5 @@ class DeviceRepository:
                     uncertain = True
             if not uncertain and all(t['mode']=='verified' or (t['action'],t['status'])==('delete','succeeded') for t in latest.values()):
                 conn.execute("UPDATE backend_devices SET status='retired' WHERE id=? AND status='deleting'",(device['id'],))
+        from .device_credentials import settle_retired_peers
+        settle_retired_peers(conn)

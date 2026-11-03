@@ -2027,12 +2027,19 @@ fn device_key_reissue_requires_confirmation_and_posts_the_rotate_command() {
         .unwrap();
     let screen = format!("{:?}", terminal.backend().buffer());
     assert!(screen.contains("VLESS networks now: 1 of 1"));
-    assert!(app.access_controls().contains(&Control::AccessDeviceRotate));
-    app.activate(Control::AccessDeviceRotate);
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessDeviceRotate(false))
+    );
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessDeviceRotate(true))
+    );
+    app.activate(Control::AccessDeviceRotate(true));
     assert!(app.nodes_requested.is_none());
     app.activate(Control::AccessBack);
     assert!(app.access.devices.as_ref().unwrap().rotate_key.is_none());
-    app.activate(Control::AccessDeviceRotate);
+    app.activate(Control::AccessDeviceRotate(true));
     app.activate(Control::AccessDeviceConfirm);
     let Some(crate::nodes::Command::Access(command)) = app.nodes_requested.take() else {
         panic!()
@@ -2040,7 +2047,7 @@ fn device_key_reissue_requires_confirmation_and_posts_the_rotate_command() {
     let (method, path, body, key) = command.request();
     assert_eq!(method, hyper::Method::POST);
     assert_eq!(path, "/api/v1/profiles/profile/devices/device/rotate");
-    assert!(body.is_none());
+    assert_eq!(body.unwrap()["protocol"], "awg");
     assert_eq!(key, app.access.devices.as_ref().unwrap().rotate_key);
     let crate::access::Command::DeviceMutate {
         revision, delete, ..
@@ -8516,6 +8523,7 @@ fn inputs_handle_ctrl_w_and_ctrl_backspace_word_deletion() {
         }),
         delete_key: None,
         rotate_key: None,
+        rotate_awg: false,
         limit: None,
         page: 0,
     });

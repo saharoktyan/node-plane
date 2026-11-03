@@ -450,7 +450,8 @@ pub(in crate::tui) fn draw_access_devices(
             if card["status"] == "active" {
                 buttons.extend([
                     ("Rename", Control::AccessDeviceEdit),
-                    ("Reissue key", Control::AccessDeviceRotate),
+                    ("New VLESS key", Control::AccessDeviceRotate(false)),
+                    ("New AWG key", Control::AccessDeviceRotate(true)),
                     ("Delete", Control::AccessDeviceDelete),
                 ]);
             }
@@ -1228,9 +1229,13 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
 }
 
 fn device_question(devices: Option<&crate::access::Devices>) -> &'static str {
-    if devices.is_some_and(|devices| devices.rotate_key.is_some()) {
-        "Reissue this device's VLESS key? Its current VLESS links stop working; AWG configurations do not change."
-    } else {
-        "Delete this device and revoke its access?"
+    match devices {
+        Some(devices) if devices.rotate_key.is_some() && devices.rotate_awg => {
+            "Reissue this device's AWG key? Its current AWG configurations stop working once nodes apply the change; VLESS links do not change."
+        }
+        Some(devices) if devices.rotate_key.is_some() => {
+            "Reissue this device's VLESS key? Its current VLESS links stop working; AWG configurations do not change."
+        }
+        _ => "Delete this device and revoke its access?",
     }
 }

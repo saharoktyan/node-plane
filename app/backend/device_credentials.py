@@ -14,6 +14,7 @@ from .devices import default_device
 
 TABLE_COLUMNS = ('device_id', 'profile_id', 'protocol', 'runtime_name', 'credential_json',
                  'revision', 'created_at')
+RETIRED_PEER_COLUMNS = ('slot_id', 'device_id', 'profile_id', 'protocol', 'runtime_name', 'created_at')
 
 
 def create_schema(conn):
@@ -25,6 +26,8 @@ def create_schema(conn):
         revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
         PRIMARY KEY(device_id, protocol), UNIQUE(protocol, runtime_name))''')
     conn.execute('CREATE INDEX IF NOT EXISTS backend_device_credentials_profile ON backend_device_credentials(profile_id)')
+    from db.migration_revisions.r0019_retired_peers import upgrade
+    upgrade(conn)
 
 
 def legacy_xray_device(profile_id):
@@ -144,6 +147,48 @@ def rotate_xray(conn, device):
     conn.execute('''UPDATE backend_device_credentials SET credential_json=?,revision=revision+1
         WHERE device_id=? AND protocol='xray' ''', (json.dumps({'uuid': str(uuid4())}), device['id']))
     return xray(conn, device['id'])
+
+
+def new_runtime_name(conn):
+    """A peer name unused by profiles, devices and peers awaiting revocation."""
+    while True:
+        name = 'd_' + uuid4().hex
+        if not any(conn.execute(f'SELECT 1 FROM {table} WHERE runtime_name=?', (name,)).fetchone()
+                   for table in ('backend_profiles', 'backend_devices', 'backend_retired_peers')):
+            return name
+
+
+def rotate_awg(conn, device):
+    """A new AWG peer for the device; the node generates its keys. The old
+    peer is revoked from every node under its own task slot."""
+    slot = str(uuid5(NAMESPACE_URL, f"node-plane:retired-peer:{device['id']}:{device['runtime_name']}"))
+    conn.execute('''INSERT INTO backend_retired_peers(slot_id,device_id,profile_id,protocol,runtime_name,created_at)
+        VALUES (?,?,?,'awg',?,?)''', (slot, device['id'], device['profile_id'], device['runtime_name'],
+                                        datetime.now(timezone.utc).isoformat()))
+    conn.execute('UPDATE backend_devices SET runtime_name=? WHERE id=?', (new_runtime_name(conn), device['id']))
+
+
+def retired_awg_peers(conn, profile_id):
+    """Old AWG peers to revoke, shaped like deleted devices for operations."""
+    rows = conn.execute('''SELECT slot_id,runtime_name FROM backend_retired_peers
+        WHERE profile_id=? AND protocol='awg' ORDER BY slot_id''', (profile_id,)).fetchall()
+    return [{'id': row['slot_id'], 'status': 'retired', 'runtime_name': row['runtime_name']} for row in rows]
+
+
+def settle_retired_peers(conn):
+    """Forgets old peers once every node removed them."""
+    for peer in conn.execute('SELECT slot_id,profile_id FROM backend_retired_peers ORDER BY slot_id').fetchall():
+        tasks = conn.execute('''SELECT t.node_key,t.action,t.status,r.mode FROM backend_operation_tasks t
+            JOIN backend_operations o ON o.id=t.operation_id
+            LEFT JOIN backend_node_retirements r ON r.node_key=t.node_key
+            WHERE o.profile_id=? AND t.device_id=? ORDER BY o.desired_revision DESC,o.created_at DESC,t.id DESC''',
+            (peer['profile_id'], peer['slot_id'])).fetchall()
+        latest = {}
+        for task in tasks:
+            latest.setdefault(task['node_key'], task)
+        if all(t['mode'] == 'verified' or (t['action'], t['status']) == ('delete', 'succeeded')
+               for t in latest.values()):
+            conn.execute('DELETE FROM backend_retired_peers WHERE slot_id=?', (peer['slot_id'],))
 
 
 def xray_peers(conn, profile_id):

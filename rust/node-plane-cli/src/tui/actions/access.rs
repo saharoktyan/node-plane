@@ -236,9 +236,10 @@ impl App {
                 self.access.selected = 0;
                 None
             }
-            Control::AccessDeviceRotate => {
+            Control::AccessDeviceRotate(awg) => {
                 if let Some(devices) = &mut self.access.devices {
                     devices.rotate_key = Some(uuid::Uuid::new_v4());
+                    devices.rotate_awg = awg;
                 }
                 self.access.selected = 0;
                 None
@@ -255,7 +256,9 @@ impl App {
                         revision,
                         name: String::new(),
                         delete: devices.delete_key.is_some(),
-                        rotate: devices.rotate_key.is_some(),
+                        rotate: devices
+                            .rotate_key
+                            .map(|_| if devices.rotate_awg { "awg" } else { "xray" }.to_string()),
                         key,
                     });
                 }
@@ -624,7 +627,7 @@ impl App {
                         | Control::AccessDeviceName
                         | Control::AccessDeviceSave
                         | Control::AccessDeviceDelete
-                        | Control::AccessDeviceRotate
+                        | Control::AccessDeviceRotate(_)
                         | Control::AccessDeviceConfirm
                         | Control::AccessDevicePage(_)
                         | Control::AccessDurationCustom

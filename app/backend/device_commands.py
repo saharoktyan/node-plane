@@ -28,7 +28,7 @@ class DeviceCommands:
     def __init__(self,db):
         self.db=db
 
-    def execute(self,actor,key,*,action,profile_id,device_id=None,revision=None,display_name=None):
+    def execute(self,actor,key,*,action,profile_id,device_id=None,revision=None,display_name=None,protocol='xray'):
         try:
             key=str(UUID(key))
         except (ValueError,TypeError,AttributeError):
@@ -37,9 +37,14 @@ class DeviceCommands:
             raise AccessDenied('invalid_input',422)
         if action != 'create' and not device_id:
             raise AccessDenied('invalid_input',422)
+        if protocol not in {'xray','awg'} or (protocol!='xray' and action!='rotate'):
+            raise AccessDenied('invalid_input',422)
         name,name_key = device_name(display_name) if action in {'create','rename'} else (None,None)
-        fingerprint=hashlib.sha256(json.dumps(dict(action=action,profile_id=profile_id,
-            device_id=device_id,revision=revision,display_name=display_name),sort_keys=True).encode()).hexdigest()
+        request=dict(action=action,profile_id=profile_id,device_id=device_id,revision=revision,display_name=display_name)
+        if protocol!='xray':
+            # Absent for Xray so commands recorded before AWG reissue still replay.
+            request['protocol']=protocol
+        fingerprint=hashlib.sha256(json.dumps(request,sort_keys=True).encode()).hexdigest()
         identity=(actor.principal.id,actor.account.id,key)
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
@@ -103,9 +108,13 @@ class DeviceCommands:
                 ensure_xray(conn,conn.execute('SELECT * FROM backend_devices WHERE id=?',(device_id,)).fetchone())
             elif action=='rename':
                 conn.execute('UPDATE backend_devices SET display_name=?,revision=revision+1 WHERE id=?',(name,device_id))
+            elif action=='rotate' and protocol=='awg':
+                # A new AWG peer with keys from the node; the old one is revoked.
+                from .device_credentials import rotate_awg
+                rotate_awg(conn,device)
+                conn.execute('UPDATE backend_devices SET revision=revision+1 WHERE id=?',(device_id,))
             elif action=='rotate':
                 # A new Xray UUID; links issued for the old one stop working.
-                # AWG keys are generated on the node and are not rotated here.
                 from .device_credentials import rotate_xray
                 rotate_xray(conn,device)
                 conn.execute('UPDATE backend_devices SET revision=revision+1 WHERE id=?',(device_id,))

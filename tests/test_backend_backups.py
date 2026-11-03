@@ -248,7 +248,7 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v5')
+        self.assertEqual(payload['format'], 'node-plane-backend-v6')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
@@ -265,6 +265,7 @@ class BackendBackupsTests(unittest.TestCase):
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
+        del payload['tables']['backend_retired_peers']
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -286,6 +287,7 @@ class BackendBackupsTests(unittest.TestCase):
         path = self.service._path(backup_id)
         payload = json.loads(path.read_bytes())
         del payload['tables']['backend_device_credentials']
+        del payload['tables']['backend_retired_peers']
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -310,6 +312,7 @@ class BackendBackupsTests(unittest.TestCase):
             del payload['tables'][table]
         del payload['tables']['backend_vpn_policies']
         del payload['tables']['backend_device_credentials']
+        del payload['tables']['backend_retired_peers']
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
         converted = self.service._load(backup_id)
