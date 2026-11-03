@@ -101,7 +101,10 @@ register(PolicyKey('quota.reset', frozenset({'installation', 'profile'}), frozen
 register(PolicyKey('quota.interval_days', frozenset({'installation', 'profile'}), frozenset({'global'}),
                    integer(1, 366), default=30))
 register(PolicyKey('quota.on_exhausted', frozenset({'installation', 'profile'}), frozenset({'global'}),
-                   choice('freeze', 'notify'), default='freeze'))
+                   choice('freeze', 'notify', 'throttle'), default='freeze'))
+# Speed of every device of a throttled profile until the next reset, kbit/s.
+register(PolicyKey('quota.throttle_kbit', frozenset({'installation', 'profile'}), frozenset({'global'}),
+                   integer(64, 100_000_000), default=1000))
 register(PolicyKey('quota.timezone', frozenset({'installation'}), frozenset({'global'}), time_zone, default='UTC'))
 # Speed per device in kbit/s, each direction on its own (plan, section 11d).
 # No limit by default; 0 exempts a profile or device from an inherited limit.

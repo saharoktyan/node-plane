@@ -3315,6 +3315,12 @@ fn quota_toggles_cycle_presets_including_no_limit() {
             serde_json::json!("freeze"),
             serde_json::json!("notify"),
         ),
+        (
+            "quota.on_exhausted",
+            serde_json::json!("notify"),
+            serde_json::json!("freeze"),
+            serde_json::json!("throttle"),
+        ),
     ] {
         app.controller.apply(
             crate::controller::Command::Policies,

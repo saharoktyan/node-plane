@@ -9,7 +9,7 @@ from tests import test_telegram_admin_profiles_rich as profile_fixture
 
 GIB = 1024 ** 3
 DEFAULTS = {'quota.bytes': None, 'quota.reset': 'calendar_month', 'quota.interval_days': 30,
-            'quota.on_exhausted': 'freeze', 'quota.timezone': 'UTC'}
+            'quota.on_exhausted': 'freeze', 'quota.throttle_kbit': 1000, 'quota.timezone': 'UTC'}
 
 
 class Policies:
@@ -82,6 +82,18 @@ class QuotaScreenTests(IsolatedAsyncioTestCase):
             ('installation', 'quota.interval_days', 7), ('installation', 'quota.timezone', 'Europe/Moscow'),
             ('installation', 'quota.interval_days', None), ('installation', 'quota.bytes', None)])
 
+    async def test_throttle_offers_a_speed_and_shows_in_the_period(self):
+        policies = Policies()
+        backend = SimpleNamespace(request=AsyncMock(side_effect=policies.request))
+        screen, _ = await self.press(quotas.installation_cb, 'tquota:exhausted:throttle', backend)
+        self.assertIn('tquota:throttle:1000', self.selected(screen))
+        await self.press(quotas.installation_cb, 'tquota:throttle:2000', backend)
+        await self.press(quotas.installation_cb, 'tquota:throttle:3000', backend)
+        self.assertEqual(policies.patches, [('installation', 'quota.on_exhausted', 'throttle'),
+                                            ('installation', 'quota.throttle_kbit', 2000)])
+        self.assertEqual(quotas.usage_line('en', {'limit_bytes': GIB, 'throttled': 2000, 'period': {
+            'used_bytes': GIB, 'end': None, 'blocked': False}}), '1.0 GiB of 1.0 GiB · speed limited to 2 Mbit/s')
+
     async def test_profile_override_exemption_and_confirmed_reset(self):
         policies = Policies()
         policies.values['installation']['quota.bytes'] = 100 * GIB
@@ -120,6 +132,7 @@ class QuotaTextTests(TestCase):
             for kind, payload in (('quota_warning', {'percent': 80, 'used': '8.0 GiB', 'limit': '10.0 GiB'}),
                                   ('quota_exhausted', {'limit': '10.0 GiB', 'suspended': True}),
                                   ('quota_exhausted', {'limit': '10.0 GiB', 'suspended': False}),
+                                  ('quota_exhausted', {'limit': '10.0 GiB', 'suspended': False, 'throttled': 512}),
                                   ('quota_reset', {})):
                 title, lines = notification_content({'notification_kind': kind, 'service_title': 'VPN',
                                                      'payload': payload}, locale)
@@ -129,3 +142,8 @@ class QuotaTextTests(TestCase):
         title, lines = notification_content({'notification_kind': 'quota_exhausted', 'service_title': 'VPN',
                                              'payload': {'limit': '10.0 GiB', 'suspended': True}}, 'en')
         self.assertIn('suspended', lines[-1])
+        title, lines = notification_content({'notification_kind': 'quota_exhausted', 'service_title': 'VPN',
+                                             'payload': {'limit': '10.0 GiB', 'suspended': False, 'throttled': 512}}, 'ru')
+        self.assertIn('512 кбит/с', lines[-1])
+        self.assertIn('ограничена до 1 Мбит/с', quota_text({'used_bytes': GIB, 'limit_bytes': GIB,
+                                                            'throttled_kbit': 1000}, 'ru'))

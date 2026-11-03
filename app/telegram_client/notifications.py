@@ -24,8 +24,13 @@ def notification_content(item, locale):
     if is_service(item):
         kind = item['notification_kind']
         values = {**(item.get('payload') or {}), 'service': item['service_title']}
-        # An exhausted quota either suspended access or only reports it.
-        body = 'body_suspended' if kind == 'quota_exhausted' and values.get('suspended') else 'body'
+        # An exhausted quota suspended access, limited speed or only reports it.
+        body = 'body'
+        if kind == 'quota_exhausted' and values.get('suspended'):
+            body = 'body_suspended'
+        elif kind == 'quota_exhausted' and values.get('throttled'):
+            from .routers.admin_speed_limits import rate_label
+            body, values['speed'] = 'body_throttled', rate_label(locale, values['throttled'])
         return (tr(locale, f'notification.{kind}.title'), (
             tr(locale, 'notification.from', sender='System'),
             tr(locale, f'notification.{kind}.{body}', **values),

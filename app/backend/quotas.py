@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 from .authorization import AccessDenied, Account, Actor, Principal, PrincipalKind, require_permission
 from .vpn_policies import effective
 
-KEYS = ('quota.bytes', 'quota.reset', 'quota.interval_days', 'quota.on_exhausted')
+KEYS = ('quota.bytes', 'quota.reset', 'quota.interval_days', 'quota.on_exhausted', 'quota.throttle_kbit')
 STRATEGIES = ('calendar_month', 'monthly_anchor', 'interval', 'none')
 WARN_PERCENT = 80
 STATE_COLUMNS = ('profile_id', 'anchor_at', 'revision')
@@ -102,6 +102,17 @@ def blocked(conn, profile_id):
         WHERE profile_id=? AND closed_at IS NULL AND blocked=1''', (profile_id,)).fetchone() is not None
 
 
+def throttle(conn, profile_id):
+    """The speed in kbit/s a used-up quota limits the profile's devices to,
+    or None. Raising the limit or a new period lifts it."""
+    values = effective(conn, profile_id=profile_id, keys=KEYS)
+    row = _open(conn, profile_id)
+    if (values['quota.on_exhausted'] != 'throttle' or not values['quota.bytes'] or row is None
+            or row['uplink_bytes'] + row['downlink_bytes'] < values['quota.bytes']):
+        return None
+    return values['quota.throttle_kbit']
+
+
 def accrue(conn, profile_id, uplink, downlink):
     """Adds observed traffic to the profile's open period, if any."""
     if uplink or downlink:
@@ -133,6 +144,7 @@ def overview(conn, profile_id):
         ORDER BY period_start DESC,id DESC LIMIT ?''', (profile_id, HISTORY)).fetchall()
     return {'limit_bytes': values['quota.bytes'] or None, 'reset': values['quota.reset'],
             'interval_days': values['quota.interval_days'], 'on_exhausted': values['quota.on_exhausted'],
+            'throttle_kbit': values['quota.throttle_kbit'], 'throttled': throttle(conn, profile_id),
             'timezone': values['quota.timezone'],
             'anchor_at': state['anchor_at'] if state else None, 'anchor_revision': state['revision'] if state else 0,
             'period': _period(_open(conn, profile_id)), 'history': [_period(row) for row in history]}
@@ -192,7 +204,8 @@ def _evaluate(conn, profile_id, values, row, now):
     if used >= limit and row['exhausted_at'] is None:
         conn.execute('UPDATE backend_quota_periods SET exhausted_at=? WHERE id=?', (now.isoformat(), row['id']))
         _notify(conn, 'quota_exhausted', profile_id, row['id'], now,
-                {**payload, 'suspended': values['quota.on_exhausted'] == 'freeze'})
+                {**payload, 'suspended': values['quota.on_exhausted'] == 'freeze',
+                 **({'throttled': values['quota.throttle_kbit']} if values['quota.on_exhausted'] == 'throttle' else {})})
     suspend = used >= limit and values['quota.on_exhausted'] == 'freeze'
     if suspend != bool(row['blocked']):
         conn.execute('UPDATE backend_quota_periods SET blocked=? WHERE id=?', (int(suspend), row['id']))

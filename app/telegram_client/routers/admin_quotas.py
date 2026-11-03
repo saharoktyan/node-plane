@@ -20,7 +20,8 @@ FIELDS = {
     'limit': ('quota.bytes', (10 * GIB, 50 * GIB, 100 * GIB, 200 * GIB, 500 * GIB)),
     'reset': ('quota.reset', ('calendar_month', 'monthly_anchor', 'interval', 'none')),
     'days': ('quota.interval_days', (7, 30)),
-    'exhausted': ('quota.on_exhausted', ('freeze', 'notify')),
+    'exhausted': ('quota.on_exhausted', ('freeze', 'notify', 'throttle')),
+    'throttle': ('quota.throttle_kbit', (512, 1000, 2000, 5000)),
     'tz': ('quota.timezone', ('UTC', 'Europe/Moscow', 'Europe/Kyiv', 'Europe/Berlin', 'Asia/Almaty')),
 }
 
@@ -43,6 +44,9 @@ def value_label(locale, field, value):
         return tr(locale, f'quota.{field}.{value}')
     if field == 'days':
         return tr(locale, 'quota.days', days=value)
+    if field == 'throttle':
+        from .admin_speed_limits import rate_label
+        return rate_label(locale, value)
     return value
 
 
@@ -54,7 +58,7 @@ def parse(field, raw, *, profile=False):
     if raw == 'none' and field == 'limit':
         return 0
     values = FIELDS[field][1]
-    value = int(raw) if raw.isdigit() and field in {'limit', 'days'} else raw
+    value = int(raw) if raw.isdigit() and field in {'limit', 'days', 'throttle'} else raw
     return value if value in values else ...
 
 
@@ -68,6 +72,8 @@ def usage_line(locale, quota):
         line += ' · ' + tr(locale, 'quota.until', date=period['end'][:10])
     if period.get('blocked'):
         line += ' · ' + tr(locale, 'quota.suspended')
+    elif quota.get('throttled'):
+        line += ' · ' + tr(locale, 'quota.throttled', speed=value_label(locale, 'throttle', quota['throttled']))
     return line
 
 
@@ -120,7 +126,8 @@ async def _show(query, bot, backend, state, profile_id=None):
         installation = policy if profile_id is None else await backend.request(
             'GET', INSTALLATION, telegram_user_id=query.from_user.id)
         shown = ('limit', 'reset', *(('days',) if _key(policy, 'quota.reset')['effective'] == 'interval' else ()),
-                 'exhausted', *(('tz',) if profile_id is None else ()))
+                 'exhausted', *(('throttle',) if _key(policy, 'quota.on_exhausted')['effective'] == 'throttle' else ()),
+                 *(('tz',) if profile_id is None else ()))
         for name in shown:
             current = _key(policy, FIELDS[name][0])
             if profile_id is None:

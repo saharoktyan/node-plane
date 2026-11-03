@@ -2,9 +2,10 @@
 
 The controller resolves `speed.*` for every active Xray client and AWG peer
 on a node and sends the node's snapshot every minute (delivery:
-backend.node_snapshots). The agent journals it and shapes on its own, so
-limits keep working while the controller is unreachable (VPN plan, section
-11d). The agent answers with the outcome of its latest pass per protocol;
+backend.node_snapshots). While a profile with `quota.on_exhausted =
+throttle` has used up its quota, `quota.throttle_kbit` caps its devices.
+The agent journals the snapshot and shapes on its own, so limits keep
+working while the controller is unreachable (VPN plan, section 11d). The agent answers with the outcome of its latest pass per protocol;
 `unsupported` means the node lacks tc, nft or nsenter.
 """
 from datetime import datetime, timedelta, timezone
@@ -28,11 +29,17 @@ def create_schema(conn):
 def node_snapshot(conn, node_key, protocols, now=None):
     """Limited clients of active devices on this node, both protocols."""
     from .node_snapshots import active_devices
-    clients = []
+    from .quotas import throttle
+    clients, throttled = [], {}
     for protocol in sorted({'awg', 'xray'} & set(protocols)):
         for row in active_devices(conn, node_key, protocol, now):
             values = effective(conn, device_id=row['device_id'], node_key=node_key, protocol=protocol, keys=KEYS)
             up, down = values['speed.up_kbit'] or 0, values['speed.down_kbit'] or 0
+            if row['profile_id'] not in throttled:
+                throttled[row['profile_id']] = throttle(conn, row['profile_id'])
+            if limit := throttled[row['profile_id']]:
+                # A used-up quota caps both directions; a lower own limit stays.
+                up, down = min(up or limit, limit), min(down or limit, limit)
             if up or down:
                 clients.append({'protocol': protocol, 'name': row['name'], 'up_kbit': up, 'down_kbit': down})
     return clients

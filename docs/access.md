@@ -68,7 +68,7 @@ A traffic quota limits uplink and downlink together across all servers of a prof
 
 - **Limit per period** (`quota.bytes`): no limit by default. A profile can choose **No limit** to be exempt from the installation quota.
 - **Reset** (`quota.reset`): on the 1st of each month; monthly on the start day (the last day of shorter months); every N days (`quota.interval_days`); or never, for a one-off allowance. Periods follow the installation time zone (`quota.timezone`, UTC by default).
-- **When used up** (`quota.on_exhausted`): suspend access until the next reset (default) or only notify.
+- **When used up** (`quota.on_exhausted`): suspend access until the next reset (default), only notify, or limit the speed of every device of the profile to `quota.throttle_kbit` (1 Mbit/s by default) until the next reset or a raised limit. A lower speed limit of a device stays.
 
 The start day is when the profile first got a quota; an administrator can move it with the API. Changes to the reset take effect from the next reset, and the current usage stays; a new limit applies at once, so raising it restores suspended access. **Reset now** in the profile's quota screen starts a new period immediately and restores suspended access.
 

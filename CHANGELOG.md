@@ -51,6 +51,9 @@
   without the controller; Xray clients get marked outbounds, AWG peers are
   shaped inside the AWG container. Nodes report when they cannot shape (no
   tc, nft or nsenter). Database revision 21 adds runtime state only.
+- Add `throttle` to `quota.on_exhausted`: a used-up quota limits the speed
+  of the profile's devices to `quota.throttle_kbit` until the next reset
+  instead of suspending access.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
 

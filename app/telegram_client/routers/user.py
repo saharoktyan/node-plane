@@ -478,7 +478,11 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
 def quota_text(quota, locale):
     """Used traffic against the quota, with the next reset if any."""
     text = tr(locale, 'quota.usage', used=_traffic_bytes(quota['used_bytes']), limit=_traffic_bytes(quota['limit_bytes']))
-    return text + (' · ' + tr(locale, 'quota.until', date=quota['period_end'][:10]) if quota.get('period_end') else '')
+    text += ' · ' + tr(locale, 'quota.until', date=quota['period_end'][:10]) if quota.get('period_end') else ''
+    if quota.get('throttled_kbit'):
+        from .admin_speed_limits import rate_label
+        text += ' · ' + tr(locale, 'quota.throttled', speed=rate_label(locale, quota['throttled_kbit']))
+    return text
 
 
 def profile_traffic_section(summary, locale):

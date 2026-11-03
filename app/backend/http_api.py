@@ -235,7 +235,11 @@ class QuotaOutput(BaseModel):
     limit_bytes: int | None
     reset: Literal['calendar_month', 'monthly_anchor', 'interval', 'none']
     interval_days: int
-    on_exhausted: Literal['freeze', 'notify']
+    on_exhausted: Literal['freeze', 'notify', 'throttle']
+    # Speed in kbit/s while the quota is used up with `throttle`; `throttled`
+    # is set while that applies.
+    throttle_kbit: int
+    throttled: int | None
     timezone: str
     anchor_at: str | None
     anchor_revision: int
@@ -298,7 +302,8 @@ class MemberProfileSummary(BaseModel):
     expired: bool
     # Access suspended until the traffic quota resets.
     quota_suspended: bool = False
-    # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted.
+    # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted,
+    # throttled_kbit (speed while throttled, else None).
     quota: dict[str, int | str | None] | None = None
     expires_at: str | None
     created_at: str | None

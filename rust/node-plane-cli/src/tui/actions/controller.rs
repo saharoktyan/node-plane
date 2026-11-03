@@ -1850,10 +1850,10 @@ impl App {
                         items.push((
                             format!(
                                 "When quota is used up: {}",
-                                if policy["effective"] == "notify" {
-                                    "Only notify"
-                                } else {
-                                    "Suspend access"
+                                match policy["effective"].as_str() {
+                                    Some("notify") => "Only notify",
+                                    Some("throttle") => "Limit speed",
+                                    _ => "Suspend access",
                                 }
                             ),
                             Control::ControllerPolicyToggle("quota.on_exhausted"),
@@ -1976,7 +1976,7 @@ fn next_preset(key: &str, policy: &serde_json::Value) -> serde_json::Value {
         "speed.up_kbit" | "speed.down_kbit" => {
             serde_json::json!([null, 1_000, 5_000, 10_000, 20_000, 50_000, 100_000])
         }
-        _ => serde_json::json!(["freeze", "notify"]),
+        _ => serde_json::json!(["freeze", "notify", "throttle"]),
     };
     let presets = presets.as_array().cloned().unwrap_or_default();
     let next = presets

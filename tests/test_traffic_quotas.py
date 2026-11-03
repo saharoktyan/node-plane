@@ -155,6 +155,40 @@ class QuotaServiceTests(unittest.TestCase):
         self.assertFalse(self.open_period()['blocked'])
         self.assertEqual(self.latest_actions(), {'ensure'})
 
+    def test_throttle_keeps_access_and_caps_speed_until_the_reset(self):
+        import json
+        from backend.speed_limits import SpeedLimits, node_snapshot
+        SpeedLimits(self.db).initialize_schema()
+        self.policy('quota.bytes', 1000)
+        self.policy('quota.on_exhausted', 'throttle')
+        self.policy('speed.down_kbit', 500, profile=True)
+
+        def limits():
+            with self.db.connect() as conn:
+                return [(c['up_kbit'], c['down_kbit']) for c in node_snapshot(conn, 'node', ['awg'], self.now)]
+        self.tick()
+        self.assertEqual(limits(), [(0, 500)])
+        self.use(1000)
+        self.tick(minutes=1)
+        self.assertFalse(self.open_period()['blocked'])
+        # The lower own limit stays; the free direction gets the throttle.
+        self.assertEqual(limits(), [(1000, 500)])
+        payload = json.loads(self.db.connection.execute(
+            "SELECT payload_json FROM backend_system_notifications WHERE kind='quota_exhausted'").fetchone()[0])
+        self.assertEqual((payload['suspended'], payload['throttled']), (False, 1000))
+        quota = self.client.get(f'/api/v1/profiles/{self.profile}/quota', headers=self.headers_for()).json()
+        self.assertEqual(quota['throttled'], 1000)
+        summary = self.client.get(f'/api/v1/profiles/{self.profile}/summary', headers=self.headers_for()).json()
+        self.assertEqual(summary['quota']['throttled_kbit'], 1000)
+        # A raised limit lifts the throttle at once, as does the next period.
+        self.policy('quota.bytes', 5000, profile=True)
+        self.assertEqual(limits(), [(0, 500)])
+        self.policy('quota.bytes', None, profile=True)
+        self.assertEqual(limits(), [(1000, 500)])
+        self.now = datetime(2026, 4, 1, 0, 0, 30, tzinfo=UTC)
+        self.tick()
+        self.assertEqual(limits(), [(0, 500)])
+
     def test_a_new_period_does_not_lift_an_administrators_freeze(self):
         self.policy('quota.bytes', 1000)
         self.tick()
