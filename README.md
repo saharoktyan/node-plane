@@ -64,17 +64,18 @@ Your installation Telegram ID receives administrator access automatically. To sh
 - Local and remote VPN nodes, protocol deployment and server settings.
 - Accounts, VPN profiles, server/protocol grants, access requests and AWG devices.
 - Configuration files, links and QR codes delivered through Telegram.
-- Access expiry, profile freezing, revocation and temporary configurations.
+- Access expiry, profile freezing, revocation and temporary configurations; tariffs and renewal requests.
+- VLESS and AWG devices, device limits, simultaneous-network limits for VLESS, speed limits and traffic quotas.
 - Traffic statistics, host observations, notifications and alerts.
 - Installation updates, configuration backups/restore and operation diagnostics/recovery.
 
 VLESS configurations are delivered as URIs or QR codes, and AmneziaWG configurations as `.conf` files. Use a VPN client that supports the relevant format; a VLESS URI configures the proxy connection, while full-device routing requires a client with TUN/VPN mode. I have tested VLESS with v2rayA on Linux, v2rayN on Windows, NekoBox on Android (TCP transport only) and v2box on iOS. I have also tested AmneziaWG with AmneziaVPN on Linux, Windows, Android and iOS. These are maintainer test results, not a compatibility guarantee for every version or device.
 
-Traffic statistics are available; traffic quotas and connection-count enforcement are not implemented yet. Revoking VLESS access also closes the device's established connections.
+Revoking VLESS access also closes the device's established connections. Stock Xray cannot do this, so nodes run Xray from the [Node Plane fork](https://github.com/saharoktyan/Xray-core), which adds connection termination to its API; the fork has to be rebased onto each Xray release.
 
 ## Compared with 3x-ui and Remnawave
 
-This compares documented standard workflows, not every third-party integration or customized deployment. Checked against official documentation on **2026-10-30**; these are feature comparisons, not comparative security or performance tests.
+This compares documented standard workflows, not every third-party integration or customized deployment. Checked against official documentation on **2026-10-30**; quotas, limits and session handling were checked in the source code (3x-ui, Remnawave `node` and `backend`, default branches) on **2026-11-04**. These are feature comparisons, not comparative security or performance tests.
 
 | Area | Node Plane today | 3x-ui | Remnawave |
 | --- | --- | --- | --- |
@@ -86,22 +87,21 @@ This compares documented standard workflows, not every third-party integration o
 | Configuration delivery | Telegram files, links and QR codes; localized bot flows | Panel and documented bot/integration workflows | Panel and ecosystem integrations |
 | Protocol scope | VLESS REALITY TCP/XHTTP and AmneziaWG | Broader protocol selection, including AmneziaWG | Xray-based proxy management |
 | Configuration subscriptions | Planned | Available | Available |
-| User/client traffic quotas | Planned | Available | Available |
+| User/client traffic quotas | Per profile, with reset periods; when exhausted, access is blocked or throttled | Total traffic per client, with periodic reset | Per user, with reset strategies (none, day, week, month, rolling month) |
+| Device and connection limits | Devices per profile; simultaneous networks per VLESS device: the oldest network is blocked for a cooldown and its connections closed | IP count per client; the user is briefly removed and re-added, and excess IPs are banned by fail2ban | HWID device limit, checked when a client fetches its subscription |
 | Access expiry | Available | Available | Available |
+| Open VLESS sessions on revocation | Closed for that user (and, for a network limit, only that source), through the forked Xray API; other users are unaffected | Stock Xray keeps open sessions; optionally Xray restarts on client disable, dropping every user | Sockets of the user's online IPs are destroyed in the kernel (`SOCK_DESTROY`); this also drops other connections of the same IP, such as users behind the same NAT |
 
 Sources: [3x-ui features](https://docs.sanaei.dev/docs/), [installation](https://docs.sanaei.dev/docs/guide/installation/), [multi-node](https://docs.sanaei.dev/docs/operations/multi-node/); Remnawave [setup](https://docs.rw/overview/quick-start/), [users and limits](https://docs.rw/learn-en/users/), [Telegram integrations](https://docs.rw/awesome-remnawave/).
 
-Node Plane's strengths are the workstation-led installation, no required public admin port, approval-based access model, temporary configurations and Telegram delivery. The alternatives offer broader protocol or subscription/quota capabilities today and browser-based administration. Choose based on which workflow fits your environment; a web panel can also be kept private, as 3x-ui documents with [localhost binding and SSH tunneling](https://docs.sanaei.dev/docs/guide/update-uninstall/).
+Node Plane's strengths are the workstation-led installation, no required public admin port, approval-based access model, temporary configurations and Telegram delivery. The alternatives offer a broader protocol selection, configuration subscriptions and browser-based administration today. Choose based on which workflow fits your environment; a web panel can also be kept private, as 3x-ui documents with [localhost binding and SSH tunneling](https://docs.sanaei.dev/docs/guide/update-uninstall/).
 
 ## Planned VPN improvements — not implemented
 
 These are development priorities for the beta period, not a guarantee that every item ships before stable 1.0. See the [roadmap](docs/roadmap.md#near-term-development-priorities).
 
 - Renewable subscriptions for easier configuration refresh.
-- Traffic quotas.
-- VLESS devices, device limits and simultaneous-connection limits per VLESS device configuration.
-- Per-profile speed limits.
-- Stronger active-session revocation and a manual server-chain builder.
+- A manual server-chain builder.
 
 ## Requirements and documentation
 
