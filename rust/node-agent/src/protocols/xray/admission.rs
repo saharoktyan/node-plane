@@ -6,7 +6,9 @@
 //! established connections are closed on every VLESS inbound (the patched
 //! runtime image; upstream Xray only stops new dispatches). A blocked source
 //! is not counted and cannot evict others, so two parties sharing one link
-//! swap at most once per cooldown. Blocks are journaled and re-applied after
+//! swap at most once per cooldown. After the cooldown a source counts again
+//! only with a connection opened after its block ended: the cooldown may be
+//! shorter than the window, and a network that left must not come back. Blocks are journaled and re-applied after
 //! an Xray restart (detected by its uptime going back).
 //!
 //! Evictions are buffered for the controller without the source address;
@@ -70,6 +72,10 @@ struct Client {
     /// per cooldown, like an eviction would be.
     #[serde(default)]
     reported: BTreeMap<String, u64>,
+    /// Sources whose block ended, and when: connections older than that do
+    /// not count. Kept for one window.
+    #[serde(default)]
+    released: BTreeMap<String, u64>,
 }
 
 /// Journaled state of every limited client on this node.
@@ -136,22 +142,32 @@ impl State {
     ) -> Changes {
         let mut changes = Changes::default();
         let client = self.clients.entry(email.to_string()).or_default();
-        client.blocks.retain(|_, block| {
+        let mut released = Vec::new();
+        client.blocks.retain(|source, block| {
             let keep = block.until > now;
             if !keep {
                 changes.remove.push(block.rule_tag.clone());
+                released.push((source.clone(), block.until));
             }
             keep
         });
+        client.released.extend(released);
         client.reported.retain(|_, until| *until > now);
         // A client vanishing without FIN stays in the online list; only a
         // recent new connection counts (spike, 5.7).
         let since = now.saturating_sub(policy.window_seconds);
+        client.released.retain(|_, until| *until >= since);
         let mut active: BTreeMap<String, u64> = BTreeMap::new();
         for (ip, seen) in online {
             let seen = u64::try_from(*seen).unwrap_or(0);
             let Some(key) = source_key(ip) else { continue };
-            if seen < since || client.blocks.contains_key(&key) {
+            if seen < since
+                || client.blocks.contains_key(&key)
+                || client
+                    .released
+                    .get(&key)
+                    .is_some_and(|until| seen <= *until)
+            {
                 continue;
             }
             let entry = active.entry(key).or_insert(seen);
@@ -635,6 +651,41 @@ mod tests {
         }
         // One eviction at the start, then one per expired cooldown.
         assert_eq!(evictions, 1 + 1290 / 300);
+    }
+
+    #[test]
+    fn a_network_that_left_does_not_return_after_a_short_cooldown() {
+        let mut state = State::default();
+        let limit = Policy {
+            cooldown_seconds: 30,
+            ..policy(1, Mode::Enforce)
+        };
+        state.observe("phone", &limit, &online(&[("198.51.100.1", 1000)]), 1000);
+        let evicted = state.observe(
+            "phone",
+            &limit,
+            &online(&[("198.51.100.1", 1000), ("203.0.113.9", 1010)]),
+            1010,
+        );
+        assert_eq!(evicted.add.len(), 1);
+        // The block ends at 1040. The old network's last connection (1000) is
+        // still inside the 120 s window, but it opened nothing since.
+        let after = state.observe(
+            "phone",
+            &limit,
+            &online(&[("198.51.100.1", 1000), ("203.0.113.9", 1050)]),
+            1050,
+        );
+        assert_eq!(after.remove, vec!["np-evict-0".to_string()]);
+        assert!(after.add.is_empty());
+        // A connection opened after the block counts again: ping-pong.
+        let back = state.observe(
+            "phone",
+            &limit,
+            &online(&[("198.51.100.1", 1060), ("203.0.113.9", 1060)]),
+            1060,
+        );
+        assert_eq!(back.add[0].2, "203.0.113.9/32");
     }
 
     #[test]

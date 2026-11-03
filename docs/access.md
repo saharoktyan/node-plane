@@ -44,7 +44,7 @@ The **Simultaneous networks** setting limits from how many networks one VLESS de
 - `connections.max_sources`: networks per device, 1 by default. Set it for the installation and per profile.
 Open it in Telegram → Settings → VPN → Simultaneous networks, in a profile's Edit screen, or in Workstation → Node Plane Settings → Policies.
 
-- `connections.window_seconds` (120) and `connections.cooldown_seconds` (300) apply to the whole installation.
+- `connections.window_seconds` (120) and `connections.cooldown_seconds` (30) apply to the whole installation. A network blocked by the limit counts again only when it opens a new connection after its cooldown.
 
 Each node receives the full set of its limits from the controller within a minute and enforces it on its own, including while the controller is unreachable. The settings screen lists nodes that do not have the current limits yet. A node whose agent is too old to enforce limits is named there; update the agent. Limits apply to VLESS only; AWG is not affected. Other devices and users are never blocked by another device's limit.
 

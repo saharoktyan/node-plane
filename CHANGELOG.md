@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Block a network evicted by the simultaneous networks limit for 30 s by
+  default instead of 5 min; after the cooldown it counts again only with a
+  new connection.
 - Add and remove VLESS users in the node agent (`node-plane-agent xray-user`)
   instead of the Python helper; the shell entry points only start the agent.
 - Runtime updates now bring existing VPN containers to the release images:

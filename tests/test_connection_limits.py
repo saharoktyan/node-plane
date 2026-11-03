@@ -79,7 +79,7 @@ class ConnectionLimitTests(Fixture, unittest.TestCase):
         self.installation('connections.mode', 'enforce')
         self.limits.sync()
         expected = {'email': self.email(self.phone), 'mode': 'enforce', 'max_sources': 1,
-                    'window_seconds': 120, 'cooldown_seconds': 300}
+                    'window_seconds': 120, 'cooldown_seconds': 30}
         self.assertEqual(self.driver.calls, [('node', 1, [expected])])
         self.assertEqual((self.row()['status'], self.row()['applied_revision']), ('current', 1))
         # Unchanged policy: the same revision again, which the agent ignores.

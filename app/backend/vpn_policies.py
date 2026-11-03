@@ -91,7 +91,7 @@ register(PolicyKey('connections.max_sources', frozenset({'installation', 'profil
 register(PolicyKey('connections.window_seconds', frozenset({'installation'}), frozenset({'global'}),
                    integer(30, 3600), default=120, protocols=frozenset({'xray'})))
 register(PolicyKey('connections.cooldown_seconds', frozenset({'installation'}), frozenset({'global'}),
-                   integer(0, 86400), default=300, protocols=frozenset({'xray'})))
+                   integer(0, 86400), default=30, protocols=frozenset({'xray'})))
 # Traffic quota per profile, uplink and downlink together on every node (plan,
 # section 8). No limit by default; 0 exempts a profile from the installation
 # quota. Periods are kept by backend.quotas.

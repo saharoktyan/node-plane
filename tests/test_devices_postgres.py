@@ -73,7 +73,7 @@ class DevicesPostgresTests(unittest.TestCase):
                                  (device['id'],)).fetchone()['runtime_name']
             status = conn.execute("SELECT status FROM backend_node_admission WHERE node_key='node'").fetchone()['status']
         self.assertEqual(driver.calls, [('node', 1, [{'email': email, 'mode': 'enforce', 'max_sources': 1,
-                                                      'window_seconds': 120, 'cooldown_seconds': 300}])])
+                                                      'window_seconds': 120, 'cooldown_seconds': 30}])])
         self.assertEqual(status, 'current')
         # Observations and events land on PostgreSQL; resent events are stored once.
         driver.events = [1, 2]
