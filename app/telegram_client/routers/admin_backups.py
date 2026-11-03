@@ -1,12 +1,13 @@
 """Backup screens backed exclusively by backend commands and read models."""
 
+import io
 import re
 from uuid import uuid4
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
-from .states import BackupNameState
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, Message
+from .states import BackupImportState, BackupNameState
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
@@ -28,7 +29,8 @@ def button(text, data, *, style=None):
 def failure_note(lang, code):
     known = {'maintenance_busy', 'backup_incompatible', 'backup_invalid',
              'backup_pending', 'backup_revocations_failed', 'resource_not_found',
-             'update_pending', 'system_cleanup_in_progress', 'restore_in_progress'}
+             'update_pending', 'system_cleanup_in_progress', 'restore_in_progress',
+             'backup_in_use', 'backup_changed', 'backup_too_large'}
     return tr(lang, 'backups.error.' + code if code in known else 'backups.failed_note')
 
 
@@ -58,6 +60,7 @@ async def overview(query, bot, backend, state):
         [button(tr(lang, "backups.settings"), "backup_settings",
             style='primary' if value["enabled"] else None)],
     ]
+    rows[0].append(button(tr(lang, "backups.import"), "backup_import"))
     if value.get("last_job"):
         lines.append(
             tr(
@@ -195,6 +198,11 @@ async def result(query, bot, backend, state, job_id):
 @router.callback_query(F.data.startswith("backup_pref:"))
 @router.callback_query(F.data.startswith("backup_submit:"))
 @router.callback_query(F.data.startswith("backup_job:"))
+@router.callback_query(F.data == "backup_import")
+@router.callback_query(F.data.startswith("backup_export:"))
+@router.callback_query(F.data.startswith("backup_send:"))
+@router.callback_query(F.data.startswith("backup_delete:"))
+@router.callback_query(F.data.startswith("backup_remove:"))
 async def backup_cb(
     query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext
 ):
@@ -219,6 +227,9 @@ async def backup_cb(
                         ).model_copy(update={'style': 'danger'})
                     ]
                 )
+            rows.append([button(tr(lang, "backups.export"), f"backup_export:{info['id']}"),
+                         button(tr(lang, "backups.delete"), f"backup_delete:{info['id']}").model_copy(
+                             update={'style': 'danger'})])
             offset = (await state.get_data()).get("backup_offset", 0)
             rows.append([button(tr(lang, "back"), f"backup_list:{offset}")])
             metadata = Table((tr(lang, 'maintenance.rich.field'), tr(lang, 'maintenance.rich.value')), (
@@ -297,6 +308,40 @@ async def backup_cb(
             await result(query, bot, backend, state, job["id"])
         elif action.startswith("backup_job:"):
             await result(query, bot, backend, state, action.split(":")[1])
+        elif action == "backup_import":
+            await state.set_state(BackupImportState.waiting_for_file)
+            await state.update_data(backup_import={'owner': query.from_user.id, 'message_id': query.message.message_id})
+            await draw(query, bot, state, 'backups.import', [tr(lang, 'backups.import_prompt')],
+                [[button(tr(lang, 'back'), 'backups')]])
+        elif action.startswith("backup_export:"):
+            info = await backend.backup_detail(query.from_user.id, action.split(":")[1])
+            await draw(query, bot, state, 'backups.export', [tr(lang, 'backups.export_warning')],
+                [[button(tr(lang, 'back'), f"backup_detail:{info['id']}"),
+                  button(tr(lang, 'backups.export_send'), f"backup_send:{info['id']}", style='primary')]])
+        elif action.startswith("backup_send:"):
+            backup_id = action.split(":")[1]
+            content = await backend.backup_export(query.from_user.id, backup_id)
+            await bot.send_document(query.message.chat.id,
+                BufferedInputFile(content, f'node-plane-backup-{backup_id}.json'))
+            await draw(query, bot, state, 'backups.export', [tr(lang, 'backups.exported')],
+                [[button(tr(lang, 'back'), f"backup_detail:{backup_id}")]])
+        elif action.startswith("backup_delete:"):
+            info = await backend.backup_detail(query.from_user.id, action.split(":")[1])
+            nonce = uuid4().hex[:8]
+            await state.update_data(backup_removal={'id': info['id'], 'checksum': info['checksum'],
+                                                    'nonce': nonce, 'owner': query.from_user.id})
+            await draw(query, bot, state, 'backups.delete', [tr(lang, 'backups.delete_warning',
+                date=info['created_at'][:19], name=info.get('name') or '—')],
+                [[button(tr(lang, 'back'), f"backup_detail:{info['id']}"),
+                  button(tr(lang, 'backups.delete'), f"backup_remove:{nonce}", style='danger')]])
+        elif action.startswith("backup_remove:"):
+            draft = (await state.get_data()).get("backup_removal")
+            if not draft or draft["nonce"] != action.split(":")[1] or draft["owner"] != query.from_user.id:
+                return await overview(query, bot, backend, state)
+            await backend.backup_delete(query.from_user.id, draft['id'], draft['checksum'])
+            await state.update_data(backup_removal=None)
+            offset = (await state.get_data()).get("backup_offset", 0)
+            await catalog(query, bot, backend, state, offset)
         elif action.startswith("backup_pref:"):
             parts = action.split(":")
             field = parts[1]
@@ -368,3 +413,45 @@ async def backup_name_message(message: Message, bot: Bot, state: FSMContext):
     draft['body']['name'] = name
     await state.update_data(backup_draft=draft)
     await confirm_manual(message.chat.id, message.from_user.id, draft['message_id'], bot, state)
+
+
+# Telegram lets bots download files only up to 20 MB.
+IMPORT_LIMIT = 20 * 1024 * 1024
+
+
+@router.message(BackupImportState.waiting_for_file, F.document)
+async def backup_import_file(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
+    data = await state.get_data()
+    draft = data.get('backup_import') or {}
+    if message.chat.type != 'private' or not message.from_user or draft.get('owner') != message.from_user.id:
+        return
+    lang = normalize_locale(data.get('locale'))
+    size = message.document.file_size or 0
+    content = None
+    if size <= IMPORT_LIMIT:
+        stream = io.BytesIO()
+        await bot.download(message.document, destination=stream)
+        content = stream.getvalue()
+    # The file holds every account and VPN key; keep it out of the chat.
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    back = [[button(tr(lang, 'back'), 'backups')]]
+    if content is None:
+        await render(bot, message.chat.id, Screen(tr(lang, 'backups.failed'),
+            (tr(lang, 'backups.error.backup_too_large'),), embedded_buttons=True, navigation=True),
+            back, state, draft['message_id'])
+        return
+    await state.set_state(None)
+    await state.update_data(backup_import=None)
+    try:
+        info = await backend.backup_import(message.from_user.id, content)
+    except BackendError as exc:
+        await render(bot, message.chat.id, Screen(tr(lang, 'backups.failed'),
+            (failure_note(lang, exc.code),), embedded_buttons=True, navigation=True),
+            back, state, draft['message_id'])
+        return
+    await render(bot, message.chat.id, Screen(tr(lang, 'backups.import'),
+        (tr(lang, 'backups.imported', date=info['created_at'][:19]),), embedded_buttons=True, navigation=True),
+        [[button(tr(lang, 'backups.details'), f"backup_detail:{info['id']}")], *back], state, draft['message_id'])

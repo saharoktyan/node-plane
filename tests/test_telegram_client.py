@@ -618,11 +618,78 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(admin_backups, 'render', new_callable=AsyncMock) as draw:
             await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
         callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
-        self.assertEqual(callbacks, ['backup_list:8'])
+        self.assertEqual(callbacks, ['backup_export:snapshot', 'backup_delete:snapshot', 'backup_list:8'])
         screen = draw.call_args.args[2]
         metadata = dict(screen.sections[0].tables[0].rows)
         self.assertEqual(metadata[user.tr('en', 'admin.profiles')], '2')
         self.assertEqual(metadata[user.tr('en', 'backups.rich.version')], '—')
+
+    async def test_backup_delete_needs_confirmation_and_sends_the_opened_checksum(self):
+        from telegram_client.routers import admin_backups
+        info = {'id': 'snap', 'checksum': 'abc', 'created_at': '2026-11-01T10:00:00', 'name': 'before update',
+                'app_version': '0.5.0', 'profiles': 1, 'nodes': 1, 'compatible': True}
+        backend = SimpleNamespace(backup_detail=AsyncMock(return_value=info), backup_delete=AsyncMock(),
+            backup_catalog=AsyncMock(return_value={'items': [], 'next_offset': None, 'total': 0}),
+            backups_overview=AsyncMock(return_value={'enabled': False, 'count': 1, 'size_bytes': 1, 'latest': None,
+                                                     'interval_hours': 24, 'keep_count': 5}))
+        self.state_data['locale'] = 'en'
+        with patch.object(admin_backups, 'render', new_callable=AsyncMock) as draw:
+            self.query.data = 'backup_detail:snap'
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            callbacks = [b.callback_data for row in draw.call_args.args[3] for b in row]
+            self.assertIn('backup_delete:snap', callbacks)
+            self.assertIn('backup_export:snap', callbacks)
+            self.query.data = 'backup_delete:snap'
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            backend.backup_delete.assert_not_awaited()
+            self.assertIn('before update', draw.call_args.args[2].plain())
+            confirm = draw.call_args.args[3][0][1].callback_data
+            self.query.data = 'backup_remove:stale'
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            backend.backup_delete.assert_not_awaited()
+            self.query.data = confirm
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+        backend.backup_delete.assert_awaited_once_with(123, 'snap', 'abc')
+
+    async def test_backup_export_warns_before_sending_the_file(self):
+        from telegram_client.routers import admin_backups
+        backend = SimpleNamespace(backup_detail=AsyncMock(return_value={'id': 'snap'}),
+                                  backup_export=AsyncMock(return_value=b'{}'))
+        self.state_data['locale'] = 'en'
+        with patch.object(admin_backups, 'render', new_callable=AsyncMock) as draw:
+            self.query.data = 'backup_export:snap'
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            self.bot.send_document.assert_not_awaited()
+            self.assertIn('VPN key', draw.call_args.args[2].plain())
+            self.query.data = draw.call_args.args[3][0][1].callback_data
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+        document = self.bot.send_document.call_args.args[1]
+        self.assertEqual(document.filename, 'node-plane-backup-snap.json')
+
+    async def test_backup_import_reads_the_file_deletes_it_and_adds_to_catalog(self):
+        from telegram_client.routers import admin_backups
+        backend = SimpleNamespace(backup_import=AsyncMock(return_value={'id': 'new', 'created_at': '2026-11-01T10:00:00'}))
+        self.state_data['locale'] = 'en'
+        with patch.object(admin_backups, 'render', new_callable=AsyncMock) as draw:
+            self.query.data = 'backup_import'
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            self.assertEqual(self.current_state, admin_backups.BackupImportState.waiting_for_file.state)
+            async def download(document, destination):
+                destination.write(b'snapshot')
+            self.bot.download = download
+            message = SimpleNamespace(chat=SimpleNamespace(id=123, type='private'), from_user=SimpleNamespace(id=123),
+                                      document=SimpleNamespace(file_size=8), delete=AsyncMock())
+            await admin_backups.backup_import_file(message, self.bot, backend, self.state)
+            message.delete.assert_awaited()
+            backend.backup_import.assert_awaited_once_with(123, b'snapshot')
+            self.assertIn('backup_detail:new', [b.callback_data for row in draw.call_args.args[3] for b in row])
+            self.assertEqual(draw.call_args.args[5], 77)
+            # A file over Telegram's download limit is refused without reading it.
+            await admin_backups.backup_cb(self.query, self.bot, backend, self.state)
+            message.document.file_size = admin_backups.IMPORT_LIMIT + 1
+            await admin_backups.backup_import_file(message, self.bot, backend, self.state)
+            self.assertEqual(backend.backup_import.await_count, 1)
+            self.assertIn('20 MB', draw.call_args.args[2].plain())
 
     def setUp(self):
         self.bot = SimpleNamespace(send_document=AsyncMock(), send_photo=AsyncMock())

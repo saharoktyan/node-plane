@@ -3652,3 +3652,32 @@ CATALOG['ru'].update({
     'override.inherited': 'Как в установке',
     'override.inherit_profile': 'Как в профиле ({value})',
 })
+
+CATALOG['en'].update({
+    'backups.import': 'Import from file',
+    'backups.import_prompt': 'Send a backup file downloaded from Node Plane (.json, up to 20 MB). It is added to the catalog without restoring; open it and choose Restore separately.',
+    'backups.imported': 'Backup from {date} added to the catalog. Nothing was restored.',
+    'backups.export': 'Download backup',
+    'backups.export_send': 'Send file',
+    'backups.export_warning': 'The file contains every account, profile, node connection and device VPN key. It stays in this chat and on Telegram servers until you delete it. Save it to protected storage and delete the message.',
+    'backups.exported': 'The file was sent below. Save it to protected storage and delete the message.',
+    'backups.delete': 'Delete',
+    'backups.delete_warning': 'Delete the backup from {date} ({name}) from the controller? This cannot be undone.',
+    'backups.error.backup_in_use': 'This backup is used by an unfinished operation. Wait for it to finish.',
+    'backups.error.backup_changed': 'The backup changed after it was opened. Open it again.',
+    'backups.error.backup_too_large': 'The file is too large. Telegram accepts backups up to 20 MB; import larger ones in Workstation.',
+})
+CATALOG['ru'].update({
+    'backups.import': 'Импорт из файла',
+    'backups.import_prompt': 'Отправьте файл резервной копии, скачанный из Node Plane (.json, до 20 МБ). Он добавится в каталог без восстановления; затем откройте его и выберите «Восстановить».',
+    'backups.imported': 'Копия от {date} добавлена в каталог. Ничего не восстановлено.',
+    'backups.export': 'Скачать копию',
+    'backups.export_send': 'Отправить файл',
+    'backups.export_warning': 'В файле все аккаунты, профили, подключения нод и VPN-ключи устройств. Он останется в этом чате и на серверах Telegram, пока вы его не удалите. Сохраните его в защищённое место и удалите сообщение.',
+    'backups.exported': 'Файл отправлен ниже. Сохраните его в защищённое место и удалите сообщение.',
+    'backups.delete': 'Удалить',
+    'backups.delete_warning': 'Удалить копию от {date} ({name}) с контроллера? Это необратимо.',
+    'backups.error.backup_in_use': 'Копия используется незавершённой операцией. Дождитесь её завершения.',
+    'backups.error.backup_changed': 'Копия изменилась после открытия. Откройте её заново.',
+    'backups.error.backup_too_large': 'Файл слишком большой. Telegram принимает копии до 20 МБ; импортируйте большие в Workstation.',
+})

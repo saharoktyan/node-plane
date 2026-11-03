@@ -89,6 +89,18 @@ class BackendClient:
     async def backup_job(self,user_id,job_id):
         return await self.request('GET',f'/api/v1/system/backups/jobs/{job_id}',telegram_user_id=user_id)
 
+    async def backup_export(self, user_id, backup_id) -> bytes:
+        return await self.request('GET', f'/api/v1/system/backups/catalog/{backup_id}/export',
+                                  telegram_user_id=user_id, binary=True)
+
+    async def backup_import(self, user_id, content: bytes):
+        return await self.request('POST', '/api/v1/system/backups/import', telegram_user_id=user_id,
+                                  content=content, timeout_seconds=120)
+
+    async def backup_delete(self, user_id, backup_id, checksum):
+        return await self.request('POST', f'/api/v1/system/backups/catalog/{backup_id}/delete',
+                                  telegram_user_id=user_id, body={'checksum': checksum})
+
     def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str):
         parsed = urlsplit(base_url)
         if parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost'} or not parsed.port or parsed.path not in {'', '/'}:
@@ -100,7 +112,8 @@ class BackendClient:
     async def request(self, method: str, path: str, *, telegram_user_id: int | None = None,
                       body: dict | None = None, command: bool = False,
                       revision: int | None = None, command_key: str | None = None,
-                      timeout_seconds: int | None = None) -> dict:
+                      timeout_seconds: int | None = None, content: bytes | None = None,
+                      binary: bool = False) -> dict | bytes:
         from time import perf_counter
         from .timings import record, route
         started = perf_counter()
@@ -112,12 +125,15 @@ class BackendClient:
             headers['Idempotency-Key'] = command_key or str(uuid4())
         if revision is not None:
             headers['If-Match'] = f'"{revision}"'
-        options = {'headers': headers, 'json': body}
+        # Raw content is a backup file; its size is bounded by the backend.
+        options = {'headers': headers, 'json': body} if content is None else {'headers': headers, 'data': content}
         if timeout_seconds is not None:
             options['timeout'] = aiohttp.ClientTimeout(total=timeout_seconds)
         try:
             async with self.session.request(method, self.base_url + path,
                                             **options) as response:
+                if binary and response.status < 400:
+                    return await response.read()
                 data = await response.json()
                 request_id = response.headers.get('X-Request-ID', '-')
                 if response.status >= 400:

@@ -27,3 +27,7 @@ class MaintenanceState(StatesGroup):
 
 class BackupNameState(StatesGroup):
     waiting_for_name = State()
+
+
+class BackupImportState(StatesGroup):
+    waiting_for_file = State()
