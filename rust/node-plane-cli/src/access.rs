@@ -710,6 +710,8 @@ pub struct Browser {
     pub devices: Option<Devices>,
     pub account_action: Option<(Value, Uuid)>,
     pub profile_action: Option<bool>, // true: delete, false: freeze/unfreeze
+    /// Page of the profile's traffic by server while it is shown.
+    pub traffic: Option<usize>,
 }
 impl Browser {
     pub fn filtered(&self) -> Vec<usize> {

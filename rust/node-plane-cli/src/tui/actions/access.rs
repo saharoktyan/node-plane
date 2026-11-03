@@ -244,6 +244,22 @@ impl App {
                 self.access.selected = 0;
                 None
             }
+            Control::AccessTraffic => {
+                self.access.traffic = Some(0);
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessTrafficPage(next) => {
+                if let Some(page) = &mut self.access.traffic {
+                    // The drawing clamps the page to the last one.
+                    *page = if next {
+                        *page + 1
+                    } else {
+                        page.saturating_sub(1)
+                    };
+                }
+                None
+            }
             Control::AccessLimits => {
                 use crate::access::text;
                 let scope = match (&self.access.devices, &self.access.card) {
@@ -465,6 +481,7 @@ impl App {
                         return None;
                     }
                     self.access.notice.clear();
+                    self.access.traffic = None;
                     let tab = if self.access.items[index]["_account_only"] == true {
                         crate::access::Tab::Accounts
                     } else {
@@ -532,6 +549,7 @@ impl App {
                 if self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
+                    || self.access.traffic.take().is_some()
                 {
                     return None;
                 }
@@ -599,6 +617,7 @@ impl App {
         self.access.editor = None;
         self.access.profile_action = None;
         self.access.account_action = None;
+        self.access.traffic = None;
         self.access.owner_filter = None;
         self.screen = Screen::Access;
         self.quick_focus = false;
@@ -652,6 +671,8 @@ impl App {
                         | Control::AccessDeviceRotate(_)
                         | Control::AccessDeviceConfirm
                         | Control::AccessLimits
+                        | Control::AccessTraffic
+                        | Control::AccessTrafficPage(_)
                         | Control::AccessDevicePage(_)
                         | Control::AccessDurationCustom
                         | Control::AccessDurationInput

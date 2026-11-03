@@ -797,8 +797,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
-                // Edit, Limits, and Freeze and Delete for members.
-                count += 2 + 2 * usize::from(card["_account"]["role"] != "admin");
+                // Edit, Limits, Traffic when collected, and Freeze and Delete for members.
+                count += 2
+                    + usize::from(card["_summary"]["traffic"].is_object())
+                    + 2 * usize::from(card["_account"]["role"] != "admin");
             }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 count += 2;
@@ -1010,6 +1012,25 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         if app.access.tab == Tab::Requests && card["status"] != "pending" {
             buttons.clear();
         }
+        if let (Tab::Profiles, Some(page)) = (app.access.tab, app.access.traffic) {
+            let capacity = usize::from(sections[1].height.saturating_sub(3)).max(1);
+            let (lines, page, pages) = profile_traffic(card, page, capacity);
+            frame.render_widget(
+                Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
+                    .wrap(Wrap { trim: false }),
+                sections[1],
+            );
+            let mut buttons = Vec::new();
+            if page > 0 {
+                buttons.push(("Previous page", Control::AccessTrafficPage(false)));
+            }
+            if page + 1 < pages {
+                buttons.push(("Next page", Control::AccessTrafficPage(true)));
+            }
+            buttons.push(("Back", Control::AccessBack));
+            draw_access_buttons(frame, app, sections[2], &buttons, hits);
+            return;
+        }
         let mut lines = vec![Line::from(label(app.access.tab, card))];
         if app.access.tab != Tab::Requests
             && let Some(account) = card.get("_account")
@@ -1058,6 +1079,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             lines.push(Line::from(format!("Frozen: {}", card["frozen"] == true)));
+            if card["deleting"] != true {
+                lines.extend(profile_details(card).into_iter().map(Line::from));
+            }
         }
         if let Some(approve) = app.access.decision {
             lines.push(Line::from(if approve {
@@ -1127,6 +1151,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 buttons.push(("Edit", Control::AccessEdit));
                 buttons.push(("Limits", Control::AccessLimits));
+                if card["_summary"]["traffic"].is_object() {
+                    buttons.push(("Traffic", Control::AccessTraffic));
+                }
                 if card["_account"]["role"] != "admin" {
                     buttons.push((
                         if card["frozen"] == true {
@@ -1229,6 +1256,104 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
     }
     draw_access_buttons(frame, app, sections[2], &buttons, hits);
+}
+
+/// Identity, servers and synchronization of a profile card, as the bot's
+/// technical information.
+fn profile_details(card: &serde_json::Value) -> Vec<String> {
+    use crate::access::text;
+    let mut lines = vec![format!(
+        "ID: {} · revision {}",
+        text(&card["id"]),
+        text(&card["desired_revision"])
+    )];
+    if let Some(count) = card["_summary"]["node_count"].as_u64() {
+        lines.push(format!("Servers: {count}"));
+    }
+    let operation = &card["operation"];
+    if let Some(status) = operation["status"].as_str() {
+        lines.push(format!("Sync: {}", status.replace('_', " ")));
+        if !matches!(status, "succeeded" | "no_targets" | "superseded") {
+            for task in operation["tasks"].as_array().into_iter().flatten() {
+                if task["status"] != "succeeded" {
+                    lines.push(format!(
+                        "{} · {} · {}",
+                        text(&task["node_key"]),
+                        text(&task["protocol"]),
+                        text(&task["status"])
+                    ));
+                }
+            }
+        }
+    }
+    lines
+}
+
+fn traffic_size(bytes: u64) -> String {
+    let mut amount = bytes as f64;
+    for unit in ["B", "KiB", "MiB", "GiB", "TiB"] {
+        if amount < 1024.0 || unit == "TiB" {
+            return format!("{amount:.1} {unit}");
+        }
+        amount /= 1024.0;
+    }
+    unreachable!()
+}
+
+/// One page of a profile's traffic by server: lines, page and page count.
+pub(in crate::tui) fn profile_traffic(
+    card: &serde_json::Value,
+    page: usize,
+    capacity: usize,
+) -> (Vec<String>, usize, usize) {
+    use crate::access::text;
+    let summary = &card["_summary"];
+    let traffic = &summary["traffic"];
+    let nodes = summary["nodes"].as_array().cloned().unwrap_or_default();
+    let pages = nodes.len().div_ceil(capacity).max(1);
+    let page = page.min(pages - 1);
+    let mut lines = vec![
+        format!("Traffic by server: {}", text(&card["display_name"])),
+        format!("Usage · {}", traffic["month"].as_str().unwrap_or("—")),
+    ];
+    for node in nodes.iter().skip(page * capacity).take(capacity) {
+        let mut stale = false;
+        let usage: Vec<String> = node["protocols"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|protocol| {
+                let item = traffic["nodes"].as_array().and_then(|items| {
+                    items.iter().find(|item| {
+                        item["node_key"] == node["key"] && item["protocol"] == *protocol
+                    })
+                });
+                stale |= item.is_some_and(|item| item["status"] != "current");
+                let total = item.and_then(|item| {
+                    Some(item["uplink_bytes"].as_u64()? + item["downlink_bytes"].as_u64()?)
+                });
+                format!(
+                    "{}: {}",
+                    if protocol == "xray" { "VLESS" } else { "AWG" },
+                    total.map_or("waiting".into(), traffic_size)
+                )
+            })
+            .collect();
+        let name = [text(&node["flag"]), text(&node["title"])]
+            .into_iter()
+            .filter(|part| !part.is_empty() && part != "—")
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(format!(
+            "{name} · {}{}",
+            usage.join(" · "),
+            if stale { " · counters stale" } else { "" }
+        ));
+    }
+    if nodes.is_empty() {
+        lines.push("No servers.".into());
+    }
+    (lines, page, pages)
 }
 
 fn device_question(devices: Option<&crate::access::Devices>) -> &'static str {

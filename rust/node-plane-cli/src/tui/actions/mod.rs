@@ -297,6 +297,8 @@ impl App {
             | Control::AccessDeviceRotate(..)
             | Control::AccessDeviceConfirm
             | Control::AccessLimits
+            | Control::AccessTraffic
+            | Control::AccessTrafficPage(..)
             | Control::AccessDevicePage(..)
             | Control::AccessDurationCustom
             | Control::AccessDurationInput

@@ -1257,9 +1257,11 @@ async fn execute_inner(
                         value["_account"] = account;
                     }
                     if matches!(&command, crate::access::Command::ProfileProgress(_) | crate::access::Command::Card(crate::access::Tab::Profiles, _)) {
-                        let id = value["id"].as_str().context("Missing profile identity")?;
+                        let id = value["id"].as_str().context("Missing profile identity")?.to_owned();
                         let operation = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/operation"), None, None).await?;
                         value["operation"] = operation;
+                        // Servers and traffic as the bot shows them; older controllers lack it.
+                        value["_summary"] = backend::request(session, &credential, Method::GET, &format!("/api/v1/profiles/{id}/summary"), None, None).await.unwrap_or(Value::Null);
                     }
                     if matches!(&command, crate::access::Command::Mutate { .. })
                         && let Some(id) = value["profile"]["id"].as_str() {

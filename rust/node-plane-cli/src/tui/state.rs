@@ -246,6 +246,9 @@ pub(super) enum Control {
     AccessDeviceConfirm,
     /// Limits of the open profile card or device card.
     AccessLimits,
+    /// Traffic by server of the open profile card, and its pages.
+    AccessTraffic,
+    AccessTrafficPage(bool),
     AccessDevicePage(bool),
     AccessExpiryMenu,
     AccessDurationCustom,

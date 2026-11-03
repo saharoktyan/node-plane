@@ -9108,3 +9108,72 @@ fn device_and_node_limits_open_their_scopes() {
     app.activate(Control::ControllerBack);
     assert!(matches!(app.screen, Screen::Nodes));
 }
+
+#[test]
+fn profile_card_shows_sync_and_traffic_by_server_in_pages() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Profiles;
+    let nodes: Vec<_> = (0..30)
+        .map(|i| serde_json::json!({"key":format!("n{i:02}"),"title":format!("Node {i}"),"flag":"","region":"eu","protocols":["xray","awg"]}))
+        .collect();
+    app.access.card = Some(
+        serde_json::json!({"id":"p1","display_name":"Anna","desired_revision":4,
+        "frozen":false,"_account":{"role":"member","status":"approved"},
+        "operation":{"status":"blocked","tasks":[
+            {"node_key":"n00","protocol":"xray","status":"succeeded"},
+            {"node_key":"n01","protocol":"awg","status":"blocked"}]},
+        "_summary":{"node_count":30,"nodes":nodes,"traffic":{"month":"2026-11","nodes":[
+            {"node_key":"n00","protocol":"xray","uplink_bytes":1073741824u64,"downlink_bytes":0,"status":"current"},
+            {"node_key":"n00","protocol":"awg","uplink_bytes":1,"downlink_bytes":1,"status":"unknown"}]}}}),
+    );
+    let draw = |app: &mut App| {
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| app.hits = draw_content(frame, app))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..40)
+            .map(|y| {
+                (0..120)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let screen = draw(&mut app);
+    assert!(screen.contains("ID: p1 · revision 4"));
+    assert!(screen.contains("Sync: blocked"));
+    assert!(screen.contains("n01 · awg · blocked"));
+    assert!(!screen.contains("n00 · xray"));
+    // Every card button stays inside the panel.
+    assert!(
+        app.hits
+            .iter()
+            .all(|hit| hit.area.bottom() <= 37 || hit.control == Control::AccessBack)
+    );
+    assert!(app.access_controls().contains(&Control::AccessTraffic));
+    app.activate(Control::AccessTraffic);
+    let screen = draw(&mut app);
+    assert!(screen.contains("Usage · 2026-11"));
+    assert!(screen.contains("Node 0 · VLESS: 1.0 GiB · AWG: 2.0 B · counters stale"));
+    assert!(screen.contains("Node 1 · VLESS: waiting · AWG: waiting"));
+    assert!(!screen.contains("Node 29 "));
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessTrafficPage(true))
+    );
+    for _ in 0..5 {
+        app.activate(Control::AccessTrafficPage(true));
+    }
+    let screen = draw(&mut app);
+    assert!(screen.contains("Node 29 "));
+    assert!(
+        !app.access_controls()
+            .contains(&Control::AccessTrafficPage(true))
+    );
+    app.activate(Control::AccessBack);
+    assert!(app.access.traffic.is_none());
+    assert!(app.access.card.is_some());
+}
