@@ -125,6 +125,62 @@ class QuotaScreenTests(IsolatedAsyncioTestCase):
         self.assertEqual(policies.resets, [confirm.rsplit(':', 1)[1]])
 
 
+class QuotaInputTests(IsolatedAsyncioTestCase):
+    setUp = profile_fixture.ProfileRichTests.setUp
+
+    def message(self, text):
+        return SimpleNamespace(text=text, delete=AsyncMock(), from_user=SimpleNamespace(id=123),
+                               chat=SimpleNamespace(id=123, type='private'))
+
+    async def test_a_typed_time_zone_is_stored_and_a_wrong_one_asks_again(self):
+        policies = Policies()
+        backend = SimpleNamespace(request=AsyncMock(side_effect=policies.request))
+        self.query.data = 'tquota:tz_input'
+        with patch.object(quotas, 'render', new_callable=AsyncMock):
+            await quotas.installation_cb(self.query, self.bot, backend, self.state)
+        self.state.set_state.assert_awaited_with(quotas.QuotaInputState.waiting_for_timezone)
+        original = policies.request
+
+        async def validating(method, path, **kwargs):
+            if method == 'PATCH' and kwargs['body']['changes'][0]['value'] == 'Mars/Base':
+                raise quotas.BackendError('invalid_policy_value', 422)
+            return await original(method, path, **kwargs)
+        backend.request = AsyncMock(side_effect=validating)
+        with patch.object(quotas, 'render', new_callable=AsyncMock) as draw:
+            await quotas.quota_text(self.message('Mars/Base'), self.bot, backend, self.state)
+        self.assertIn('Not recognised', draw.call_args.args[2].lines[0])
+        with patch.object(quotas, 'render', new_callable=AsyncMock) as draw:
+            await quotas.quota_text(self.message('Asia/Tashkent'), self.bot, backend, self.state)
+        self.assertEqual(policies.patches[-1], ('installation', 'quota.timezone', 'Asia/Tashkent'))
+        self.state.set_state.assert_awaited_with(None)
+        # A value outside the presets shows as the selected custom choice.
+        self.assertIn('tquota:tz_input', [b.callback_data for s in draw.call_args.args[2].sections
+                                          for r in s.rows for b in r if b.style == 'primary'])
+
+    async def test_the_anchor_moves_to_a_typed_day_in_the_quota_time_zone(self):
+        calls = []
+
+        async def request(method, path, **kwargs):
+            calls.append((method, path, kwargs.get('revision'), kwargs.get('body')))
+            if path.endswith('/quota'):
+                return {'limit_bytes': GIB, 'reset': 'monthly_anchor', 'timezone': 'Europe/Moscow',
+                        'anchor_at': '2026-02-09T21:00:00+00:00', 'anchor_revision': 3,
+                        'period': {'used_bytes': 0, 'end': None, 'blocked': False}}
+            return Policies().listing('profile' if 'profiles' in path else 'installation')
+        backend = SimpleNamespace(request=AsyncMock(side_effect=request))
+        self.query.data = 'pquota:p1'
+        with patch.object(quotas, 'render', new_callable=AsyncMock) as draw:
+            await quotas.profile_cb(self.query, self.bot, backend, self.state)
+        period = draw.call_args.args[2].sections[0]
+        self.assertEqual(period.lines[1], 'Start day: 2026-02-10')
+        self.query.data = 'pquota:p1:anchor_input'
+        with patch.object(quotas, 'render', new_callable=AsyncMock):
+            await quotas.profile_cb(self.query, self.bot, backend, self.state)
+        with patch.object(quotas, 'render', new_callable=AsyncMock):
+            await quotas.quota_text(self.message('2026-03-15'), self.bot, backend, self.state)
+        self.assertIn(('PATCH', '/api/v1/profiles/p1/quota', 3, {'anchor_at': '2026-03-15T00:00:00+03:00'}), calls)
+
+
 class QuotaTextTests(TestCase):
     def test_notifications_and_member_card_text(self):
         from telegram_client.routers.user import quota_text

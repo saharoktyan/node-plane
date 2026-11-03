@@ -3,7 +3,8 @@ from uuid import uuid4
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
@@ -12,6 +13,11 @@ from .callbacks import AdminSettingsCallback
 from .common import render
 
 router = Router()
+
+
+class QuotaInputState(StatesGroup):
+    waiting_for_timezone = State()
+    waiting_for_anchor = State()
 
 GIB = 1024 ** 3
 INSTALLATION = '/api/v1/vpn-policies/installation'
@@ -87,33 +93,41 @@ def _choices(locale, field, prefix, selected, *, none=()):
 
 
 async def _show(query, bot, backend, state, profile_id=None):
+    await query.answer()
+    await show(query.message.chat.id, query.from_user.id, query.message.message_id, query.data,
+               bot, backend, state, profile_id)
+
+
+async def show(chat_id, user_id, message_id, data, bot, backend, state, profile_id=None):
     from .admin_profiles import _profile_error
     from .admin_settings import _friendly_error
-    await query.answer()
     locale = normalize_locale((await state.get_data()).get('locale'))
     if profile_id is None:
         prefix, path, back, error = 'tquota', INSTALLATION, AdminSettingsCallback().pack(), _friendly_error
     else:
         prefix, path = f'pquota:{profile_id}', f'/api/v1/profiles/{profile_id}/vpn-policies'
         back, error = f'admin_profile_edit:{profile_id}', _profile_error
-    field, _, raw = query.data.removeprefix(prefix).lstrip(':').partition(':')
+    field, _, raw = data.removeprefix(prefix).lstrip(':').partition(':')
     rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back)]]
     lines, sections = (), ()
     try:
         if profile_id is not None and field == 'reset_now':
             # Confirmed reset: the key comes from the confirmation button.
             await backend.request('POST', f'/api/v1/profiles/{profile_id}/quota/reset',
-                telegram_user_id=query.from_user.id, command=True, command_key=raw)
+                telegram_user_id=user_id, command=True, command_key=raw)
             field = ''
+        if field in ('tz_input', 'anchor_input'):
+            await _prompt(chat_id, user_id, message_id, field, prefix, bot, backend, state, profile_id, locale)
+            return
         if profile_id is not None and field == 'reset_ask':
-            await render(bot, query.message.chat.id, Screen(tr(locale, 'quota.reset_title'),
+            await render(bot, chat_id, Screen(tr(locale, 'quota.reset_title'),
                 (tr(locale, 'quota.reset_warning'),), embedded_buttons=True, navigation=True),
                 [[InlineKeyboardButton(text=tr(locale, 'quota.reset_now'), style='danger',
                     callback_data=f'{prefix}:reset_now:{uuid4()}')],
                  [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=prefix)]],
-                state, query.message.message_id)
+                state, message_id)
             return
-        policy = await backend.request('GET', path, telegram_user_id=query.from_user.id)
+        policy = await backend.request('GET', path, telegram_user_id=user_id)
         if field in FIELDS and (profile_id is None or field != 'tz'):
             current = _key(policy, FIELDS[field][0])
             value = parse(field, raw, profile=profile_id is not None)
@@ -121,10 +135,10 @@ async def _show(query, bot, backend, state, profile_id=None):
             if profile_id is None and value == current['default']:
                 value = None
             if value is not ... and value != current['value']:
-                policy = await backend.request('PATCH', path, telegram_user_id=query.from_user.id, command=True,
+                policy = await backend.request('PATCH', path, telegram_user_id=user_id, command=True,
                     body={'changes': [{'key': FIELDS[field][0], 'value': value, 'revision': current['revision']}]})
         installation = policy if profile_id is None else await backend.request(
-            'GET', INSTALLATION, telegram_user_id=query.from_user.id)
+            'GET', INSTALLATION, telegram_user_id=user_id)
         shown = ('limit', 'reset', *(('days',) if _key(policy, 'quota.reset')['effective'] == 'interval' else ()),
                  'exhausted', *(('throttle',) if _key(policy, 'quota.on_exhausted')['effective'] == 'throttle' else ()),
                  *(('tz',) if profile_id is None else ()))
@@ -133,6 +147,11 @@ async def _show(query, bot, backend, state, profile_id=None):
             if profile_id is None:
                 choice_rows = _choices(locale, name, prefix, current['effective'],
                                        none=(None,) if name == 'limit' else ())
+                if name == 'tz':
+                    custom = current['effective'] not in FIELDS['tz'][1]
+                    choice_rows += ((InlineKeyboardButton(
+                        text=current['effective'] if custom else tr(locale, 'quota.tz_other'),
+                        callback_data=f'{prefix}:tz_input', style='primary' if custom else None),),)
             else:
                 inherited = value_label(locale, name, _key(installation, FIELDS[name][0])['effective'])
                 inherit = InlineKeyboardButton(text=tr(locale, 'quota.inherit', value=inherited),
@@ -143,15 +162,89 @@ async def _show(query, bot, backend, state, profile_id=None):
         lines = (tr(locale, 'quota.hint' if profile_id is None else 'quota.profile_hint'),)
         if profile_id is not None:
             quota = await backend.request('GET', f'/api/v1/profiles/{profile_id}/quota',
-                                          telegram_user_id=query.from_user.id)
-            usage = Section(tr(locale, 'quota.period'), (usage_line(locale, quota),),
-                rows=((InlineKeyboardButton(text=tr(locale, 'quota.reset_now'),
-                    callback_data=f'{prefix}:reset_ask'),),) if quota.get('period') else ())
+                                          telegram_user_id=user_id)
+            actions = ((InlineKeyboardButton(text=tr(locale, 'quota.reset_now'),
+                callback_data=f'{prefix}:reset_ask'),),) if quota.get('period') else ()
+            if quota.get('anchor_at') and quota.get('reset') in ('monthly_anchor', 'interval'):
+                actions += ((InlineKeyboardButton(text=tr(locale, 'quota.anchor_move'),
+                    callback_data=f'{prefix}:anchor_input'),),)
+            anchor = (tr(locale, 'quota.anchor', date=_local_date(quota['anchor_at'], quota.get('timezone'))),) \
+                if quota.get('anchor_at') and quota.get('reset') in ('monthly_anchor', 'interval') else ()
+            usage = Section(tr(locale, 'quota.period'), (usage_line(locale, quota), *anchor), rows=actions)
             sections = (usage, *sections)
     except BackendError as exc:
         lines, sections = (error(locale, exc),), ()
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'quota.title'), lines, sections=sections,
-        embedded_buttons=True, navigation=True), rows, state, query.message.message_id)
+    await render(bot, chat_id, Screen(tr(locale, 'quota.title'), lines, sections=sections,
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+
+
+def _local_date(value, tz):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    try:
+        return datetime.fromisoformat(value).astimezone(ZoneInfo(tz or 'UTC')).date().isoformat()
+    except (ValueError, KeyError):
+        return value[:10]
+
+
+async def _prompt(chat_id, user_id, message_id, field, prefix, bot, backend, state, profile_id, locale):
+    """Waits for a time zone name or an anchor date as text."""
+    if field == 'anchor_input':
+        quota = await backend.request('GET', f'/api/v1/profiles/{profile_id}/quota', telegram_user_id=user_id)
+        await state.update_data(quota_input={'kind': 'anchor', 'profile_id': profile_id,
+            'revision': quota['anchor_revision'], 'tz': quota.get('timezone') or 'UTC', 'message_id': message_id})
+        await state.set_state(QuotaInputState.waiting_for_anchor)
+        lines = (tr(locale, 'quota.anchor_prompt', tz=quota.get('timezone') or 'UTC'),)
+    else:
+        await state.update_data(quota_input={'kind': 'tz', 'message_id': message_id})
+        await state.set_state(QuotaInputState.waiting_for_timezone)
+        lines = (tr(locale, 'quota.tz_prompt'),)
+    await render(bot, chat_id, Screen(tr(locale, 'quota.title'), lines, embedded_buttons=True, navigation=True),
+                 [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=prefix)]], state, message_id)
+
+
+@router.message(QuotaInputState.waiting_for_timezone, F.text)
+@router.message(QuotaInputState.waiting_for_anchor, F.text)
+async def quota_text(message: Message, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    """A typed time zone or anchor date; invalid input asks again."""
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from .admin_settings import _friendly_error
+    if message.from_user is None or message.chat.type != 'private':
+        return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    pending = (await state.get_data()).get('quota_input') or {}
+    user_id, message_id, value = message.from_user.id, pending.get('message_id'), (message.text or '').strip()
+    profile_id = pending.get('profile_id')
+    prefix = f'pquota:{profile_id}' if pending.get('kind') == 'anchor' else 'tquota'
+    try:
+        if pending.get('kind') == 'anchor':
+            try:
+                day = date.fromisoformat(value)
+            except ValueError:
+                raise BackendError('invalid_input', 422) from None
+            anchor = datetime(day.year, day.month, day.day, tzinfo=ZoneInfo(pending['tz']))
+            await backend.request('PATCH', f'/api/v1/profiles/{profile_id}/quota', telegram_user_id=user_id,
+                command=True, revision=pending['revision'], body={'anchor_at': anchor.isoformat()})
+        else:
+            policy = await backend.request('GET', INSTALLATION, telegram_user_id=user_id)
+            current = _key(policy, 'quota.timezone')
+            await backend.request('PATCH', INSTALLATION, telegram_user_id=user_id, command=True,
+                body={'changes': [{'key': 'quota.timezone', 'value': None if value == 'UTC' else value,
+                                   'revision': current['revision']}]})
+    except BackendError as exc:
+        await render(bot, message.chat.id, Screen(tr(locale, 'quota.title'), (
+            tr(locale, 'quota.input_invalid') if exc.status == 422 else _friendly_error(locale, exc),),
+            embedded_buttons=True, navigation=True),
+            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=prefix)]], state, message_id)
+        return
+    await state.set_state(None)
+    await state.update_data(quota_input=None)
+    await show(message.chat.id, user_id, message_id, prefix, bot, backend, state, profile_id)
 
 
 @router.callback_query(F.data.startswith('tquota'))
