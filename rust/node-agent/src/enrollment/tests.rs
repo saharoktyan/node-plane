@@ -8,6 +8,7 @@ use super::*;
 use crate::agent::v1::node_enrollment_service_client::NodeEnrollmentServiceClient;
 use crate::intents::leases::fake::Scripted;
 
+const CONTROLLER: &str = "22222222-2222-4222-8222-222222222222";
 const SECRET: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
 fn token(expires: i64) -> String {
@@ -195,9 +196,17 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
         tls_certificate_path: tls.join("server.crt").display().to_string(),
         tls_key_path: tls.join("server.key").display().to_string(),
         tls_client_ca_path: tls.join("ca.crt").display().to_string(),
+        node_env_path: dir.join("node.env").display().to_string(),
+        state_dir: dir.join("state").display().to_string(),
         ..AgentConfig::default()
     };
     fs::write(tls.join("enrollment.token"), token(now() + 600)).unwrap();
+    // Reinstalled over another controller's node n0.
+    fs::write(tls.join("enrollment.previous-node"), "n0\n").unwrap();
+    fs::create_dir_all(dir.join("state")).unwrap();
+    let old = "11111111-1111-4111-8111-111111111111";
+    fs::write(dir.join("state/controller-installation-id"), old).unwrap();
+    fs::write(dir.join("profile-intents.sqlite3"), "old fences").unwrap();
     assert!(pending(&config));
     let served = {
         let config = config.clone();
@@ -225,10 +234,25 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
         .unwrap()
         .into_inner();
     assert_eq!(challenge.node_key, "n1");
+    assert_eq!(
+        (
+            challenge.previous_node_key.as_str(),
+            challenge.previous_controller.as_str(),
+            challenge.previous_ca_sha256.as_str()
+        ),
+        ("n0", old, "")
+    );
     controller
         .verify(
             "agent",
-            &[b"n1", &sent, &challenge.public_key],
+            &[
+                b"n1",
+                &sent,
+                &challenge.public_key,
+                b"n0",
+                old.as_bytes(),
+                b"",
+            ],
             &challenge.proof,
         )
         .unwrap();
@@ -242,13 +266,17 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
     let (ca_pem, certificate_pem) = issue(&dir, &challenge.public_key);
     let complete =
         |ca_pem: &str, certificate_pem: &str, proof: Vec<u8>| EnrollmentCompleteRequest {
+            controller_id: CONTROLLER.into(),
             ca_pem: ca_pem.into(),
             certificate_pem: certificate_pem.into(),
             proof,
         };
     let proof = |ca: &str, cert: &str| {
         controller
-            .proof("controller", &[b"n1", ca.as_bytes(), cert.as_bytes()])
+            .proof(
+                "controller",
+                &[b"n1", CONTROLLER.as_bytes(), ca.as_bytes(), cert.as_bytes()],
+            )
             .as_ref()
             .to_vec()
     };
@@ -342,6 +370,7 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
             firewall: |_, _| String::new(),
             token: Token::parse(&token(i64::MAX)).unwrap(),
             public_key: challenge.public_key.clone(),
+            previous: handover::Previous::default(),
             files: Files::of(&config),
             port: tls_port,
             done: Mutex::new(None),

@@ -18,11 +18,17 @@ message EnrollAgentRequest {
   // host:port the agent listens on; its certificate names the host.
   string target = 2;
   string token = 3;
+  // This controller installation, and the node keys it retired for good:
+  // only those may hand their agent over to another node.
+  string controller_id = 4;
+  repeated string retired_node_keys = 5;
 }
 
 message EnrollAgentResponse {
   // How the agent restricted its port, for the operator.
   string firewall = 1;
+  // Where the agent archived another controller's journal, if it did.
+  string journal_archive = 2;
 }
 
 message GetNodeDiagnosticsRequest {

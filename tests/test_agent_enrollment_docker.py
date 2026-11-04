@@ -20,6 +20,7 @@ from backend.driver_transport import GrpcIntentDriver, _LocalTokenInterceptor
 REPO = Path(__file__).resolve().parents[1]
 AGENT = REPO / 'rust/node-agent/target/debug/node-plane-agent'
 DRIVER = REPO / 'rust/node-driver/target/debug/node-plane-driver'
+CONTROLLER = '22222222-2222-4222-8222-222222222222'
 
 
 def docker(*args, check=True):
@@ -82,10 +83,6 @@ tls_client_ca_path = "/test/tls/ca.crt"
         self.addCleanup(lambda: docker('rm', '-f', identity, check=False))
         docker('cp', f'{node}/.', f'{self.name}:/test')
         docker('start', self.name)
-        docker('exec', '-d', self.name, 'sh', '-c',
-               'export NODE_AGENT_CONFIG_PATH=/test/agent.toml; '
-               'exec /test/libs/ld-linux-x86-64.so.2 --library-path /test/libs /test/agent-bin '
-               '> /test/agent.log 2>&1')
         self.target = '127.0.0.1:' + docker('port', self.name, '50061/tcp').stdout.strip().rsplit(':', 1)[1]
 
         shared = self.root / 'shared'
@@ -101,6 +98,18 @@ tls_client_ca_path = "/test/tls/ca.crt"
             'NODE_AGENT_CONFIG_PATH': str(self.root / 'absent.toml'), 'NODE_AGENT_TARGETS': '',
         }
         self.driver = self.start_driver()
+
+    def start_agent(self, previous_node=None):
+        if previous_node:
+            # Reinstalled over node `previous_node` of this controller.
+            docker('exec', self.name, 'sh', '-c',
+                   f'mkdir -p /var/lib/node-plane-agent && echo {CONTROLLER} > '
+                   f'/var/lib/node-plane-agent/controller-installation-id && '
+                   f'echo {previous_node} > /test/tls/enrollment.previous-node')
+        docker('exec', '-d', self.name, 'sh', '-c',
+               'export NODE_AGENT_CONFIG_PATH=/test/agent.toml; '
+               'exec /test/libs/ld-linux-x86-64.so.2 --library-path /test/libs /test/agent-bin '
+               '> /test/agent.log 2>&1')
 
     def start_driver(self):
         self.process = process = subprocess.Popen([str(DRIVER)], env=self.driver_env,
@@ -119,13 +128,26 @@ tls_client_ca_path = "/test/tls/ca.crt"
         deadline = time.monotonic() + 10
         while True:
             try:
-                return self.driver.enroll_agent('n1', self.target, token)
+                return self.driver.enroll_agent('n1', self.target, token, CONTROLLER)
             except grpc.RpcError as error:
                 if error.code() != grpc.StatusCode.UNAVAILABLE or time.monotonic() >= deadline:
                     raise
                 time.sleep(0.1)
 
+    def test_the_agent_of_another_active_node_is_not_taken_over(self):
+        self.start_agent(previous_node='n2')
+        with self.assertRaises(grpc.RpcError) as taken:
+            self.enroll(self.token)
+        self.assertEqual(taken.exception.code(), grpc.StatusCode.FAILED_PRECONDITION, self.agent_log())
+        self.assertIn('n2', taken.exception.details())
+        self.assertFalse(self.registry.exists())
+        # Once the controller retired n2 for good, the agent is handed over.
+        result = self.driver.enroll_agent('n1', self.target, self.token, CONTROLLER, ['n2'])
+        self.assertEqual(result['journal_archive'], '')
+        self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
+
     def test_the_driver_enrolls_a_token_agent_and_then_reaches_it_over_mutual_tls(self):
+        self.start_agent()
         # Before enrollment the driver does not know the node.
         with self.assertRaises(grpc.RpcError) as unknown:
             self.driver.inspect_node('n1')
@@ -139,7 +161,7 @@ tls_client_ca_path = "/test/tls/ca.crt"
 
         result = self.enroll(self.token)
         # The node image has no ufw; the agent says so instead of failing.
-        self.assertEqual(result, {'firewall': 'ufw is not installed'}, self.agent_log())
+        self.assertEqual(result, {'firewall': 'ufw is not installed', 'journal_archive': ''}, self.agent_log())
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
         files = docker('exec', self.name, 'sh', '-c',
                        'ls /test/tls; stat -c %a /test/tls/server.key').stdout.split()
@@ -158,7 +180,7 @@ tls_client_ca_path = "/test/tls/ca.crt"
 
         # The token is spent, and a restarted driver still knows the agent.
         with self.assertRaises(grpc.RpcError):
-            self.driver.enroll_agent('n1', self.target, self.token)
+            self.driver.enroll_agent('n1', self.target, self.token, CONTROLLER)
         self.process.terminate()
         self.process.wait(timeout=10)
         self.driver = self.start_driver()

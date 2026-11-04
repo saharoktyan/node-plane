@@ -357,15 +357,25 @@ message EnrollmentChallengeResponse {
   // DER SubjectPublicKeyInfo of the key the agent generated.
   bytes public_key = 2;
   bytes proof = 3;
+  // Who had the agent before: the node key the installer replaced, the
+  // controller installation that enrolled it and the SHA-256 of its CA.
+  // Empty when unknown. Covered by the proof.
+  string previous_node_key = 4;
+  string previous_controller = 5;
+  string previous_ca_sha256 = 6;
 }
 
 message EnrollmentCompleteRequest {
   string ca_pem = 1;
   string certificate_pem = 2;
   bytes proof = 3;
+  // The controller installation: a journal of another one is archived.
+  string controller_id = 4;
 }
 
 message EnrollmentCompleteResponse {
   // How the agent port was restricted to the controller, for the operator.
   string firewall = 1;
+  // Where the previous controller's journal was archived, if it was.
+  string journal_archive = 2;
 }

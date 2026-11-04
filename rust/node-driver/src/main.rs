@@ -436,25 +436,41 @@ impl NodeService for NodeApi {
             return Err(Status::invalid_argument("invalid node key"));
         }
         let token = enrollment::Token::parse(&req.token)?;
+        if uuid::Uuid::try_parse(&req.controller_id)
+            .map(|id| id.hyphenated().to_string())
+            .ok()
+            .as_deref()
+            != Some(req.controller_id.as_str())
+        {
+            return Err(Status::invalid_argument("invalid controller identity"));
+        }
+        let controller = enrollment::Controller {
+            id: &req.controller_id,
+            retired_node_keys: &req.retired_node_keys,
+        };
         let ca = env::var("NODE_AGENT_CA_CERT")
             .ok()
             .map(|value| PathBuf::from(value.trim()))
             .filter(|path| path.is_file())
             .ok_or_else(|| Status::failed_precondition("agent CA is not configured"))?;
         let now = chrono::Utc::now().timestamp();
-        let firewall = enrollment::enroll(&ca, &req.node_key, &req.target, &token, now).await?;
+        let enrolled =
+            enrollment::enroll(&ca, &controller, &req.node_key, &req.target, &token, now).await?;
         let mut targets = self
             .ctx
             .agent_targets
             .write()
             .map_err(|_| Status::internal("agent targets unavailable"))?;
         let registry = enrollment::registry(&ca);
-        let mut enrolled = enrollment::load(&registry);
-        enrolled.insert(req.node_key.clone(), req.target.clone());
-        enrollment::save(&registry, &enrolled)
+        let mut recorded = enrollment::load(&registry);
+        recorded.insert(req.node_key.clone(), req.target.clone());
+        enrollment::save(&registry, &recorded)
             .map_err(|err| Status::internal(format!("enrolled agent not recorded: {err}")))?;
         targets.insert(req.node_key, req.target);
-        Ok(Response::new(EnrollAgentResponse { firewall }))
+        Ok(Response::new(EnrollAgentResponse {
+            firewall: enrolled.firewall,
+            journal_archive: enrolled.journal_archive,
+        }))
     }
 
     async fn inspect_backend_node(

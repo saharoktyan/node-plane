@@ -31,6 +31,7 @@ use crate::config::AgentConfig;
 use crate::intents::leases::{Host, System};
 
 pub(crate) mod der;
+pub(crate) mod handover;
 
 /// The TLS files of the agent and the token that enrolls them.
 pub(crate) struct Files {
@@ -38,6 +39,10 @@ pub(crate) struct Files {
     pub(crate) certificate: PathBuf,
     pub(crate) ca: PathBuf,
     pub(crate) token: PathBuf,
+    /// The node key the installer replaced, if any.
+    pub(crate) previous_node: PathBuf,
+    pub(crate) journal: PathBuf,
+    pub(crate) state: PathBuf,
 }
 
 impl Files {
@@ -47,6 +52,9 @@ impl Files {
             key: config.tls_key_path.clone().into(),
             ca: config.tls_client_ca_path.clone().into(),
             token: certificate.with_file_name("enrollment.token"),
+            previous_node: certificate.with_file_name("enrollment.previous-node"),
+            journal: Path::new(&config.node_env_path).with_file_name("profile-intents.sqlite3"),
+            state: config.state_dir.clone().into(),
             certificate,
         }
     }
@@ -206,6 +214,7 @@ struct Enrollment {
     firewall: Firewall,
     token: Token,
     public_key: Vec<u8>,
+    previous: handover::Previous,
     files: Files,
     port: u16,
     done: Mutex<Option<oneshot::Sender<()>>>,
@@ -226,14 +235,25 @@ impl NodeEnrollmentService for Enrollment {
         if !(16..=64).contains(&nonce.len()) {
             return Err(Status::invalid_argument("invalid enrollment nonce"));
         }
+        let previous = &self.previous;
         let proof = self.token.proof(
             "agent",
-            &[self.node_key.as_bytes(), &nonce, &self.public_key],
+            &[
+                self.node_key.as_bytes(),
+                &nonce,
+                &self.public_key,
+                previous.node_key.as_bytes(),
+                previous.controller.as_bytes(),
+                previous.ca_sha256.as_bytes(),
+            ],
         );
         Ok(Response::new(EnrollmentChallengeResponse {
             node_key: self.node_key.clone(),
             public_key: self.public_key.clone(),
             proof: proof.as_ref().to_vec(),
+            previous_node_key: previous.node_key.clone(),
+            previous_controller: previous.controller.clone(),
+            previous_ca_sha256: previous.ca_sha256.clone(),
         }))
     }
 
@@ -248,6 +268,7 @@ impl NodeEnrollmentService for Enrollment {
             "controller",
             &[
                 self.node_key.as_bytes(),
+                request.controller_id.as_bytes(),
                 request.ca_pem.as_bytes(),
                 request.certificate_pem.as_bytes(),
             ],
@@ -266,11 +287,22 @@ impl NodeEnrollmentService for Enrollment {
         {
             return Err(Status::invalid_argument("invalid CA certificate"));
         }
+        let archive = handover::hand_over(
+            &self.previous,
+            &request.controller_id,
+            &crate::protocols::sha256_hex(request.ca_pem.as_bytes()),
+            &self.node_key,
+            &self.files.journal,
+            &self.files.state,
+            &chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string(),
+        )
+        .map_err(Status::failed_precondition)?;
         let store =
             |path: &Path, text: &str| replace(path, text.as_bytes()).map_err(Status::internal);
         store(&self.files.ca, &request.ca_pem)?;
         store(&self.files.certificate, &request.certificate_pem)?;
         fs::remove_file(&self.files.token).map_err(|err| Status::internal(err.to_string()))?;
+        let _ = fs::remove_file(&self.files.previous_node);
         let (port, restrict) = (self.port, self.firewall);
         let firewall = tokio::task::spawn_blocking(move || restrict(peer, port))
             .await
@@ -278,7 +310,12 @@ impl NodeEnrollmentService for Enrollment {
         if let Some(done) = self.done.lock().ok().and_then(|mut done| done.take()) {
             let _ = done.send(());
         }
-        Ok(Response::new(EnrollmentCompleteResponse { firewall }))
+        Ok(Response::new(EnrollmentCompleteResponse {
+            firewall,
+            journal_archive: archive
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+        }))
     }
 }
 
@@ -294,6 +331,7 @@ async fn serve_with(
     let files = Files::of(config);
     let token = Token::parse(&fs::read_to_string(&files.token)?)?;
     let public_key = key(&files.key)?;
+    let previous = handover::previous(&files.previous_node, &files.ca, &files.state);
     let addr: std::net::SocketAddr = config.listen_addr.parse()?;
     let (done, finished) = oneshot::channel();
     let enrollment = Enrollment {
@@ -301,6 +339,7 @@ async fn serve_with(
         firewall,
         token,
         public_key,
+        previous,
         files,
         port: addr.port(),
         done: Mutex::new(Some(done)),

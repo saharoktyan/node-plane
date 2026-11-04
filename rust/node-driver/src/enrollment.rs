@@ -186,14 +186,56 @@ fn tempdir() -> Result<PathBuf, Status> {
 
 use std::os::unix::fs::DirBuilderExt;
 
-/// Enrolls the agent at `target` and returns how it restricted its port.
+/// What the agent did when it was enrolled.
+pub(crate) struct Enrolled {
+    pub(crate) firewall: String,
+    pub(crate) journal_archive: String,
+}
+
+/// Who asks for the agent.
+pub(crate) struct Controller<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) retired_node_keys: &'a [String],
+}
+
+/// Refuses to take the agent of another active node of this controller.
+pub(crate) fn check_owner(
+    controller: &Controller,
+    ca_sha256: &str,
+    node_key: &str,
+    previous_node_key: &str,
+    previous_controller: &str,
+    previous_ca_sha256: &str,
+) -> Result<(), Status> {
+    let same = if previous_controller.is_empty() {
+        !previous_ca_sha256.is_empty() && previous_ca_sha256 == ca_sha256
+    } else {
+        previous_controller == controller.id
+    };
+    if same
+        && !previous_node_key.is_empty()
+        && previous_node_key != node_key
+        && !controller
+            .retired_node_keys
+            .iter()
+            .any(|key| key == previous_node_key)
+    {
+        return Err(Status::failed_precondition(format!(
+            "the agent belongs to node {previous_node_key} of this controller"
+        )));
+    }
+    Ok(())
+}
+
+/// Enrolls the agent at `target`.
 pub(crate) async fn enroll(
     ca: &Path,
+    controller: &Controller<'_>,
     node_key: &str,
     target: &str,
     token: &Token,
     now: i64,
-) -> Result<String, Status> {
+) -> Result<Enrolled, Status> {
     if now >= token.expires {
         return Err(Status::permission_denied("enrollment token expired"));
     }
@@ -215,7 +257,12 @@ pub(crate) async fn enroll(
         .challenge(EnrollmentChallengeRequest {
             nonce: nonce.clone(),
         })
-        .await?
+        .await
+        .map_err(|status| match status.code() {
+            // Nothing answered on the connection.
+            tonic::Code::Unknown => Status::unavailable("agent is not waiting for enrollment"),
+            _ => status,
+        })?
         .into_inner();
     if challenge.node_key != node_key {
         return Err(Status::failed_precondition(
@@ -224,7 +271,14 @@ pub(crate) async fn enroll(
     }
     if !token.verify(
         "agent",
-        &[node_key.as_bytes(), &nonce, &challenge.public_key],
+        &[
+            node_key.as_bytes(),
+            &nonce,
+            &challenge.public_key,
+            challenge.previous_node_key.as_bytes(),
+            challenge.previous_controller.as_bytes(),
+            challenge.previous_ca_sha256.as_bytes(),
+        ],
         &challenge.proof,
     ) {
         return Err(Status::permission_denied(
@@ -233,11 +287,25 @@ pub(crate) async fn enroll(
     }
     let ca_pem = fs::read_to_string(ca)
         .map_err(|err| Status::failed_precondition(format!("agent CA unavailable: {err}")))?;
+    let ca_sha256: String = ring::digest::digest(&ring::digest::SHA256, ca_pem.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    check_owner(
+        controller,
+        &ca_sha256,
+        node_key,
+        &challenge.previous_node_key,
+        &challenge.previous_controller,
+        &challenge.previous_ca_sha256,
+    )?;
     let certificate_pem = issue(ca, node_key, &subject, &challenge.public_key)?;
     let proof = token.proof(
         "controller",
         &[
             node_key.as_bytes(),
+            controller.id.as_bytes(),
             ca_pem.as_bytes(),
             certificate_pem.as_bytes(),
         ],
@@ -247,10 +315,14 @@ pub(crate) async fn enroll(
             ca_pem,
             certificate_pem,
             proof,
+            controller_id: controller.id.to_string(),
         })
         .await?
         .into_inner();
-    Ok(completed.firewall)
+    Ok(Enrolled {
+        firewall: completed.firewall,
+        journal_archive: completed.journal_archive,
+    })
 }
 
 /// Agents enrolled by token, `node_key=target` per line, next to the CA.
@@ -318,6 +390,27 @@ mod tests {
         let key = hmac::Key::new(hmac::HMAC_SHA256, &[0xab; 32]);
         let expected = hmac::sign(&key, b"agent\0\0\0\0\x02n1\0\0\0\x01x");
         assert_eq!(proof, expected.as_ref());
+    }
+
+    #[test]
+    fn an_agent_of_another_active_node_is_not_taken() {
+        let retired = ["n0".to_string()];
+        let controller = Controller {
+            id: "c1",
+            retired_node_keys: &retired,
+        };
+        let check = |previous: &str, by: &str, ca: &str| {
+            check_owner(&controller, "ca", "n1", previous, by, ca).is_ok()
+        };
+        assert!(check("", "", ""));
+        assert!(check("n1", "c1", ""));
+        assert!(!check("n2", "c1", ""));
+        // A legacy agent is ours when it trusts our CA.
+        assert!(!check("n2", "", "ca"));
+        assert!(check("n2", "", "other"));
+        // Another controller's node, or one we retired, is handed over.
+        assert!(check("n2", "c2", "ca"));
+        assert!(check("n0", "c1", ""));
     }
 
     #[test]
