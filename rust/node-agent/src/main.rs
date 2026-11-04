@@ -17,6 +17,7 @@ mod protocols;
 mod runtime;
 mod shaping;
 mod state;
+mod update;
 
 use chrono::Utc;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
@@ -49,6 +50,9 @@ fn print_startup(config: &AgentConfig) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = update::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = protocols::awg::profile::run(&args) {
         std::process::exit(code);
     }
@@ -149,10 +153,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .identity(server_identity)
         .client_ca_root(client_ca);
 
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    // Serving with this binary is what confirms a self-update.
+    update::confirm(&config);
+    let incoming = tonic::transport::server::TcpIncoming::from_listener(listener, true, None)
+        .map_err(|err| err as Box<dyn std::error::Error>)?;
     Server::builder()
         .tls_config(tls)?
         .add_service(NodeAgentServiceServer::new(api))
-        .serve_with_shutdown(addr, async {
+        .serve_with_incoming_shutdown(incoming, async {
             let _ = tokio::signal::ctrl_c().await;
             println!("node-plane-agent stopping");
         })

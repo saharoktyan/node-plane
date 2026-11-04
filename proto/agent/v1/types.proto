@@ -15,6 +15,8 @@ message RuntimeFacts {
   bool awg_config_present = 8;
   string binary_version = 9;
   string binary_commit = 10;
+  // The version a self-update rolled back from, if the last one failed.
+  string update_rolled_back = 11;
 }
 
 message LocalHealth {

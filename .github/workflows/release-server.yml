@@ -35,6 +35,8 @@ jobs:
           python3 scripts/generate_third_party_licenses.py --check --cargo-about "$RUNNER_TEMP/license-tools/cargo-about"
       - name: Build server artifacts
         # Exercise the packaged installer before publishing its archive.
+        env:
+          NODE_PLANE_RELEASE_SIGNING_KEY: ${{ secrets.NODE_PLANE_RELEASE_SIGNING_KEY }}
         run: |
           python3 -m unittest tests.test_controller_release
           bash scripts/build_release_stack.sh

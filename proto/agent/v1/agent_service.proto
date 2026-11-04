@@ -33,6 +33,8 @@ service NodeAgentService {
   rpc InstallDocker(InstallDockerRequest) returns (InstallDockerResponse);
   rpc DeleteRuntime(DeleteRuntimeRequest) returns (DeleteRuntimeResponse);
   rpc UninstallAgent(AgentEmpty) returns (RuntimeCommandResponse);
+  // Fetch a signed release and restart into it; see src/update in the agent.
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
   // Backend-owned deletion: preparation fences new mutations only after all
   // managed profiles have a successful delete as their latest intent.
   rpc PrepareDecommission(DecommissionRequest) returns (RuntimeCommandResponse);
@@ -182,6 +184,21 @@ message InstallDockerRequest {}
 
 message InstallDockerResponse {
   string summary = 1;
+}
+
+message UpdateAgentRequest {
+  // Where the release assets are published, without a trailing slash.
+  string release_url = 1;
+  string version = 2;
+}
+
+message UpdateAgentResponse {
+  // "updating": the agent restarts into the new version; "current": nothing to do.
+  string status = 1;
+  // The version that answered.
+  string version = 2;
+  // A version the rollback guard put back, if any.
+  string rolled_back = 3;
 }
 
 message DeleteRuntimeRequest {

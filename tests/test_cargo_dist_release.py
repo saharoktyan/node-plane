@@ -59,10 +59,30 @@ class CargoDistReleaseTests(unittest.TestCase):
                 path = commands / name
                 path.write_text(content)
                 path.chmod(0o755)
+            signing = root / 'signing.pem'
+            subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(signing)],
+                           check=True, capture_output=True)
+            public = subprocess.run(['openssl', 'pkey', '-in', str(signing), '-pubout', '-outform', 'DER'],
+                                    check=True, capture_output=True).stdout[-32:]
+            (root / 'rust/node-agent/release-key.hex').write_text(public.hex() + '\n')
             env = {**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
-                   'GITHUB_REF_NAME': 'v0.4.3-alpha.59', 'GITHUB_SHA': 'a' * 40}
-            result = subprocess.run(['bash', str(root / 'scripts/build_release_stack.sh')],
-                                    env=env, capture_output=True, text=True, timeout=20)
+                   'GITHUB_REF_NAME': 'v0.4.3-alpha.59', 'GITHUB_SHA': 'a' * 40,
+                   'NODE_PLANE_RELEASE_SIGNING_KEY': signing.read_text()}
+            env.pop('NODE_PLANE_RELEASE_KEY', None)
+            build = ['bash', str(root / 'scripts/build_release_stack.sh')]
+            other = root / 'other.pem'
+            subprocess.run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', str(other)],
+                           check=True, capture_output=True)
+            mismatch = subprocess.run(build, env={**env, 'NODE_PLANE_RELEASE_SIGNING_KEY': other.read_text()},
+                                      capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn('does not match the key built into the agent', mismatch.stderr)
+            unsigned = {k: v for k, v in env.items() if k != 'NODE_PLANE_RELEASE_SIGNING_KEY'}
+            required = subprocess.run(build, env={**unsigned, 'CI': 'true'},
+                                      capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(required.returncode, 0)
+            self.assertIn('NODE_PLANE_RELEASE_SIGNING_KEY is required', required.stderr)
+            result = subprocess.run(build, env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr)
 
             config = tomllib.loads((ROOT / 'dist-workspace.toml').read_text())
@@ -75,6 +95,15 @@ class CargoDistReleaseTests(unittest.TestCase):
                 digest, name = line.split()
                 self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
             self.assertFalse((out / 'node-plane-cli-linux-amd64.tar.gz').exists())
+            statement = out / 'node-plane-agent-linux-amd64.release'
+            agent_sha = hashlib.sha256((out / 'node-plane-agent-linux-amd64.tar.gz').read_bytes()).hexdigest()
+            self.assertEqual(statement.read_text(),
+                             'node-plane-agent-release 1\nversion 0.4.3-alpha.59\ntarget linux-amd64\n'
+                             f'archive node-plane-agent-linux-amd64.tar.gz\nsha256 {agent_sha}\n')
+            verify = subprocess.run(['openssl', 'pkeyutl', '-verify', '-inkey', str(signing), '-rawin',
+                                     '-in', str(statement), '-sigfile', str(out / f'{statement.name}.sig')],
+                                    capture_output=True, text=True)
+            self.assertEqual(verify.returncode, 0, verify.stderr)
             self.assertEqual((out / 'node-plane-agent-installer.sh').read_bytes(),
                              (ROOT / 'scripts/install_agent.sh').read_bytes())
             self.assertEqual((out / 'node-plane-workstation-installer.sh').read_bytes(),

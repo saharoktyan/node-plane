@@ -32,6 +32,7 @@ impl AgentState {
             commit: Self::read_first_line(&self.runtime_commit_path()),
             binary_version: env!("NODE_PLANE_BINARY_VERSION").to_string(),
             binary_commit: env!("NODE_PLANE_BINARY_COMMIT").to_string(),
+            update_rolled_back: self.update_rolled_back(),
             runtime_root: self.config.runtime_root.clone(),
             xray_config_path,
             awg_config_path,

@@ -247,6 +247,25 @@ impl NodeAgentService for NodeAgentApi {
         Ok(Response::new(result))
     }
 
+    async fn update_agent(
+        &self,
+        request: Request<agent::v1::UpdateAgentRequest>,
+    ) -> Result<Response<agent::v1::UpdateAgentResponse>, Status> {
+        let state = self.state.clone();
+        let request = request.into_inner();
+        let (response, outcome) = tokio::task::spawn_blocking(move || state.update_agent(request))
+            .await
+            .map_err(|_| Status::internal("agent update worker unavailable"))??;
+        if outcome == crate::update::Outcome::Updating {
+            // Answer first; the service then restarts into the new binary.
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                crate::update::restart();
+            });
+        }
+        Ok(Response::new(response))
+    }
+
     async fn uninstall_agent(
         &self,
         _request: Request<AgentEmpty>,

@@ -12,7 +12,7 @@ use crate::agent::v1::{
     ObserveSessionsRequest, ObserveSessionsResponse, PathExistsRequest, RefreshAwgConfigRequest,
     RefreshAwgConfigResponse, RunDiagnosticsRequest, RunDiagnosticsResponse,
     RuntimeCommandResponse, RuntimeFacts, RuntimeFileSpec, SyncRuntimeFilesRequest,
-    SyncRuntimeFilesResponse,
+    SyncRuntimeFilesResponse, UpdateAgentRequest, UpdateAgentResponse,
 };
 
 pub struct AgentTransport {
@@ -158,6 +158,21 @@ impl AgentTransport {
         request.set_timeout(Duration::from_secs(5));
         let response = client.get_runtime_facts(request).await?;
         Ok(response.into_inner())
+    }
+
+    pub async fn update_agent(
+        &self,
+        release_url: &str,
+        version: &str,
+    ) -> Result<UpdateAgentResponse, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(UpdateAgentRequest {
+            release_url: release_url.to_string(),
+            version: version.to_string(),
+        });
+        // The agent answers after downloading and checking the release.
+        request.set_timeout(Duration::from_secs(600));
+        Ok(client.update_agent(request).await?.into_inner())
     }
 
     pub async fn get_node_health(&self) -> Result<LocalHealth, tonic::Status> {

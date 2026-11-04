@@ -1,5 +1,6 @@
 fn main() {
     binary_metadata();
+    release_key();
     println!("cargo:rerun-if-changed=../../proto/agent/v1/types.proto");
     println!("cargo:rerun-if-changed=../../proto/agent/v1/agent_service.proto");
 
@@ -59,4 +60,23 @@ fn binary_metadata() {
         version.trim()
     );
     println!("cargo:rustc-env=NODE_PLANE_BINARY_COMMIT={}", commit.trim());
+}
+
+/// The public key self-updates must be signed with: `release-key.hex` next to
+/// this file, or `NODE_PLANE_RELEASE_KEY` for a fork's own key.
+fn release_key() {
+    println!("cargo:rerun-if-changed=release-key.hex");
+    println!("cargo:rerun-if-env-changed=NODE_PLANE_RELEASE_KEY");
+    let key = std::env::var("NODE_PLANE_RELEASE_KEY")
+        .ok()
+        .or_else(|| std::fs::read_to_string("release-key.hex").ok())
+        .unwrap_or_default();
+    let key = key.trim();
+    if !key.is_empty() {
+        assert!(
+            key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()),
+            "the release key must be 32 bytes of hex"
+        );
+        println!("cargo:rustc-env=NODE_PLANE_RELEASE_KEY={key}");
+    }
 }

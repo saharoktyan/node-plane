@@ -44,7 +44,7 @@ use driver::v1::{
     GetNodeDiagnosticsRequest, GetNodeDiagnosticsResponse, GetOperationRequest,
     InspectBackendNodeRequest, ListOperationsRequest, ListOperationsResponse, Operation,
     OperationEvent, RefreshAwgConfigRequest, RefreshAwgConfigResponse, StartOperationResponse,
-    WatchOperationRequest,
+    UpdateAgentRequest, UpdateAgentResponse, WatchOperationRequest,
 };
 
 #[derive(Clone)]
@@ -501,6 +501,34 @@ impl NodeService for NodeApi {
             awg_config_present: facts.awg_config_present,
             agent_version: facts.binary_version,
             agent_commit: facts.binary_commit,
+            agent_update_rolled_back: facts.update_rolled_back,
+        }))
+    }
+
+    async fn update_agent(
+        &self,
+        request: Request<UpdateAgentRequest>,
+    ) -> Result<Response<UpdateAgentResponse>, Status> {
+        let req = request.into_inner();
+        if req.node_key.trim().is_empty() {
+            return Err(Status::invalid_argument("node_key is required"));
+        }
+        let target = self
+            .ctx
+            .agent_target(&req.node_key)
+            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+        let transport = agent_transport::AgentTransport::new(target);
+        let facts = transport.get_runtime_facts().await?;
+        if facts.node_key != req.node_key {
+            return Err(Status::failed_precondition("agent node identity mismatch"));
+        }
+        let answer = transport
+            .update_agent(&req.release_url, &req.version)
+            .await?;
+        Ok(Response::new(UpdateAgentResponse {
+            status: answer.status,
+            version: answer.version,
+            rolled_back: answer.rolled_back,
         }))
     }
 

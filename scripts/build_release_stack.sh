@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 cd "$ROOT_DIR"
 if [[ "${1:-}" == --from-ci && "${CI:-}" == true ]]; then
   mkdir -p "$OUT_DIR"
-  for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz node-plane-agent-installer.sh node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 SHA256SUMS.txt RELEASE_METADATA.txt; do
+  for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz node-plane-agent-linux-amd64.release node-plane-agent-linux-amd64.release.sig node-plane-agent-installer.sh node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 SHA256SUMS.txt RELEASE_METADATA.txt; do
     cp "$ROOT_DIR/dist/server-input/$name" "$OUT_DIR/$name"
   done
   (cd "$OUT_DIR" && sha256sum --check SHA256SUMS.txt)
@@ -55,6 +55,32 @@ for legal in LICENSE THIRD_PARTY_LICENSES; do
   chmod 0644 "$TMP_DIR/$legal"
 done
 
+# Agents install a self-update only from a statement signed with the release
+# key; release-key.hex in the agent crate is the public half they check.
+sign_agent_release() {
+  local archive="$AGENT_NAME.tar.gz" statement="$OUT_DIR/$AGENT_NAME.release"
+  printf 'node-plane-agent-release 1\nversion %s\ntarget linux-amd64\narchive %s\nsha256 %s\n' \
+    "${TAG#v}" "$archive" "$(sha256sum "$OUT_DIR/$archive" | cut -d' ' -f1)" > "$statement"
+  if [[ -z "${NODE_PLANE_RELEASE_SIGNING_KEY:-}" ]]; then
+    if [[ "${CI:-}" == true ]]; then
+      echo "NODE_PLANE_RELEASE_SIGNING_KEY is required to sign the agent release." >&2
+      exit 1
+    fi
+    echo "NODE_PLANE_RELEASE_SIGNING_KEY is not set; agents will not self-update to this build." >&2
+    return 0
+  fi
+  local key="$TMP_DIR/release-signing.pem" expected actual
+  (umask 077; printf '%s\n' "$NODE_PLANE_RELEASE_SIGNING_KEY" > "$key")
+  expected="${NODE_PLANE_RELEASE_KEY:-$(tr -d ' \r\n' < rust/node-agent/release-key.hex 2>/dev/null || true)}"
+  actual="$(openssl pkey -in "$key" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "The release signing key does not match the key built into the agent." >&2
+    exit 1
+  fi
+  openssl pkeyutl -sign -inkey "$key" -rawin -in "$statement" -out "$statement.sig"
+  rm -f "$key"
+}
+
 mkdir -p "$OUT_DIR"
 cargo build --locked --release --manifest-path rust/node-driver/Cargo.toml
 cargo build --locked --release --manifest-path rust/node-agent/Cargo.toml
@@ -77,6 +103,7 @@ done
 
 tar -C "$TMP_DIR" -czf "$OUT_DIR/$DRIVER_NAME.tar.gz" "$DRIVER_NAME" LICENSE THIRD_PARTY_LICENSES
 tar -C "$TMP_DIR" -czf "$OUT_DIR/$AGENT_NAME.tar.gz" "$AGENT_NAME" LICENSE THIRD_PARTY_LICENSES
+sign_agent_release
 python3 scripts/controller_release.py build --root "$ROOT_DIR" \
   --archive "$OUT_DIR/$CONTROLLER_NAME" --ref "$TAG" --commit "$COMMIT"
 cp scripts/install_agent.sh "$OUT_DIR/node-plane-agent-installer.sh"
@@ -87,7 +114,9 @@ python3 scripts/validate_release.py --tag "$TAG" --commit "$COMMIT" \
 
 (
   cd "$OUT_DIR"
-  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" node-plane-agent-installer.sh \
+  signed=()
+  [[ ! -f "$AGENT_NAME.release.sig" ]] || signed=("$AGENT_NAME.release" "$AGENT_NAME.release.sig")
+  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" "${signed[@]}" node-plane-agent-installer.sh \
     node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 RELEASE_METADATA.txt > SHA256SUMS.txt
 )
 

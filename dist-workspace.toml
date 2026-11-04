@@ -35,6 +35,8 @@ artifacts = [
   "dist/release-stack/node-plane-controller.tar.gz",
   "dist/release-stack/node-plane-driver-linux-amd64.tar.gz",
   "dist/release-stack/node-plane-agent-linux-amd64.tar.gz",
+  "dist/release-stack/node-plane-agent-linux-amd64.release",
+  "dist/release-stack/node-plane-agent-linux-amd64.release.sig",
   "dist/release-stack/node-plane-agent-installer.sh",
   "dist/release-stack/node-plane-workstation-installer.sh",
   "dist/release-stack/node-plane-workstation-installer.ps1",

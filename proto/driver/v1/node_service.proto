@@ -11,6 +11,23 @@ service NodeService {
   // Dials an agent installed with a one-time token, issues its certificate
   // and remembers its target. No SSH or sudo on the node.
   rpc EnrollAgent(EnrollAgentRequest) returns (EnrollAgentResponse);
+  // Asks the agent to install a signed release and restart into it.
+  rpc UpdateAgent(UpdateAgentRequest) returns (UpdateAgentResponse);
+}
+
+message UpdateAgentRequest {
+  string node_key = 1;
+  // Where the release assets are published, without a trailing slash.
+  string release_url = 2;
+  string version = 3;
+}
+
+message UpdateAgentResponse {
+  // "updating": the agent restarts into the new version; "current": nothing to do.
+  string status = 1;
+  string version = 2;
+  // A version the agent's rollback guard put back, if any.
+  string rolled_back = 3;
 }
 
 message EnrollAgentRequest {
@@ -57,4 +74,6 @@ message BackendNodeObservation {
   bool awg_config_present = 6;
   string agent_version = 7;
   string agent_commit = 8;
+  // The version the agent's last self-update rolled back from, if any.
+  string agent_update_rolled_back = 9;
 }
