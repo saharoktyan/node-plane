@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Harden the agent service with a systemd drop-in the agent keeps in place
+  (`node-plane-agent harden`): read-only home directories, no kernel module
+  loading, kernel logs, cgroup or hostname changes, native system calls only.
+  Agents of earlier releases add it on their next start. Removal deletes it
+  and checks that it and `node-plane-agent.previous` are gone.
 - Update node agents without SSH: **Updates** asks each agent to install the
   controller's release itself. The agent downloads it from GitHub, accepts it
   only when the release key signed its checksum, refuses older versions,

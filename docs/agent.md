@@ -63,7 +63,11 @@ The controller calls the agent's API: protocol deployment, profile access, setti
 
 The controller sends nothing the agent executes: the runtime entry points, the AWG profile generator and the AmneziaWG container's start script are built into the agent, and the controller delivers only data such as `node.env`. On a node installed with the command, a compromised controller can therefore do only what the agent's API allows. A node set up over SSH also gives the controller its SSH access. Python is not needed on the server.
 
-Planned next: a systemd sandbox for the agent.
+## Service hardening
+
+The agent keeps `/etc/systemd/system/node-plane-agent.service.d/hardening.conf` in place and rewrites it if it changes: home directories are read-only, so the agent cannot add an SSH key; it cannot load kernel modules (the kernel still loads the ones `tc`, `nft` and Docker need), read kernel logs, change cgroups or the hostname; and it runs only native 64-bit system calls. Agents of earlier releases add it on their next start; it applies from the restart after that, for example the next update.
+
+This limits mistakes, not a compromised agent. The agent needs the Docker socket, writes systemd units for temporary access and starts transient units; each of these is enough to leave any sandbox. A stricter sandbox (`ProtectSystem=strict`, fewer capabilities) would therefore not stop an attacker, but could break Docker, apt, ufw or speed limits. What limits a compromised controller is above: the agent's API, nothing executable delivered and signed agent releases.
 
 ## Agent updates
 
@@ -88,6 +92,7 @@ Agents from before self-update, and agents built without a release key, are upda
 | `/usr/local/bin/node-plane-agent` | Agent binary |
 | `/usr/local/bin/node-plane-agent.previous` | Previous binary after a self-update |
 | `/etc/systemd/system/node-plane-agent.service` | Service |
+| `/etc/systemd/system/node-plane-agent.service.d/hardening.conf` | Service hardening |
 | `/etc/node-plane/agent.toml` | Node key, listen address, TLS paths |
 | `/etc/node-plane/tls/` | Agent key and certificate, controller CA; the token until enrollment |
 | `/etc/node-plane/node.env` | Node settings |

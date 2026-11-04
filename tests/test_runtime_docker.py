@@ -620,6 +620,9 @@ mkdir -p /var/lib/node-plane-agent/journal-archives/previous-controller-test
 echo old-journal > /var/lib/node-plane-agent/journal-archives/previous-controller-test/profile-intents.sqlite3
 echo manifest > /var/lib/node-plane-agent/journal-archives/previous-controller-test/manifest.json
 echo fixture > /etc/systemd/system/node-plane-agent.service
+mkdir -p /etc/systemd/system/node-plane-agent.service.d
+echo fixture > /etc/systemd/system/node-plane-agent.service.d/hardening.conf
+echo fixture > /usr/local/bin/node-plane-agent.previous
 echo preserve > /etc/systemd/system/controller-test.service
 echo unrelated > /var/lib/node-plane-agent-unrelated
 echo preserve > /test/attacker-controlled

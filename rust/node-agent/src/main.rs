@@ -50,6 +50,9 @@ fn print_startup(config: &AgentConfig) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = host::hardening::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = update::run(&args) {
         std::process::exit(code);
     }
@@ -96,6 +99,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(code);
     }
     let config = AgentConfig::load();
+    // Installed agents of earlier releases get the hardening on their next start.
+    if let Err(err) = host::hardening::ensure() {
+        eprintln!("agent service hardening not written: {err}");
+    }
     if enrollment::pending(&config) {
         enrollment::serve(&config).await?;
     }

@@ -137,6 +137,8 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 chmod 0644 /etc/systemd/system/node-plane-agent.service
+# The agent owns its systemd hardening drop-in; see docs/agent.md.
+timeout 30 /usr/local/bin/node-plane-agent harden >/dev/null
 systemctl daemon-reload
 systemctl enable node-plane-agent >/dev/null 2>&1 || fail "could not enable the agent service"
 systemctl restart node-plane-agent || fail "could not start the agent service"

@@ -1085,6 +1085,10 @@ EOF
     changed=1
   fi
   rm -f "$config_tmp" "$unit_tmp"
+  # The agent owns its systemd hardening drop-in; see docs/agent.md.
+  local hardening
+  hardening="$(sudo timeout 30 /usr/local/bin/node-plane-agent harden)" || return 1
+  [[ "$hardening" != *written* ]] || changed=1
   sudo systemctl enable --now node-plane-agent || return 1
   if [[ $changed -eq 1 ]]; then
     sudo systemctl restart node-plane-agent || return 1
@@ -1444,6 +1448,7 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 UNIT
+sudo timeout 30 /usr/local/bin/node-plane-agent harden >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now node-plane-agent
 sudo systemctl restart node-plane-agent

@@ -204,6 +204,9 @@ class AgentEnrollmentDockerTests(unittest.TestCase):
         self.assertEqual(ufw, ["allow 50061/tcp comment Node Plane agent enrollment",
                                "delete allow 50061/tcp", "allow 50061/tcp comment Node Plane agent"])
         self.assertIn('restart node-plane-agent', docker('exec', self.name, 'cat', '/test/systemctl.log').stdout)
+        hardening = docker('exec', self.name, 'cat',
+                           '/etc/systemd/system/node-plane-agent.service.d/hardening.conf').stdout
+        self.assertIn('ProtectHome=read-only', hardening)
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
         files = docker('exec', self.name, 'sh', '-c',
                        'ls /etc/node-plane/tls; stat -c %a /etc/node-plane/tls /etc/node-plane/tls/server.key'

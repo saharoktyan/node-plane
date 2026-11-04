@@ -21,4 +21,6 @@ Runtime entry points (`init-awg.sh`, `deploy-xray.sh`, `awg-add-user.sh` and the
 
 `UpdateAgent` and `node-plane-agent self-update RELEASE_URL VERSION` install a newer signed release (`src/update/`). The release statement must verify against the key `build.rs` embeds from `release-key.hex` (or `NODE_PLANE_RELEASE_KEY`); without one the agent refuses self-updates. The previous binary stays as `<binary>.previous`, and a transient systemd timer runs it as `update-guard` to restore it unless the new agent confirmed by binding its listener.
 
+`host/hardening.rs` keeps the service's systemd drop-in (`node-plane-agent harden`, also at start); it holds only options the agent's tools tolerate, see [Node agent on the server](../../docs/agent.md#service-hardening).
+
 See [Architecture](../../docs/development/architecture.md), [Temporary access](../../docs/development/temporary-access.md) and [Testing](../../docs/development/testing.md). RPC definitions are under [`proto/`](../../proto/).
