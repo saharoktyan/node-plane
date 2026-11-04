@@ -31,6 +31,10 @@
   SQLite format (through the `rusqlite` crate); the script still serves the
   commands not moved yet. An agent killed during a profile command now
   leaves it unconfirmed for repair.
+- Expire temporary access and supervise leased containers in the node
+  agent (`node-plane-agent lease monitor|expire|supervise|prepare|deploy`).
+  The lease units run the agent; units of earlier releases are rewritten
+  when the agent starts.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

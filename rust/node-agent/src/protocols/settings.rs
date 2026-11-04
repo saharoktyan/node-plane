@@ -135,13 +135,7 @@ fn xray(setting: Setting<'_>, config: &Path, args: &[String]) -> Result<(), Stri
         return Ok(());
     }
     backup.restore();
-    if Path::new("/etc/systemd/system/node-plane-leased-xray.service").exists() {
-        let helper = runtime().join("apply-profile-intent.py");
-        quiet(
-            "python3",
-            &[&helper.to_string_lossy(), "prepare-leased-runtime", "xray"],
-        );
-    }
+    let _ = super::deploy::prepare_leased("xray");
     quiet(
         "docker",
         &["restart", &setting("XRAY_CONTAINER_NAME", "xray")],

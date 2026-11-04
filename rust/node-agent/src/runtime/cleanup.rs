@@ -205,6 +205,7 @@ impl AgentState {
                         || name.starts_with(".xray-config-")
                         || name.starts_with(".xray-user-")
                         || name.starts_with(".lease-config-")
+                        || name.starts_with(".peer-")
                     {
                         fs::remove_file(entry.path()).map_err(|err| {
                             Status::internal(format!("failed to remove config artifact: {err}"))

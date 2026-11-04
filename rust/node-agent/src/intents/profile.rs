@@ -10,6 +10,7 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
+use super::leases::System;
 use super::{
     Lock, Response, commands_schema, database, disabled, fences_schema, fingerprint, has_table,
     leases, leases_schema, open, open_readonly,
@@ -545,13 +546,17 @@ pub(crate) fn run(
     instance: &str,
 ) -> Result<Response, String> {
     let protocol = intent.protocol.as_str();
-    if intent.lease_seconds.is_some() && !leases::enforcement_ready(protocol) {
-        return Err("temporary expiry enforcement is unavailable".into());
+    if intent.lease_seconds.is_some() {
+        let ready = leases::RuntimeSettings::read(protocol)
+            .is_ok_and(|settings| leases::enforcement_ready(&System, protocol, &settings));
+        if !ready {
+            return Err("temporary expiry enforcement is unavailable".into());
+        }
     }
     if !intent.ensure() && temporary_name(&intent.runtime_name) {
         let settings = leases::RuntimeSettings::read(protocol)?;
-        let record = leases::container(protocol, &settings)?;
-        if !leases::running(&record)? {
+        let record = leases::container(&System, protocol, &settings)?;
+        if !leases::running(&record) {
             leases::prune_config(
                 protocol,
                 &settings.config,

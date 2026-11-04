@@ -12,7 +12,68 @@ use crate::protocols::lock_config;
 use crate::protocols::xray::user_sync::write_config;
 use crate::runtime::files::env_value;
 
-const NODE_ENV: &str = "/etc/node-plane/node.env";
+/// node.env; the lease commands of tests point elsewhere.
+pub(crate) fn node_env() -> PathBuf {
+    std::env::var_os("NODE_PLANE_NODE_ENV")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| "/etc/node-plane/node.env".into())
+}
+
+/// What a host command returned.
+pub(crate) struct Output {
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: String,
+}
+
+/// The commands lease handling runs on the host: Docker and systemd.
+/// Tests answer them instead.
+pub(crate) trait Host {
+    /// Runs `args`, killed after `timeout` seconds when given.
+    fn run(&self, args: &[&str], timeout: Option<u64>) -> Result<Output, String>;
+
+    /// Stdout of a command that must succeed.
+    fn check(&self, args: &[&str], timeout: Option<u64>) -> Result<String, String> {
+        let output = self.run(args, timeout)?;
+        if output.code != Some(0) {
+            return Err(format!("{} failed", args.join(" ")));
+        }
+        Ok(output.stdout)
+    }
+
+    fn succeeds(&self, args: &[&str], timeout: Option<u64>) -> bool {
+        self.run(args, timeout)
+            .is_ok_and(|output| output.code == Some(0))
+    }
+}
+
+/// The real host.
+pub(crate) struct System;
+
+impl Host for System {
+    fn run(&self, args: &[&str], timeout: Option<u64>) -> Result<Output, String> {
+        let mut command = match timeout {
+            Some(seconds) => {
+                let mut command = Command::new("timeout");
+                command.arg(format!("{seconds}s")).args(args);
+                command
+            }
+            None => {
+                let mut command = Command::new(args[0]);
+                command.args(&args[1..]);
+                command
+            }
+        };
+        let output = command
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|err| format!("{}: {err}", args[0]))?;
+        Ok(Output {
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        })
+    }
+}
 
 /// Where node.env puts the protocol's config and container.
 pub(crate) struct RuntimeSettings {
@@ -23,10 +84,13 @@ pub(crate) struct RuntimeSettings {
 
 impl RuntimeSettings {
     pub(crate) fn read(protocol: &str) -> Result<Self, String> {
-        Self::from_env(protocol, &fs::read_to_string(NODE_ENV).unwrap_or_default())
+        Self::from_env(
+            protocol,
+            &fs::read_to_string(node_env()).unwrap_or_default(),
+        )
     }
 
-    fn from_env(protocol: &str, raw: &str) -> Result<Self, String> {
+    pub(crate) fn from_env(protocol: &str, raw: &str) -> Result<Self, String> {
         let value = |key: &str, default: &str| {
             env_value(raw, key)
                 .filter(|value| !value.is_empty())
@@ -77,29 +141,22 @@ impl RuntimeSettings {
     }
 }
 
-fn succeeds(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
 /// The protocol's container, when its name, ID and config mount are ours.
-pub(crate) fn container(protocol: &str, settings: &RuntimeSettings) -> Result<Value, String> {
-    let output = Command::new("docker")
-        .args(["container", "inspect", &settings.container])
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|_| "leased runtime is unavailable".to_string())?;
-    if !output.status.success() {
-        return Err("leased runtime is unavailable".into());
-    }
-    let records: Value =
-        serde_json::from_slice(&output.stdout).map_err(|_| "leased runtime is unavailable")?;
+pub(crate) fn container(
+    host: &dyn Host,
+    protocol: &str,
+    settings: &RuntimeSettings,
+) -> Result<Value, String> {
+    let unavailable = || "leased runtime is unavailable".to_string();
+    let output = host
+        .check(
+            &["docker", "container", "inspect", &settings.container],
+            Some(15),
+        )
+        .map_err(|_| unavailable())?;
+    let records: Value = serde_json::from_str(&output).map_err(|_| unavailable())?;
     let [record] = records.as_array().map(Vec::as_slice).unwrap_or_default() else {
-        return Err("leased runtime is unavailable".into());
+        return Err(unavailable());
     };
     let source = settings
         .config
@@ -124,16 +181,23 @@ pub(crate) fn container(protocol: &str, settings: &RuntimeSettings) -> Result<Va
     Ok(record.clone())
 }
 
-pub(crate) fn running(record: &Value) -> Result<bool, String> {
-    record["State"]["Running"]
-        .as_bool()
-        .ok_or_else(|| "leased container ownership is unconfirmed".into())
+/// The ID of a checked container record.
+pub(crate) fn id(record: &Value) -> &str {
+    record["Id"].as_str().unwrap_or_default()
+}
+
+pub(crate) fn running(record: &Value) -> bool {
+    record["State"]["Running"] == true
 }
 
 /// Whether expiry is enforced now: the timer and its scan healthy, and the
 /// supervisor running the protocol container, which Docker must not restart
 /// on its own.
-pub(crate) fn enforcement_ready(protocol: &str) -> bool {
+pub(crate) fn enforcement_ready(
+    host: &dyn Host,
+    protocol: &str,
+    settings: &RuntimeSettings,
+) -> bool {
     let units = [
         ("is-enabled", "node-plane-lease-expiry.timer".to_string()),
         ("is-active", "node-plane-lease-expiry.timer".to_string()),
@@ -146,24 +210,25 @@ pub(crate) fn enforcement_ready(protocol: &str) -> bool {
     ];
     if !units
         .iter()
-        .all(|(action, unit)| succeeds("systemctl", &[action, "--quiet", unit]))
+        .all(|(action, unit)| host.succeeds(&["systemctl", action, "--quiet", unit], Some(15)))
     {
         return false;
     }
     // `is-failed` answers 1 for a unit that has not failed.
-    let failed = Command::new("systemctl")
-        .args(["is-failed", "--quiet", "node-plane-lease-expiry.service"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    if !failed.is_ok_and(|status| status.code() == Some(1)) {
+    let failed = host.run(
+        &[
+            "systemctl",
+            "is-failed",
+            "--quiet",
+            "node-plane-lease-expiry.service",
+        ],
+        Some(15),
+    );
+    if !failed.is_ok_and(|output| output.code == Some(1)) {
         return false;
     }
-    let Ok(settings) = RuntimeSettings::read(protocol) else {
-        return false;
-    };
-    container(protocol, &settings).is_ok_and(|record| {
-        record["State"]["Running"] == true && record["HostConfig"]["RestartPolicy"]["Name"] == "no"
+    container(host, protocol, settings).is_ok_and(|record| {
+        running(&record) && record["HostConfig"]["RestartPolicy"]["Name"] == "no"
     })
 }
 
@@ -236,9 +301,103 @@ pub(crate) fn prune_config(
     Ok(())
 }
 
+/// A host that answers like the lease tests' Docker and systemd, and
+/// records what ran.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::{Host, Output};
+
+    pub(crate) struct FakeHost {
+        pub(crate) config: PathBuf,
+        pub(crate) running: RefCell<bool>,
+        pub(crate) policy: RefCell<String>,
+        pub(crate) failed: bool,
+        pub(crate) bad_mount: bool,
+        pub(crate) calls: RefCell<Vec<Vec<String>>>,
+        /// The config when the container started.
+        pub(crate) started: RefCell<Option<String>>,
+        /// Called on `docker wait`, while the supervisor waits.
+        pub(crate) on_wait: Box<dyn Fn()>,
+        /// Commands that fail.
+        pub(crate) failing: Vec<Vec<String>>,
+    }
+
+    impl FakeHost {
+        pub(crate) fn new(config: PathBuf) -> Self {
+            Self {
+                config,
+                running: RefCell::new(false),
+                policy: RefCell::new("no".into()),
+                failed: false,
+                bad_mount: false,
+                calls: RefCell::new(Vec::new()),
+                started: RefCell::new(None),
+                on_wait: Box::new(|| {}),
+                failing: Vec::new(),
+            }
+        }
+
+        pub(crate) fn ran(&self, args: &[&str]) -> bool {
+            self.calls.borrow().iter().any(|call| call == args)
+        }
+    }
+
+    impl Host for FakeHost {
+        fn run(&self, args: &[&str], _: Option<u64>) -> Result<Output, String> {
+            let call: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            self.calls.borrow_mut().push(call.clone());
+            let mut stdout = String::new();
+            let mut code = 0;
+            if self.failing.contains(&call) {
+                code = 3;
+            } else if args.starts_with(&["docker", "container", "inspect"]) {
+                let awg = self.config.extension().is_some_and(|ext| ext == "conf");
+                let source = if self.bad_mount {
+                    "/unrelated".to_string()
+                } else {
+                    self.config.parent().unwrap().to_string_lossy().into_owned()
+                };
+                stdout = json!([{"Id": "a".repeat(64), "Name": "/test",
+                    "State": {"Running": *self.running.borrow()},
+                    "HostConfig": {"RestartPolicy": {"Name": *self.policy.borrow()}},
+                    "Mounts": [{"Type": "bind", "Source": source,
+                        "Destination": if awg { "/opt/amnezia/awg" } else { "/etc/xray" }}]}])
+                .to_string();
+            } else if args.starts_with(&["docker", "update"]) {
+                *self.policy.borrow_mut() = "no".into();
+            } else if args.starts_with(&["docker", "start"]) {
+                *self.started.borrow_mut() = std::fs::read_to_string(&self.config).ok();
+                *self.running.borrow_mut() = true;
+            } else if args.starts_with(&["docker", "wait"]) {
+                (self.on_wait)();
+            } else if args.starts_with(&["systemctl", "is-failed"]) {
+                code = if self.failed { 0 } else { 1 };
+            }
+            Ok(Output {
+                code: Some(code),
+                stdout,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::fake::FakeHost;
     use super::*;
+
+    fn settings(config: &Path) -> RuntimeSettings {
+        RuntimeSettings {
+            config: config.to_path_buf(),
+            container: "test".into(),
+            server_key: "lv1".into(),
+        }
+    }
 
     #[test]
     fn runtime_settings_follow_node_env_and_are_checked() {
@@ -253,6 +412,35 @@ mod tests {
         assert!(RuntimeSettings::from_env("xray", "XRAY_CONFIG=relative.json\n").is_err());
         assert!(RuntimeSettings::from_env("xray", "SERVER_KEY=-bad\n").is_err());
         assert!(RuntimeSettings::from_env("other", "").is_err());
+    }
+
+    #[test]
+    fn enforcement_needs_the_timer_the_supervisor_and_an_owned_running_container() {
+        let config = crate::protocols::test_dir("lease-ready").join("config.json");
+        let ready = |change: &dyn Fn(&mut FakeHost)| {
+            let mut host = FakeHost::new(config.clone());
+            *host.running.borrow_mut() = true;
+            change(&mut host);
+            enforcement_ready(&host, "xray", &settings(&config))
+        };
+        assert!(ready(&|_| {}));
+        assert!(!ready(&|host| *host.running.borrow_mut() = false));
+        assert!(!ready(
+            &|host| *host.policy.borrow_mut() = "unless-stopped".into()
+        ));
+        assert!(!ready(&|host| host.failed = true));
+        assert!(!ready(&|host| host.bad_mount = true));
+        // A restarting or stopped expiry worker is not ready.
+        assert!(!ready(&|host| host.failing = vec![
+            [
+                "systemctl",
+                "is-active",
+                "--quiet",
+                "node-plane-lease-expiry.service"
+            ]
+            .map(String::from)
+            .to_vec()
+        ]));
     }
 
     #[test]

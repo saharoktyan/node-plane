@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -116,6 +117,27 @@ class DockerRuntimeTests(unittest.TestCase):
     def started(self, container):
         return docker('inspect', '-f', '{{.State.StartedAt}}', container).stdout
 
+    def lease_environment(self, **settings):
+        """The agent's lease commands on a test node.env, journal and runtime;
+        the runtime has the AWG revocation entry point on that node.env."""
+        node_env = self.root / 'lease-node.env'
+        node_env.write_text(''.join(f'{key}={shlex.quote(str(value))}\n' for key, value in settings.items()))
+        runtime = self.root / 'lease-runtime'
+        runtime.mkdir(exist_ok=True)
+        script = runtime / 'awg-del-user.sh'
+        script.write_text((Path(__file__).resolve().parents[1] / 'runtime_assets/awg-del-user.sh').read_text()
+                          .replace('source /etc/node-plane/node.env', f'source {shlex.quote(str(node_env))}', 1))
+        script.chmod(0o755)
+        return {**os.environ, 'NODE_PLANE_NODE_ENV': str(node_env), 'NODE_PLANE_RUNTIME_ROOT': str(runtime),
+                'NODE_PLANE_PROFILE_JOURNAL': str(self.root / 'lease-journal.sqlite3'),
+                'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY)}
+
+    def expire(self, env):
+        result = subprocess.run([str(AGENT_BINARY), 'lease', 'expire'], env=env,
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
     @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_expired_temporary_vless_is_pruned_before_real_container_restart(self):
         path, container = self.xray()
@@ -134,18 +156,20 @@ class DockerRuntimeTests(unittest.TestCase):
         with sqlite3.connect(journal) as conn:
             conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
         docker('stop',container)
-        def execute(args,**kwargs):
-            if args[:2]==['docker','wait']:
-                return subprocess.CompletedProcess(args,0,stdout='0\n')
-            return subprocess.run(args,**kwargs)
-        with patch.object(engine,'leased_runtime_settings',return_value=(path,container,'')):
-            engine.start_leased_runtime('xray',journal,execute)
+        env = self.lease_environment(XRAY_CONFIG=path, XRAY_CONTAINER_NAME=container)
+        supervisor = subprocess.Popen([str(AGENT_BINARY),'lease','supervise','xray'],env=env,
+                                      stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        self.addCleanup(lambda: supervisor.poll() is None and supervisor.kill())
         self.wait_users(container)
         for tag in ('reality-tcp','reality-xhttp'):
             users = xray_users(tag)
             self.assertIn('alice',users)
             self.assertNotIn(intent['runtime_name'],users)
-        self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
+        # The supervisor waits on its container and ends with it.
+        docker('stop',container)
+        _, errors = supervisor.communicate(timeout=60)
+        self.assertEqual(supervisor.returncode,0,errors)
+        self.assertEqual(self.expire(env),{'expired':1,'pending':0})
 
     @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_xray_api_add_and_revoke_persist_across_real_restart(self):
@@ -412,12 +436,14 @@ class DockerRuntimeTests(unittest.TestCase):
             if index:
                 config += f'Endpoint = {names[0]}:51820\nPersistentKeepalive = 1\n'
             (directory / 'peer.conf').write_text(config)
-            script = ('set -eu; mkdir -p /dev/net; mknod /dev/net/tun c 10 200; '
+            # The production image names the tool wg as well.
+            script = ('set -eu; ln -sf "$(command -v awg)" /usr/local/bin/wg; mkdir -p /dev/net; mknod /dev/net/tun c 10 200; '
                 'amneziawg-go awg0; awg setconf awg0 /config/peer.conf; '
                 f'ip addr add 10.88.0.{index+1}/24 dev awg0; ip link set dev awg0 mtu 1280 up; exec sleep 86400')
             self.container(suffix, AWG_IMAGE, '--network', network, '--cap-add', 'NET_ADMIN',
                 '--device-cgroup-rule', 'c 10:200 rwm', '-e', 'WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1',
-                '-v', f'{directory}:/config:ro', command=('sh', '-c', script))
+                '-v', f'{directory}:/config:ro', '-v', f'{directory}:/opt/amnezia/awg:ro',
+                command=('sh', '-c', script))
         return names
 
     def test_explicit_manual_awg31_profile_transfers_traffic(self):
@@ -538,24 +564,16 @@ class DockerRuntimeTests(unittest.TestCase):
         docker('exec',client,'awg','setconf','awg0','/config/peer.conf')
         probe = docker('exec',client,'ping','-c','5','-W','2','10.88.0.1',check=False)
         self.assertEqual(probe.returncode,0,probe.stdout+probe.stderr+docker('logs',client).stderr)
-        peers = load('expiry_test_awg_peers','awg-peer-state.py')
         intent = {'command_id':str(uuid4()),'protocol':'awg','runtime_name':name,'revision':1,
                   'action':'ensure','uuid':'','short_id':'','lease_seconds':43200}
-        def wg_docker(*args,**kwargs):
-            # The production wrapper aliases wg to awg; this fixture uses the
-            # unmodified upstream image, so select its original executable.
-            return subprocess.run(['docker',*('awg' if a=='wg' else a for a in args)],check=True,**kwargs)
-        def mutate(value,fd):
-            if value['action']=='delete':
-                with patch.object(peers,'docker',side_effect=wg_docker):
-                    peers.mutate('revoke',path,self.root/'clients',name,server,'awg0')
-            return {'summary':'OK','payload_json':''}
-        engine.apply(intent,journal,mutate)
+        engine.apply(intent,journal,lambda value,fd: {'summary':'OK','payload_json':''})
         import sqlite3
         from datetime import datetime,timedelta,timezone
         with sqlite3.connect(journal) as conn:
             conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
-        self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
+        env = self.lease_environment(AWG_CONFIG=path, AWG_CONTAINER_NAME=server, AWG_IFACE='awg0',
+                                     AWG_CLIENTS_DIR=self.root/'clients')
+        self.assertEqual(self.expire(env),{'expired':1,'pending':0})
         self.assertNotEqual(docker('exec',client,'ping','-c','2','-W','1','10.88.0.1',check=False).returncode,0)
         self.assertEqual(docker('exec',server,'awg','show','awg0','peers').stdout.strip(),permanent_key)
         self.assertNotIn('# '+name,path.read_text())

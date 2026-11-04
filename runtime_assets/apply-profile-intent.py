@@ -66,7 +66,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py monitor-leases
+ExecStart=/usr/local/bin/node-plane-agent lease monitor
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=60
@@ -97,7 +97,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py start-leased-runtime {_protocol}
+ExecStart=/usr/local/bin/node-plane-agent lease supervise {_protocol}
 Restart=always
 RestartSec=5s
 TimeoutStopSec=45s
@@ -106,6 +106,17 @@ KillMode=control-group
 [Install]
 WantedBy=docker.service
 '''
+# Units of earlier releases ran this script; they are still ours, and the
+# agent rewrites them when it starts.
+FORMER_LEASE_UNITS = {name: text.replace('/usr/local/bin/node-plane-agent lease monitor',
+                                         '/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py monitor-leases')
+                      .replace('/usr/local/bin/node-plane-agent lease supervise',
+                               '/usr/bin/python3 /opt/node-plane-runtime/apply-profile-intent.py start-leased-runtime')
+                      for name, text in LEASE_UNITS.items()}
+
+
+def owned_lease_unit(path, name):
+    return not path.is_symlink() and path.read_text() in (LEASE_UNITS[name], FORMER_LEASE_UNITS[name])
 
 
 def ensure_lease_scheduler(directory='/etc/systemd/system', execute=subprocess.run, protocol=None):
@@ -225,25 +236,9 @@ def stop_leased_runtime_units(protocols=('awg', 'xray'), execute=subprocess.run,
         path = Path(directory) / name
         if not path.exists():
             continue
-        if path.is_symlink() or path.read_text() != LEASE_UNITS[name]:
+        if not owned_lease_unit(path, name):
             raise ValueError('leased runtime unit ownership is unconfirmed')
         execute(['systemctl', 'disable', '--now', name], check=True, capture_output=True, timeout=45)
-
-
-def refresh_leased_runtime(protocol, execute=subprocess.run, directory='/etc/systemd/system'):
-    """Retain startup protection when a managed protocol container is replaced."""
-    name = 'node-plane-leased-' + protocol + '.service'
-    path = Path(directory) / name
-    if not path.exists():
-        return False
-    if path.is_symlink() or path.read_text() != LEASE_UNITS[name]:
-        raise ValueError('leased runtime unit ownership is unconfirmed')
-    ensure_lease_scheduler(directory, execute)
-    config, container, _ = leased_runtime_settings(protocol, execute)
-    record = leased_container(protocol, config, container, execute)
-    execute(['docker', 'update', '--restart', 'no', record['Id']], check=True, capture_output=True, timeout=30)
-    execute(['systemctl', 'enable', '--now', name], check=True, capture_output=True, timeout=30)
-    return True
 
 
 def prune_leased_config(protocol, config, names, server_key=''):
@@ -295,73 +290,6 @@ def prune_leased_config(protocol, config, names, server_key=''):
         finally:
             if os.path.exists(candidate):
                 os.unlink(candidate)
-
-
-def prepare_leased_config_locked(protocol, path, config, server_key):
-    path = Path(path)
-    if Path(str(path) + '.disabled').exists():
-        raise ValueError('node removal is in progress')
-    if not path.exists():
-        return
-    with closing(sqlite3.connect(path)) as conn:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
-            return
-        rows = conn.execute('SELECT profile,expires_at,status FROM temporary_leases WHERE protocol=?', (protocol,)).fetchall()
-        names = [name for name, deadline, status in rows if
-            status != 'active' or datetime.fromisoformat(deadline) <= datetime.now(timezone.utc)]
-        # Retain pending revocations if pruning/start fails. Never report a
-        # completed removal before confirming the runtime outcome.
-        with conn:
-            conn.executemany("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=? AND status IN ('active','provisioning')",
-                             ((protocol, name) for name in names))
-        prune_leased_config(protocol, config, names, server_key)
-
-
-@contextmanager
-def lease_restart_lock(path):
-    lock_path = str(path) + '.lock'
-    inherited = os.environ.get('NODE_PLANE_PROFILE_LOCK_FD')
-    if inherited is not None:
-        fd = int(inherited)
-        actual, expected = os.fstat(fd), os.stat(lock_path)
-        if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
-            raise ValueError('invalid inherited runtime lock')
-        # An inherited open description shares its parent's flock. Never
-        # release that lock here; another process's lock fails without waiting.
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        yield
-    else:
-        with open(lock_path, 'a') as lock:
-            os.chmod(lock.name, 0o600)
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            yield
-
-
-def prepare_leased_runtime(protocol, path='/etc/node-plane/profile-intents.sqlite3', execute=subprocess.run):
-    with lease_restart_lock(path):
-        config, _, server_key = leased_runtime_settings(protocol, execute)
-        prepare_leased_config_locked(protocol, path, config, server_key)
-
-
-def start_leased_runtime(protocol, path='/etc/node-plane/profile-intents.sqlite3', execute=subprocess.run):
-    """Supervise one owned container; never load overdue identities on restart."""
-    path = Path(path)
-    with open(str(path) + '.lock', 'a') as lock:
-        os.chmod(lock.name, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if Path(str(path) + '.disabled').exists():
-            raise ValueError('node removal is in progress')
-        config, container, server_key = leased_runtime_settings(protocol, execute)
-        record = leased_container(protocol, config, container, execute)
-        execute(['docker', 'update', '--restart', 'no', record['Id']], check=True, capture_output=True, timeout=30)
-        if not record['State']['Running']:
-            prepare_leased_config_locked(protocol, path, config, server_key)
-            execute(['docker', 'start', record['Id']], check=True, capture_output=True, timeout=30)
-            if not leased_container(protocol, config, container, execute)['State']['Running']:
-                raise ValueError('leased runtime did not start')
-    # The lock must not be held while supervising: regular grants, revocation
-    # and the expiry timer share it. Restart after a crash runs the guard again.
-    execute(['docker', 'wait', record['Id']], check=True, capture_output=True)
 
 
 def lease_current(connection, intent, now=None):
@@ -500,81 +428,6 @@ def lookup(intent, path):
         return json.loads(row[2])
     finally:
         connection.close()
-
-
-def monitor_leases(path, runner, stop=None, interval=1):
-    """Keep local expiry checks alive without spawning a service for every scan."""
-    import threading
-    stop = stop or threading.Event()
-    while not stop.is_set():
-        result = expire_leases(path, runner)
-        if result['expired']:
-            print(json.dumps(result), flush=True)
-        if result['pending']:
-            # Fail visibly and let systemd retry. Never report an unhealthy scan as success.
-            raise ValueError('temporary lease revocation is pending')
-        stop.wait(interval)
-
-
-def expire_leases(path, runner, now=None):
-    """Local revocation independent of the controller and agent RPC service.
-
-    Only idempotent deletes are retried. Never replay an interrupted ensure.
-    The shared lock also waits for orphaned mutation subprocesses to stop.
-    """
-    path = Path(path)
-    if not path.exists():
-        return {'expired': 0, 'pending': 0}
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        raise ValueError('expiry requires an aware UTC clock')
-    with open(str(path) + '.lock', 'a') as lock:
-        os.chmod(lock.name, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        # Decommission writes this fence only after all known peers are removed.
-        # Cleanup may already have deleted the protocol scripts and containers.
-        if Path(str(path) + '.disabled').exists():
-            return {'expired': 0, 'pending': 0}
-        with closing(sqlite3.connect(path)) as connection:
-            connection.execute('PRAGMA synchronous=FULL')
-            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='temporary_leases'").fetchone():
-                return {'expired': 0, 'pending': 0}
-            expired = pending = 0
-            rows = connection.execute('''SELECT protocol,profile,command_id,expires_at,status
-                FROM temporary_leases WHERE status IN ('provisioning','active','revoking')
-                ORDER BY expires_at,protocol,profile''').fetchall()
-            for protocol, profile, command_id, deadline, status in rows:
-                if status != 'revoking' and datetime.fromisoformat(deadline) > now:
-                    continue
-                # Reserve the identity permanently, including after a failed delete.
-                with connection:
-                    connection.execute("UPDATE temporary_leases SET status='revoking' WHERE protocol=? AND profile=?", (protocol, profile))
-                fence = connection.execute('SELECT revision,command_id,action FROM fences WHERE protocol=? AND profile=?', (protocol, profile)).fetchone()
-                intent = {'command_id': 'expiry:' + hashlib.sha256(command_id.encode()).hexdigest(),
-                          'protocol': protocol, 'runtime_name': profile, 'revision': fence[0] + 1,
-                          'action': 'delete', 'uuid': '', 'short_id': ''}
-                validate(intent)
-                try:
-                    response = runner(intent, lock.fileno())
-                    if (not isinstance(response, dict) or set(response) != {'summary', 'payload_json'}
-                            or any(not isinstance(value, str) for value in response.values())):
-                        raise ValueError('invalid expiry result')
-                except Exception:
-                    pending += 1
-                    continue
-                fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-                with connection:
-                    connection.execute('''INSERT INTO commands VALUES (?,?,'succeeded',?,?)
-                        ON CONFLICT(id) DO NOTHING''', (intent['command_id'], fingerprint, json.dumps(response),
-                            os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')))
-                    connection.execute("UPDATE fences SET revision=?,command_id=?,action='delete' WHERE protocol=? AND profile=?",
-                                       (intent['revision'], intent['command_id'], protocol, profile))
-                    connection.execute("UPDATE commands SET status='superseded' WHERE id=? AND status='running'", (command_id,))
-                    if fence[2] == 'delete':
-                        connection.execute("UPDATE commands SET status='superseded' WHERE id=? AND status='running'",(fence[1],))
-                    connection.execute("UPDATE temporary_leases SET status='expired' WHERE protocol=? AND profile=?", (protocol, profile))
-                expired += 1
-            return {'expired': expired, 'pending': pending}
 
 
 def awg_profile_module():
@@ -1296,23 +1149,12 @@ def inspect_for_repair(intent, allow_unused=False):
 if __name__ == '__main__':
     os.umask(0o077)
     try:
-        if len(sys.argv) == 3 and sys.argv[1] == 'prepare-leased-runtime':
-            prepare_leased_runtime(sys.argv[2])
-            print(json.dumps({'prepared': True}))
-            sys.exit(0)
-        if len(sys.argv) == 3 and sys.argv[1] == 'leased-deploy':
-            print(json.dumps({'protected': refresh_leased_runtime(sys.argv[2])}))
-            sys.exit(0)
-        if len(sys.argv) == 3 and sys.argv[1] == 'start-leased-runtime':
-            start_leased_runtime(sys.argv[2])
-            sys.exit(0)
-        if len(sys.argv) == 2 and sys.argv[1] == 'monitor-leases':
-            monitor_leases('/etc/node-plane/profile-intents.sqlite3', run)
-            sys.exit(0)
-        if len(sys.argv) == 2 and sys.argv[1] == 'expire-leases':
-            result = expire_leases('/etc/node-plane/profile-intents.sqlite3', run)
-            print(json.dumps(result))
-            sys.exit(1 if result['pending'] else 0)
+        if len(sys.argv) >= 2 and sys.argv[1] in {'monitor-leases', 'start-leased-runtime'}:
+            # Units of earlier releases, until the agent rewrites them.
+            agent = '/usr/local/bin/node-plane-agent'
+            command = ['lease', 'monitor'] if sys.argv[1] == 'monitor-leases' else ['lease', 'supervise']
+            os.execve(agent, [agent, *command, *sys.argv[2:]], dict(os.environ,
+                NODE_AGENT_CONFIG_PATH='/nonexistent/node-plane-agent-probe.toml', NODE_AGENT_LISTEN_ADDR='probe'))
         if len(sys.argv) == 3 and sys.argv[1] == 'apply-node-settings':
             result = apply_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', run_node_settings)
             print(json.dumps(result))

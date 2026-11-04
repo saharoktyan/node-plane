@@ -68,6 +68,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = protocols::awg::setup::run(&args) {
         std::process::exit(code);
     }
+    if let Some(code) = intents::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = protocols::deploy::run(&args) {
         std::process::exit(code);
     }
@@ -75,6 +78,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(code);
     }
     let config = AgentConfig::load();
+    // Lease units of earlier releases ran the removed script.
+    if let Err(err) = intents::scheduler::migrate(
+        &intents::leases::System,
+        std::path::Path::new(intents::scheduler::UNITS),
+    ) {
+        eprintln!("lease unit migration failed: {err}");
+    }
     let state = AgentState::new(config.clone());
     let api = NodeAgentApi {
         state: state.clone(),

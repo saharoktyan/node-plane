@@ -9,9 +9,12 @@
 //!
 //! `apply-profile-intent.py` shares the journal for the commands not moved
 //! here yet; both keep its schema.
+pub(crate) mod expiry;
 pub(crate) mod leases;
 pub(crate) mod legacy;
 pub(crate) mod profile;
+pub(crate) mod scheduler;
+pub(crate) mod supervisor;
 
 use std::fs;
 use std::os::fd::{AsRawFd, RawFd};
@@ -23,6 +26,84 @@ use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 
 use crate::protocols::sha256_hex;
+
+const JOURNAL: &str = "/etc/node-plane/profile-intents.sqlite3";
+
+/// The journal of a subcommand; tests point it elsewhere.
+pub(crate) fn journal_path() -> PathBuf {
+    std::env::var_os("NODE_PLANE_PROFILE_JOURNAL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| JOURNAL.into())
+}
+
+/// The agent instance a subcommand records; the expiry service has none.
+fn instance() -> String {
+    std::env::var("NODE_PLANE_AGENT_INSTANCE_ID").unwrap_or_else(|_| "standalone".into())
+}
+
+fn leased_protocol(value: &str) -> Result<&str, String> {
+    matches!(value, "awg" | "xray")
+        .then_some(value)
+        .ok_or_else(|| "invalid leased protocol".into())
+}
+
+/// `node-plane-agent lease monitor|expire|supervise P|prepare P|deploy P`:
+/// the expiry service, one scan, the supervisor of a leased container, and
+/// the steps of a deployment of one. Replaces those commands of
+/// `apply-profile-intent.py`.
+pub(crate) fn run(args: &[String]) -> Option<i32> {
+    let (first, rest) = args.split_first()?;
+    if first != "lease" {
+        return None;
+    }
+    let journal = journal_path();
+    let instance = instance();
+    let runtime = crate::protocols::settings::runtime();
+    let mut runner =
+        |intent: &profile::Intent, lock: RawFd| profile::run(intent, lock, &runtime, &instance);
+    let host = leases::System;
+    let units = Path::new(scheduler::UNITS);
+    let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+    let result: Result<Option<String>, String> = match rest.as_slice() {
+        ["monitor"] => expiry::monitor(&journal, &instance, &mut runner).map(|()| None),
+        ["expire"] => {
+            expiry::expire(&journal, &instance, chrono::Utc::now(), &mut runner).map(|scan| {
+                let report = serde_json::json!({"expired": scan.expired, "pending": scan.pending});
+                println!("{report}");
+                if scan.pending > 0 {
+                    std::process::exit(1);
+                }
+                None
+            })
+        }
+        ["supervise", protocol] => leased_protocol(protocol).and_then(|protocol| {
+            let settings = leases::RuntimeSettings::read(protocol)?;
+            supervisor::supervise(&host, protocol, &journal, &settings).map(|()| None)
+        }),
+        ["prepare", protocol] => leased_protocol(protocol)
+            .and_then(|protocol| supervisor::prepare(protocol, &journal))
+            .map(|()| Some(r#"{"prepared": true}"#.into())),
+        ["deploy", protocol] => leased_protocol(protocol)
+            .and_then(|protocol| scheduler::refresh(&host, units, protocol))
+            .map(|protected| Some(serde_json::json!({"protected": protected}).to_string())),
+        _ => Err(
+            "usage: lease monitor|expire|supervise PROTOCOL|prepare PROTOCOL|deploy PROTOCOL"
+                .into(),
+        ),
+    };
+    Some(match result {
+        Ok(output) => {
+            if let Some(output) = output {
+                println!("{output}");
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        }
+    })
+}
 
 impl crate::state::AgentState {
     /// The journal beside node.env.

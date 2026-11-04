@@ -1,5 +1,4 @@
 """Node-local lease expiry: no Docker or controller needed for these tests."""
-import json
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -8,7 +7,6 @@ import subprocess
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-from concurrent.futures import ThreadPoolExecutor
 
 from tests.test_agent_profile_intents import MODULE
 from tests.test_agent_node_operations import MODULE as OPERATIONS
@@ -32,32 +30,10 @@ class TemporaryLeaseTests(unittest.TestCase):
         self.calls.append(dict(intent))
         return {'summary': 'private config', 'payload_json': ''}
 
-    def overdue(self, intent):
-        with sqlite3.connect(self.path) as conn:
-            conn.execute('UPDATE temporary_leases SET expires_at=? WHERE protocol=? AND profile=?',
-                         ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
-                          intent['protocol'], intent['runtime_name']))
-
     def status(self, intent):
         with sqlite3.connect(self.path) as conn:
             return conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',
                                 (intent['protocol'], intent['runtime_name'])).fetchone()[0]
-
-    def test_both_protocols_get_selected_lifetime_and_duplicate_does_not_extend_it(self):
-        for protocol in ('awg', 'xray'):
-            for seconds in (43200, 86400, 259200):
-                intent = self.intent(protocol, lease_seconds=seconds)
-                before = datetime.now(timezone.utc)
-                receipt = MODULE.apply(intent, self.path, self.mutate)
-                payload = json.loads(receipt['payload_json'])
-                deadline = datetime.fromisoformat(payload['expires_at'])
-                self.assertGreaterEqual(deadline, before + timedelta(seconds=seconds))
-                self.assertLessEqual(deadline, datetime.now(timezone.utc) + timedelta(seconds=seconds))
-                self.assertEqual(payload['revocation_mode'], 'new_connections_only' if protocol == 'xray' else 'peer_removed')
-                self.assertEqual(MODULE.apply(intent, self.path, self.mutate), receipt)
-                self.assertEqual(MODULE.lookup(intent, self.path), receipt)
-        self.assertEqual(len(self.calls), 6)
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 0, 'pending': 0})
 
     def test_retry_cannot_change_selected_lifetime(self):
         intent = self.intent(lease_seconds=43200)
@@ -91,8 +67,9 @@ class TemporaryLeaseTests(unittest.TestCase):
             self.assertEqual(state['status'],'active')
             with self.assertRaises(ValueError):
                 OPERATIONS.execute('temporary_status',intent['command_id'],dict(intent,node_key='n1'),False,self.path)
-        self.overdue(intent)
-        MODULE.expire_leases(self.path,self.mutate)
+        # As the expiry scan leaves it.
+        with sqlite3.connect(self.path) as conn:
+            conn.execute("UPDATE temporary_leases SET status='expired'")
         self.assertEqual(OPERATIONS.execute('temporary_status',intent['command_id'],intent,True,self.path)['status'],'expired')
 
     def test_early_delete_does_not_ignore_unrelated_interrupted_command(self):
@@ -104,95 +81,6 @@ class TemporaryLeaseTests(unittest.TestCase):
         deletion.pop('lease_seconds')
         with self.assertRaisesRegex(ValueError,'unfinished'):
             MODULE.apply(deletion,self.path,self.mutate)
-
-    def test_timer_settles_failed_manual_delete_without_leaving_a_running_fence(self):
-        intent = self.intent()
-        MODULE.apply(intent,self.path,self.mutate)
-        deletion = dict(intent,command_id=str(uuid4()),revision=2,action='delete')
-        deletion.pop('lease_seconds')
-        def fail(i, fd):
-            raise TimeoutError('lost deletion')
-        with self.assertRaises(TimeoutError):
-            MODULE.apply(deletion,self.path,fail)
-        self.assertEqual(MODULE.expire_leases(self.path,self.mutate),{'expired':1,'pending':0})
-        with sqlite3.connect(self.path) as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM commands WHERE status='running'").fetchone()[0],0)
-        permanent = dict(self.intent(),runtime_name='permanent')
-        permanent.pop('lease_seconds')
-        MODULE.apply(permanent,self.path,self.mutate)
-
-    def test_expiry_isolated_from_permanent_and_other_temporary_credentials(self):
-        first, second = self.intent(), self.intent()
-        permanent = {**self.intent(), 'runtime_name': 'permanent'}
-        permanent.pop('lease_seconds')
-        for intent in (first, second, permanent):
-            MODULE.apply(intent, self.path, self.mutate)
-        self.overdue(first)
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 1, 'pending': 0})
-        self.assertEqual((self.calls[-1]['runtime_name'], self.calls[-1]['action']),
-                         (first['runtime_name'], 'delete'))
-        self.assertEqual(self.status(second), 'active')
-        MODULE.lookup(second, self.path)
-        MODULE.lookup(permanent, self.path)
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 0, 'pending': 0})
-
-    def test_expired_credentials_cannot_be_read_replayed_renewed_or_made_permanent(self):
-        intent = self.intent('xray')
-        MODULE.apply(intent, self.path, self.mutate)
-        self.overdue(intent)
-        for function in (MODULE.lookup, lambda i, p: MODULE.apply(i, p, self.mutate)):
-            with self.assertRaises(ValueError):
-                function(intent, self.path)
-        MODULE.expire_leases(self.path, self.mutate)
-        for leased in (True, False):
-            replacement = dict(intent, command_id=str(uuid4()), revision=3)
-            if not leased:
-                replacement.pop('lease_seconds')
-            with self.assertRaises(ValueError):
-                MODULE.apply(replacement, self.path, self.mutate)
-        self.assertEqual([i['action'] for i in self.calls], ['ensure', 'delete'])
-
-    def test_interrupted_ensure_is_revoked_without_being_replayed(self):
-        intent = self.intent()
-        def interrupted(i, fd):
-            self.mutate(i, fd)
-            raise TimeoutError('private diagnostics')
-        with self.assertRaises(TimeoutError):
-            MODULE.apply(intent, self.path, interrupted)
-        self.assertEqual(self.status(intent), 'provisioning')
-        self.overdue(intent)
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 1, 'pending': 0})
-        with sqlite3.connect(self.path) as conn:
-            self.assertEqual(conn.execute('SELECT status FROM commands WHERE id=?',
-                                          (intent['command_id'],)).fetchone()[0], 'superseded')
-        # Expiry frees the shared command journal for unrelated profiles.
-        MODULE.apply(self.intent(), self.path, self.mutate)
-
-    def test_failed_delete_is_persisted_and_retried_without_renewing_any_peer(self):
-        first, second = self.intent(), self.intent('xray')
-        for intent in (first, second):
-            MODULE.apply(intent, self.path, self.mutate)
-            self.overdue(intent)
-        def unavailable(i, fd):
-            if i['protocol'] == 'awg':
-                raise TimeoutError('offline runtime')
-            return self.mutate(i, fd)
-        self.assertEqual(MODULE.expire_leases(self.path, unavailable), {'expired': 1, 'pending': 1})
-        self.assertEqual(self.status(first), 'revoking')
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 1, 'pending': 0})
-        self.assertEqual(self.status(first), 'expired')
-
-    def test_early_revoke_cancels_local_expiry_and_cannot_reactivate_identity(self):
-        intent = self.intent()
-        MODULE.apply(intent, self.path, self.mutate)
-        revoke = dict(intent, command_id=str(uuid4()), revision=2, action='delete')
-        revoke.pop('lease_seconds')
-        MODULE.apply(revoke, self.path, self.mutate)
-        self.assertEqual(self.status(intent), 'revoked')
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate,
-                            datetime.now(timezone.utc) + timedelta(days=2)), {'expired': 0, 'pending': 0})
-        with self.assertRaises(ValueError):
-            MODULE.apply(dict(intent, command_id=str(uuid4()), revision=3), self.path, self.mutate)
 
     def test_invalid_duration_or_nonisolated_identity_never_runs(self):
         for fields in ({'lease_seconds': True}, {'lease_seconds': 1}, {'lease_seconds': 172800},
@@ -212,32 +100,6 @@ class TemporaryLeaseTests(unittest.TestCase):
             MODULE.apply(dict(intent, command_id=str(uuid4()), revision=2), self.path, self.mutate)
         self.assertEqual(len(self.calls), 1)
 
-    def test_concurrent_expiry_scans_delete_once(self):
-        intent = self.intent()
-        MODULE.apply(intent, self.path, self.mutate)
-        self.overdue(intent)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda _: MODULE.expire_leases(self.path, self.mutate), range(2)))
-        self.assertEqual(sum(result['expired'] for result in results), 1)
-        self.assertEqual([i['action'] for i in self.calls], ['ensure', 'delete'])
-
-    def test_finished_node_cleanup_never_retries_removed_runtime_scripts(self):
-        intent = self.intent()
-        MODULE.apply(intent, self.path, self.mutate)
-        MODULE.prepare_decommission(self.path, str(uuid4()), self.mutate)
-        self.overdue(intent)
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 0, 'pending': 0})
-        self.assertEqual([i['action'] for i in self.calls], ['ensure', 'delete'])
-
-    def test_old_or_absent_journal_is_not_created_by_expiry_scan(self):
-        self.assertEqual(MODULE.expire_leases(self.path, self.mutate), {'expired': 0, 'pending': 0})
-        self.assertFalse(self.path.exists())
-        with sqlite3.connect(self.path) as conn:
-            conn.execute('CREATE TABLE old_fixture (id TEXT)')
-        MODULE.expire_leases(self.path, self.mutate)
-        with sqlite3.connect(self.path) as conn:
-            self.assertEqual(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [('old_fixture',)])
-
     def test_scheduler_is_persistent_and_independent_of_agent_service(self):
         calls = []
         directory = Path(self.tmp.name) / 'units'
@@ -252,7 +114,7 @@ class TemporaryLeaseTests(unittest.TestCase):
         self.assertEqual(calls.count(['systemctl', 'daemon-reload']), 1)
         unit = (directory / 'node-plane-lease-expiry.service').read_text()
         self.assertNotIn('node-plane-agent.service', unit)
-        self.assertIn('monitor-leases', unit)
+        self.assertIn('ExecStart=/usr/local/bin/node-plane-agent lease monitor', unit)
         self.assertIn('Type=simple', unit)
         self.assertIn('StartLimitIntervalSec=0', unit)
         self.assertIn(['systemctl','reset-failed','node-plane-lease-expiry.service','node-plane-lease-expiry.timer'], calls)
@@ -309,24 +171,6 @@ class TemporaryLeaseTests(unittest.TestCase):
         for observation in ({**empty, 'live_present':True}, {**empty, 'disk_present':True}, {}, {**empty, 'live_present':0}):
             with patch.object(OPERATIONS.intents, 'inspect_for_repair', return_value=observation), self.assertRaises(ValueError):
                 OPERATIONS.execute('temporary_resolve', other['command_id'], other, recover=True, path=self.path)
-
-    def test_monitor_reuses_process_and_stays_quiet_without_due_leases(self):
-        from unittest.mock import Mock
-        stop = Mock()
-        stop.is_set.side_effect = [False,False,False,True]
-        with patch.object(MODULE,'expire_leases',return_value={'expired':0,'pending':0}) as scan, patch('builtins.print') as output:
-            MODULE.monitor_leases(self.path,self.mutate,stop=stop)
-        self.assertEqual(scan.call_count,3)
-        self.assertEqual(stop.wait.call_count,3)
-        output.assert_not_called()
-
-    def test_monitor_pending_revocation_fails_for_supervised_retry(self):
-        from unittest.mock import Mock
-        stop = Mock()
-        stop.is_set.return_value = False
-        with patch.object(MODULE,'expire_leases',return_value={'expired':0,'pending':1}), self.assertRaises(ValueError):
-            MODULE.monitor_leases(self.path,self.mutate,stop=stop)
-        stop.wait.assert_not_called()
 
     def test_scheduler_failure_never_provisions_a_peer(self):
         intent = self.intent()

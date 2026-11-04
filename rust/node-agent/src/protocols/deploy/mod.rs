@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use ring::rand::{SecureRandom, SystemRandom};
 
-use super::settings::runtime;
 use super::{Setting, process_setting};
 
 fn succeeds(program: &str, args: &[&str]) -> bool {
@@ -151,32 +150,22 @@ pub(crate) fn leased(service: &str) -> bool {
     .exists()
 }
 
-/// `apply-profile-intent.py COMMAND SERVICE` of the lease supervisor.
-fn lease_helper(command: &str, service: &str) -> Result<(), String> {
-    let helper = runtime().join("apply-profile-intent.py");
-    let status = Command::new("python3")
-        .arg(helper)
-        .args([command, service])
-        .stdout(Stdio::null())
-        .status()
-        .map_err(|err| format!("{command} failed: {err}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| format!("{command} {service} failed"))
-}
-
 /// Lets the lease supervisor drop expired users before the container starts.
 pub(crate) fn prepare_leased(service: &str) -> Result<(), String> {
     if !leased(service) {
         return Ok(());
     }
-    lease_helper("prepare-leased-runtime", service)
+    crate::intents::supervisor::prepare(service, &crate::intents::journal_path())
 }
 
 /// Hands the new container to the lease supervisor.
 pub(crate) fn leased_deploy(service: &str) -> Result<(), String> {
-    lease_helper("leased-deploy", service)
+    crate::intents::scheduler::refresh(
+        &crate::intents::leases::System,
+        Path::new(crate::intents::scheduler::UNITS),
+        service,
+    )
+    .map(|_| ())
 }
 
 /// Waits for a new container to fail on its config, if it does.
