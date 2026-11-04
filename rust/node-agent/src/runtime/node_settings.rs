@@ -1,6 +1,4 @@
-//! Node settings: legacy script path and the backend intent path.
-use std::process::Command;
-
+//! Node settings: the legacy script path and the journaled intent path.
 use serde_json::Value;
 use tonic::Status;
 
@@ -8,6 +6,9 @@ use crate::agent;
 use crate::agent::v1::{
     ApplyBackendNodeSettingsRequest, ApplyNodeSettingsRequest, RuntimeCommandResponse,
 };
+use crate::intents::leases::System;
+use crate::intents::runtime::Runtime;
+use crate::intents::{apply, settings, verify};
 use crate::state::AgentState;
 
 impl AgentState {
@@ -33,6 +34,15 @@ impl AgentState {
         })
     }
 
+    /// The runtime the node commands manage.
+    pub(crate) fn node_runtime(&self) -> Runtime {
+        Runtime::system(
+            self.resolve_runtime_path("/opt/node-plane-runtime").into(),
+            self.config.node_env_path.clone().into(),
+            &self.instance_id,
+        )
+    }
+
     pub(crate) fn apply_backend_node_settings(
         &self,
         req: ApplyBackendNodeSettingsRequest,
@@ -44,23 +54,21 @@ impl AgentState {
             ));
         }
         let intent = backend_settings_intent(&req)?;
-        let output = self
-            .run_runtime_command(
-                "apply-profile-intent.py",
-                &["apply-node-settings".to_string(), intent.to_string()],
-            )
-            .map_err(|_| {
-                Status::failed_precondition("node settings intent blocked; reconciliation required")
-            })?;
-        let value: Value = serde_json::from_str(&output)
-            .map_err(|_| Status::internal("invalid node settings response"))?;
-        let payload = value
-            .get("payload_json")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Status::internal("invalid node settings response"))?;
+        let runtime = self.node_runtime();
+        let response = settings::apply(
+            &intent,
+            &self.journal(),
+            &self.instance_id,
+            &runtime.tool(),
+            &mut |settings, lock, progress| apply::run(&System, &runtime, settings, lock, progress),
+        )
+        .map_err(|err| {
+            eprintln!("node settings {} failed: {err}", req.command_id);
+            Status::failed_precondition("node settings intent blocked; reconciliation required")
+        })?;
         Ok(RuntimeCommandResponse {
             summary: "node settings applied".to_string(),
-            payload_json: payload.to_string(),
+            payload_json: response.payload_json,
         })
     }
 
@@ -74,21 +82,11 @@ impl AgentState {
             ));
         }
         let intent = backend_settings_intent(&req)?;
-        let output = self
-            .run_runtime_command(
-                "apply-profile-intent.py",
-                &["lookup-node-settings".to_string(), intent.to_string()],
-            )
+        let response = settings::lookup(&intent, &self.journal(), &self.node_runtime().tool())
             .map_err(|_| Status::failed_precondition("node settings success is not confirmed"))?;
-        let value: Value = serde_json::from_str(&output)
-            .map_err(|_| Status::internal("invalid node settings response"))?;
-        let payload = value
-            .get("payload_json")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Status::internal("invalid node settings response"))?;
         Ok(RuntimeCommandResponse {
             summary: "node settings confirmed".to_string(),
-            payload_json: payload.to_string(),
+            payload_json: response.payload_json,
         })
     }
 
@@ -102,44 +100,21 @@ impl AgentState {
             ));
         }
         let intent = backend_settings_intent(&req)?;
-        // Recovery must use the current agent's journal implementation even
-        // when an agent-only node has no deployed VPN runtime/helper at all.
-        let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
-        let code = format!(
-            "import sys\n__file__ = sys.argv[1]\nsys.argv = sys.argv[1:]\n{}",
-            include_str!("../../../../runtime_assets/apply-profile-intent.py")
-        );
-        let output = Command::new("python3")
-            .args([
-                "-c",
-                &code,
-                &helper,
-                "resolve-node-settings",
-                &intent.to_string(),
-            ])
-            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
-            .output()
-            .map_err(|_| {
-                Status::failed_precondition("node settings recovery helper unavailable")
-            })?;
-        if !output.status.success() {
-            return Err(Status::failed_precondition(
-                "node settings journal retirement was not confirmed",
-            ));
-        }
-        let value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| Status::internal("invalid node settings repair response"))?;
-        let observation = value
-            .get("observation")
-            .ok_or_else(|| Status::internal("invalid node settings repair observation"))?;
-        for key in ["config_matches", "containers_running"] {
-            if observation.get(key).and_then(Value::as_bool).is_none() {
-                return Err(Status::internal("invalid node settings repair observation"));
-            }
-        }
+        // Works on an agent-only node without any VPN runtime.
+        let runtime = self.node_runtime();
+        let record = settings::resolve(
+            &intent,
+            &self.journal(),
+            &self.instance_id,
+            &runtime.tool(),
+            &mut |settings| verify::observe(&System, &runtime, settings),
+        )
+        .map_err(|_| {
+            Status::failed_precondition("node settings journal retirement was not confirmed")
+        })?;
         Ok(RuntimeCommandResponse {
             summary: "interrupted node settings command retired".to_string(),
-            payload_json: observation.to_string(),
+            payload_json: record["observation"].to_string(),
         })
     }
 }

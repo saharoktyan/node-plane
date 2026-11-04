@@ -1,12 +1,13 @@
-"""Actual SIGKILL boundaries using PostgreSQL and the agent's durable helper.
+"""Actual SIGKILL boundaries using PostgreSQL and a durable agent journal.
 
 Run separately with NODE_PLANE_TEST_POSTGRES_DSN; no production hosts or RPCs.
 """
+from contextlib import closing
 import fcntl
-import importlib.util
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -23,10 +24,38 @@ from tests import test_backups_postgres as fixture
 from tests.test_core_reliability_postgres import HookDatabase
 
 
-SPEC = importlib.util.spec_from_file_location('fault_intents',
-    Path(__file__).resolve().parents[1] / 'runtime_assets/apply-profile-intent.py')
-INTENTS = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(INTENTS)
+class Journal:
+    """The agent journal as the controller sees it: a command runs once, its
+    stored result answers a repeat or a lookup, and an unfinished one is never
+    replayed. The agent's own journal is tested in the node agent."""
+
+    @staticmethod
+    def connect(path):
+        conn = sqlite3.connect(path, isolation_level=None)
+        conn.execute('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, status TEXT NOT NULL, response TEXT)')
+        return conn
+
+    @classmethod
+    def apply(cls, intent, path, mutate):
+        with closing(cls.connect(path)) as conn:
+            row = conn.execute('SELECT status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
+            if row:
+                if row[0] != 'succeeded':
+                    raise ValueError('previous command did not complete successfully')
+                return json.loads(row[1])
+            conn.execute("INSERT INTO commands VALUES (?, 'running', NULL)", (intent['command_id'],))
+            result = mutate(intent, None)
+            conn.execute("UPDATE commands SET status = 'succeeded', response = ? WHERE id = ?",
+                         (json.dumps(result), intent['command_id']))
+            return result
+
+    @classmethod
+    def lookup(cls, intent, path):
+        with closing(cls.connect(path)) as conn:
+            row = conn.execute('SELECT status, response FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
+        if not row or row[0] != 'succeeded':
+            raise ValueError('command success is not confirmed')
+        return json.loads(row[1])
 
 
 class DurableDriver:
@@ -54,14 +83,14 @@ class DurableDriver:
                 os.fsync(stream.fileno())
             self.pause('during_mutation')
             return {'summary': 'applied', 'payload_json': '{}'}
-        result = INTENTS.apply(self.intent(task, value), self.root / 'agent.sqlite3', mutate)
+        result = Journal.apply(self.intent(task, value), self.root / 'agent.sqlite3', mutate)
         self.pause('after_success')
         return {'succeeded': True, 'driver_operation_id': task,
             'result_json': result['payload_json']}
 
     def lookup(self, task, value):
         try:
-            result = INTENTS.lookup(self.intent(task, value), self.root / 'agent.sqlite3')
+            result = Journal.lookup(self.intent(task, value), self.root / 'agent.sqlite3')
         except Exception:
             return {'succeeded': False}
         return {'succeeded': True, 'driver_operation_id': task,

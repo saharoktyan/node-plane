@@ -58,7 +58,6 @@ pub(crate) struct Intent {
 
 impl Intent {
     /// A checked intent from its JSON form.
-    #[cfg_attr(not(test), allow(dead_code))] // For the lease commands, next.
     pub(crate) fn parse(value: &Value) -> Result<Self, String> {
         let invalid = || "invalid command identity".to_string();
         let map = value.as_object().ok_or_else(invalid)?;

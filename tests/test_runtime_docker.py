@@ -5,6 +5,7 @@ host network, published VPN ports or production node paths are used. Xray
 fixtures publish only the Xray API port (and test SOCKS ports), on host loopback.
 """
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -38,7 +39,6 @@ def load(name, file):
 
 
 AWG = load('runtime_test_awg', 'awg_profile.py')
-OPERATIONS = load('runtime_test_operations', 'backend-node-operation.py')
 
 
 def xray_users(tag):
@@ -62,10 +62,8 @@ class DockerRuntimeTests(unittest.TestCase):
     def test_xray_image_reference_is_version_and_digest_pinned(self):
         self.assertRegex(XRAY_IMAGE, r'ghcr\.io/saharoktyan/xray-core:v26\.10\.31-np\.2@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
-        # Deployments run the agent's release pin; the journal names it too.
-        for path in (root / 'rust/node-agent/src/runtime/images.rs', root / 'runtime_assets/apply-profile-intent.py'):
-            with self.subTest(path=path.name):
-                self.assertIn(XRAY_IMAGE, path.read_text())
+        # Deployments and new configs run the agent's release pin.
+        self.assertIn(XRAY_IMAGE, (root / 'rust/node-agent/src/runtime/images.rs').read_text())
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='node-plane-runtime-test-')
@@ -132,6 +130,26 @@ class DockerRuntimeTests(unittest.TestCase):
                 'NODE_PLANE_PROFILE_JOURNAL': str(self.root / 'lease-journal.sqlite3'),
                 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY)}
 
+    def overdue_lease(self, intent):
+        """A granted temporary identity whose lease is overdue, as the agent
+        journal records it."""
+        import sqlite3
+        from datetime import datetime, timedelta, timezone
+        with sqlite3.connect(self.root / 'lease-journal.sqlite3') as conn:
+            conn.executescript('''
+                CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response TEXT, instance_id TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS fences (protocol TEXT, profile TEXT, revision INTEGER NOT NULL, command_id TEXT NOT NULL, action TEXT, PRIMARY KEY(protocol, profile));
+                CREATE TABLE IF NOT EXISTS temporary_leases (protocol TEXT NOT NULL, profile TEXT NOT NULL, command_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY(protocol, profile));''')
+            fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            conn.execute("INSERT INTO commands VALUES (?, ?, 'succeeded', ?, 'test')",
+                         (intent['command_id'], fingerprint, json.dumps({'summary': 'OK', 'payload_json': ''})))
+            conn.execute("INSERT INTO fences VALUES (?, ?, 1, ?, 'ensure')",
+                         (intent['protocol'], intent['runtime_name'], intent['command_id']))
+            conn.execute("INSERT INTO temporary_leases VALUES (?, ?, ?, ?, 'active')",
+                         (intent['protocol'], intent['runtime_name'], intent['command_id'],
+                          (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()))
+
     def expire(self, env):
         result = subprocess.run([str(AGENT_BINARY), 'lease', 'expire'], env=env,
                                 capture_output=True, text=True, timeout=60)
@@ -142,19 +160,10 @@ class DockerRuntimeTests(unittest.TestCase):
     def test_expired_temporary_vless_is_pruned_before_real_container_restart(self):
         path, container = self.xray()
         self.sync(path,container,'add',str(uuid4()))
-        engine = OPERATIONS.intents
-        journal = self.root/'lease-journal.sqlite3'
         intent = {'command_id':str(uuid4()),'protocol':'xray','runtime_name':'tmp_'+uuid4().hex,
             'revision':1,'action':'ensure','uuid':str(uuid4()),'short_id':'0123456789abcdef','lease_seconds':43200}
-        def mutate(value,fd):
-            self.sync(path,container,'add' if value['action']=='ensure' else 'delete',
-                      value['uuid'] or None,value['runtime_name'])
-            return {'summary':'OK','payload_json':''}
-        engine.apply(intent,journal,mutate)
-        import sqlite3
-        from datetime import datetime,timedelta,timezone
-        with sqlite3.connect(journal) as conn:
-            conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
+        self.sync(path,container,'add',intent['uuid'],intent['runtime_name'])
+        self.overdue_lease(intent)
         docker('stop',container)
         env = self.lease_environment(XRAY_CONFIG=path, XRAY_CONTAINER_NAME=container)
         supervisor = subprocess.Popen([str(AGENT_BINARY),'lease','supervise','xray'],env=env,
@@ -392,13 +401,28 @@ class DockerRuntimeTests(unittest.TestCase):
             '-v', f'{source}:/opt/amnezia/awg')
         unrelated = self.container('unrelated', 'postgres:16-alpine', '--network', 'none',
             '-v', f'{self.root / "unrelated"}:/unrelated')
-        values = [str(self.root / 'xray/config.json'), str(self.root / 'amnezia-awg/data/wg0.conf'), xc, ac]
-        return values, (current, previous, awg), unrelated
+        node_env = self.root / 'agent' / 'node.env'
+        node_env.parent.mkdir()
+        node_env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={self.root / "xray/config.json"}\n'
+                            f'AWG_CONFIG={self.root / "amnezia-awg/data/wg0.conf"}\n'
+                            f'XRAY_CONTAINER_NAME={xc}\nAWG_CONTAINER_NAME={ac}\n')
+        return node_env, (current, previous, awg), unrelated
 
+    def cleanup(self, node_env):
+        """The agent's runtime cleanup of both protocols on the test runtime."""
+        intent = {'node_key': 'n1', 'command_id': 'cleanup-1', 'revision': 1,
+                  'protocols': ['xray', 'awg'], 'settings': {}}
+        env = {**os.environ, 'NODE_PLANE_NODE_ENV': str(node_env), 'NODE_PLANE_RUNTIME_ROOT': str(self.root),
+               'NODE_PLANE_PROFILE_JOURNAL': str(node_env.with_name('intents.sqlite3'))}
+        return subprocess.run([str(AGENT_BINARY), 'node-operation', 'cleanup_runtime', 'cleanup-1',
+                               json.dumps(intent)], env=env, capture_output=True, text=True, timeout=120)
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_real_docker_cleanup_removes_only_owned_current_previous_and_peer_cache(self):
-        values, managed, unrelated = self.cleanup_fixture()
-        with patch.object(OPERATIONS, 'ROOT', self.root), patch.object(OPERATIONS, 'environment', return_value=values):
-            OPERATIONS.remove_protocol_runtime(None)
+        node_env, managed, unrelated = self.cleanup_fixture()
+        result = self.cleanup(node_env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['result'], {'cleaned': True})
         for name in managed:
             self.assertNotEqual(docker('inspect', name, check=False).returncode, 0)
         self.assertEqual(docker('inspect', unrelated).returncode, 0)
@@ -407,11 +431,12 @@ class DockerRuntimeTests(unittest.TestCase):
         for file in ('helper.py', 'journal.sqlite3', 'unrelated/sentinel'):
             self.assertTrue((self.root / file).exists())
 
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_real_docker_unowned_mount_aborts_before_any_container_or_file_deletion(self):
-        values, managed, unrelated = self.cleanup_fixture(conflicting=True)
-        with patch.object(OPERATIONS, 'ROOT', self.root), patch.object(OPERATIONS, 'environment', return_value=values):
-            with self.assertRaisesRegex(ValueError, 'ownership'):
-                OPERATIONS.remove_protocol_runtime(None)
+        node_env, managed, unrelated = self.cleanup_fixture(conflicting=True)
+        result = self.cleanup(node_env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('ownership', result.stderr)
         for name in (*managed, unrelated):
             self.assertEqual(docker('inspect', '-f', '{{.State.Running}}', name).stdout.strip(), 'true')
         for directory in ('xray', 'amnezia-awg/data', 'awg-clients', 'unrelated'):
@@ -552,8 +577,6 @@ class DockerRuntimeTests(unittest.TestCase):
 
     def test_temporary_awg_expiry_disconnects_peer_and_preserves_other_peer(self):
         server,client = self.awg_pair('quic')
-        engine = OPERATIONS.intents
-        journal = self.root/'lease-journal.sqlite3'
         name = 'tmp_'+uuid4().hex
         path = self.root/'server-quic'/'peer.conf'
         text = path.read_text().replace('[Peer]','# '+name+'\n[Peer]',1)
@@ -566,11 +589,7 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertEqual(probe.returncode,0,probe.stdout+probe.stderr+docker('logs',client).stderr)
         intent = {'command_id':str(uuid4()),'protocol':'awg','runtime_name':name,'revision':1,
                   'action':'ensure','uuid':'','short_id':'','lease_seconds':43200}
-        engine.apply(intent,journal,lambda value,fd: {'summary':'OK','payload_json':''})
-        import sqlite3
-        from datetime import datetime,timedelta,timezone
-        with sqlite3.connect(journal) as conn:
-            conn.execute('UPDATE temporary_leases SET expires_at=?',((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(),))
+        self.overdue_lease(intent)
         env = self.lease_environment(AWG_CONFIG=path, AWG_CONTAINER_NAME=server, AWG_IFACE='awg0',
                                      AWG_CLIENTS_DIR=self.root/'clients')
         self.assertEqual(self.expire(env),{'expired':1,'pending':0})

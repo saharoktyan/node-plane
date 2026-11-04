@@ -232,7 +232,6 @@ fn hand_over(host: &dyn Host, protocol: &str, settings: &RuntimeSettings) -> Res
 }
 
 /// Stops the supervisors of `protocols`, when they are ours.
-#[cfg_attr(not(test), allow(dead_code))] // For runtime cleanup, with the node operations.
 pub(crate) fn stop(host: &dyn Host, dir: &Path, protocols: &[&str]) -> Result<(), String> {
     for protocol in protocols {
         let name = supervisor(protocol);

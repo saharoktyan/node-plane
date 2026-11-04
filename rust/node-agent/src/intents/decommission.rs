@@ -9,9 +9,7 @@ use rusqlite::params;
 use serde_json::{Value, json};
 
 use super::profile::{Intent, Runner};
-use super::{
-    Lock, Response, database, fences_schema, has_table, open, open_readonly, sidecar,
-};
+use super::{Lock, Response, database, fences_schema, has_table, open, open_readonly, sidecar};
 
 /// A decommission command is a lowercase hyphenated UUID.
 fn command_id(value: &str) -> Result<&str, String> {
@@ -80,7 +78,13 @@ fn revoke_profiles(
             .map_err(database)?;
         statement
             .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })
             .map_err(database)?
             .collect::<Result<_, _>>()
@@ -122,7 +126,12 @@ fn revoke_profiles(
             .execute(
                 "UPDATE fences SET revision=?, command_id=?, action='delete'
                     WHERE protocol=? AND profile=?",
-                params![intent.revision, intent.command_id, intent.protocol, intent.runtime_name],
+                params![
+                    intent.revision,
+                    intent.command_id,
+                    intent.protocol,
+                    intent.runtime_name
+                ],
             )
             .map_err(database)?;
         transaction.commit().map_err(database)?;
@@ -255,7 +264,10 @@ mod tests {
             )
             .unwrap();
         connection
-            .execute("INSERT INTO commands VALUES ('node-op', 'hash', ?, '{}', 'agent')", [status])
+            .execute(
+                "INSERT INTO commands VALUES ('node-op', 'hash', ?, '{}', 'agent')",
+                [status],
+            )
             .unwrap();
     }
 
@@ -277,7 +289,15 @@ mod tests {
     #[test]
     fn an_interrupted_command_or_an_untracked_fence_refuses() {
         let journal = test_journal("decommission-untracked");
-        assert!(apply(&intent(1, "task-1", "delete"), &journal, "agent", &mut uncertain).is_err());
+        assert!(
+            apply(
+                &intent(1, "task-1", "delete"),
+                &journal,
+                "agent",
+                &mut uncertain
+            )
+            .is_err()
+        );
         assert!(prepare(&journal, COMMAND, "agent", None).is_err());
         let connection = Connection::open(&journal).unwrap();
         connection
@@ -289,11 +309,17 @@ mod tests {
     #[test]
     fn an_empty_node_or_one_with_node_operations_only_is_fenced() {
         let empty = test_journal("decommission-empty");
-        assert_eq!(prepare(&empty, COMMAND, "agent", None).unwrap()["kind"], "decommission");
+        assert_eq!(
+            prepare(&empty, COMMAND, "agent", None).unwrap()["kind"],
+            "decommission"
+        );
         assert!(!empty.exists());
         let operations = test_journal("decommission-operations");
         commands_table(&operations, "succeeded");
-        assert_eq!(prepare(&operations, COMMAND, "agent", None).unwrap()["kind"], "decommission");
+        assert_eq!(
+            prepare(&operations, COMMAND, "agent", None).unwrap()["kind"],
+            "decommission"
+        );
         let unfinished = test_journal("decommission-unfinished");
         commands_table(&unfinished, "running");
         let err = prepare(&unfinished, COMMAND, "agent", None).unwrap_err();
@@ -316,18 +342,28 @@ mod tests {
         apply(&xray, &journal, "agent", &mut ok).unwrap();
         let calls = Mutex::new(Vec::new());
         let mut record_calls = |intent: &Intent, _| {
-            calls.lock().unwrap().push((intent.runtime_name.clone(), intent.action.clone()));
+            calls
+                .lock()
+                .unwrap()
+                .push((intent.runtime_name.clone(), intent.action.clone()));
             Ok(Response::ok())
         };
         prepare(&journal, COMMAND, "agent", Some(&mut record_calls)).unwrap();
         prepare(&journal, COMMAND, "agent", Some(&mut record_calls)).unwrap();
         assert_eq!(
             *calls.lock().unwrap(),
-            [("p_test".to_string(), "delete".to_string()), ("old_profile".into(), "delete".into())]
+            [
+                ("p_test".to_string(), "delete".to_string()),
+                ("old_profile".into(), "delete".into())
+            ]
         );
         let remaining: i64 = Connection::open(&journal)
             .unwrap()
-            .query_row("SELECT COUNT(*) FROM fences WHERE action!='delete'", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM fences WHERE action!='delete'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(remaining, 0);
         assert!(apply(&intent(3, "late", "ensure"), &journal, "agent", &mut ok).is_err());
@@ -364,6 +400,9 @@ mod tests {
         drop(connection);
         assert!(prepare(&journal, COMMAND, "agent", None).is_err());
         apply(&intent(2, "task-2", "delete"), &journal, "agent", &mut ok).unwrap();
-        assert_eq!(prepare(&journal, COMMAND, "agent", None).unwrap()["kind"], "decommission");
+        assert_eq!(
+            prepare(&journal, COMMAND, "agent", None).unwrap()["kind"],
+            "decommission"
+        );
     }
 }

@@ -7,6 +7,8 @@ use tonic::Status;
 
 use crate::agent::v1::{BackendNodeActionRequest, RuntimeCommandResponse};
 use crate::host::metrics as host_metrics;
+use crate::intents::leases::System;
+use crate::intents::operation::{self, Node};
 use crate::protocols::traffic;
 use crate::protocols::xray::revocation;
 use crate::state::AgentState;
@@ -47,7 +49,7 @@ impl AgentState {
                 return Err(Status::invalid_argument("progress is read-only"));
             }
             let value = read_operation_progress(
-                Path::new("/etc/node-plane/operation-progress"),
+                &self.journal().with_file_name("operation-progress"),
                 &req.command_id,
             );
             return Ok(RuntimeCommandResponse {
@@ -62,8 +64,8 @@ impl AgentState {
                 ));
             }
             let setting = |key: &str, default: &str| self.node_env_value(key, default);
-            let journal = Path::new("/etc/node-plane/profile-intents.sqlite3");
-            let snapshot = traffic::observe(&setting, journal, &req.intent_json)
+            let journal = self.journal();
+            let snapshot = traffic::observe(&setting, &journal, &req.intent_json)
                 .await
                 .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
             return Ok(RuntimeCommandResponse {
@@ -77,25 +79,10 @@ impl AgentState {
         let (action, recover, intent_json) =
             (req.action.clone(), req.recover, req.intent_json.clone());
         let state = self.clone();
-        let output = tokio::task::spawn_blocking(move || {
-            state.run_runtime_command(
-                "backend-node-operation.py",
-                &[
-                    req.action,
-                    req.command_id,
-                    req.intent_json,
-                    req.recover.to_string(),
-                ],
-            )
-        })
-        .await
-        .map_err(|_| Status::internal("node operation worker unavailable"))?
-        .map_err(|status| {
-            owner_conflict(status.message())
-                .unwrap_or_else(|| Status::failed_precondition("node operation needs attention"))
-        })?;
-        let mut value: Value = serde_json::from_str(&output)
-            .map_err(|_| Status::internal("invalid node operation response"))?;
+        let output = tokio::task::spawn_blocking(move || state.node_operation(&req))
+            .await
+            .map_err(|_| Status::internal("node operation worker unavailable"))??;
+        let mut value = output;
         if inspect
             && let (Some(metrics), Some(cpu)) = (
                 value.get_mut("host_metrics").and_then(Value::as_object_mut),
@@ -126,19 +113,60 @@ impl AgentState {
     }
 }
 
-/// The script refused a VPN runtime of another node before changing
-/// anything; this outcome is certain, unlike other failures.
-fn owner_conflict(message: &str) -> Option<Status> {
-    let (_, owner) = message.split_once("failed: runtime_owner_conflict: ")?;
-    let owner: String = owner
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        .take(64)
-        .collect();
-    Some(Status::failed_precondition(format!(
-        "runtime_owner_conflict: {}",
-        if owner.is_empty() { "unknown" } else { &owner }
-    )))
+impl AgentState {
+    /// A journaled node operation, a read of the node, or temporary access.
+    fn node_operation(&self, req: &BackendNodeActionRequest) -> Result<Value, Status> {
+        let runtime = self.node_runtime();
+        let journal = self.journal();
+        let attention = |err: String| {
+            eprintln!(
+                "node operation {} {} failed: {err}",
+                req.action, req.command_id
+            );
+            Status::failed_precondition("node operation needs attention")
+        };
+        if req.action == "inspect" {
+            return Ok(operation::inspect(&System, &runtime));
+        }
+        let intent: Value = serde_json::from_str(&req.intent_json)
+            .map_err(|_| Status::invalid_argument("invalid node operation intent"))?;
+        if req.action.starts_with("temporary_") {
+            let mut node = Node {
+                host: &System,
+                runtime: &runtime,
+            };
+            return operation::temporary(
+                &journal,
+                &self.instance_id,
+                &req.action,
+                &req.command_id,
+                &intent,
+                req.recover,
+                &mut node,
+            )
+            .map_err(attention);
+        }
+        operation::command(
+            &journal,
+            &runtime.env,
+            &runtime.tool(),
+            &self.instance_id,
+            &req.action,
+            &req.command_id,
+            &intent,
+            req.recover,
+            &mut |action, intent, lock, progress| {
+                operation::run(&System, &runtime, action, intent, lock, progress)
+            },
+        )
+        .map_err(|err| match err {
+            // Refused before any change: a certain outcome, unlike others.
+            operation::Error::OwnerConflict(owner) => {
+                Status::failed_precondition(format!("runtime_owner_conflict: {owner}"))
+            }
+            operation::Error::Failed(err) => attention(err),
+        })
+    }
 }
 
 pub(crate) fn read_operation_progress(directory: &Path, command_id: &str) -> Value {
@@ -176,16 +204,6 @@ pub(crate) fn read_operation_progress(directory: &Path, command_id: &str) -> Val
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn only_an_owner_refusal_keeps_its_reason() {
-        let status = super::owner_conflict(
-            "backend-node-operation.py failed: runtime_owner_conflict: ger2\n",
-        )
-        .unwrap();
-        assert_eq!(status.message(), "runtime_owner_conflict: ger2");
-        assert!(super::owner_conflict("backend-node-operation.py failed: boom").is_none());
-    }
-
     #[test]
     fn progress_lookup_is_bounded_read_only_and_checks_command_identity() {
         let directory = std::env::temp_dir().join(format!(

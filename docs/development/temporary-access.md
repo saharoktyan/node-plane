@@ -12,9 +12,9 @@ Unknown issuance remains blocked and is reconciled through observation. Failed r
 
 ## Independent enforcement
 
-`apply-profile-intent.py expire-leases` runs under the node mutation lock. It deletes expired/uncertain temporary identities and retains failed deletion work for retry.
+`node-plane-agent lease expire` runs under the node mutation lock. It deletes expired/uncertain temporary identities and retains failed deletion work for retry.
 
-Provisioning installs `node-plane-lease-expiry.service` and `.timer` before issuing credentials. The service runs `monitor-leases`, checking expiry every second in one process and logging only revocations. Failed revocation stops the worker and systemd retries it; the timer also starts the worker after boot or a stop. Updating the scheduler clears the old service's start-limit failure. Runtime synchronization upgrades existing scheduling units without renewing credentials.
+Provisioning installs `node-plane-lease-expiry.service` and `.timer` before issuing credentials. The service runs `node-plane-agent lease monitor`, checking expiry every second in one process and logging only revocations. Failed revocation stops the worker and systemd retries it; the timer also starts the worker after boot or a stop. Updating the scheduler clears the old service's start-limit failure. Runtime synchronization upgrades existing scheduling units without renewing credentials.
 
 `node-plane-leased-{protocol}.service` owns the relevant container restart, pruning expired identities before startup. Docker automatic restart is disabled for supervisor-owned containers.
 

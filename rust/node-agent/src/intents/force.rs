@@ -41,7 +41,9 @@ fn code(code: &str) -> String {
 
 /// A lowercase hyphenated UUID.
 fn uuid(value: &Value) -> Result<&str, String> {
-    let text = value.as_str().ok_or_else(|| code("force_invalid_request"))?;
+    let text = value
+        .as_str()
+        .ok_or_else(|| code("force_invalid_request"))?;
     crate::fencing::valid_force_identity(text)
         .then_some(text)
         .ok_or_else(|| code("force_invalid_identity"))
@@ -50,9 +52,10 @@ fn uuid(value: &Value) -> Result<&str, String> {
 fn node_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
-        && value.bytes().enumerate().all(|(index, b)| {
-            b.is_ascii_alphanumeric() || (index > 0 && matches!(b, b'_' | b'-'))
-        })
+        && value
+            .bytes()
+            .enumerate()
+            .all(|(index, b)| b.is_ascii_alphanumeric() || (index > 0 && matches!(b, b'_' | b'-')))
 }
 
 /// A checked ticket request.
@@ -69,7 +72,9 @@ pub(crate) struct Spec {
 fn protocols(list: &Value) -> bool {
     list.as_array().is_some_and(|items| {
         items.len() <= 2
-            && items.iter().all(|item| matches!(item.as_str(), Some("awg" | "xray")))
+            && items
+                .iter()
+                .all(|item| matches!(item.as_str(), Some("awg" | "xray")))
             && items
                 .iter()
                 .enumerate()
@@ -96,12 +101,21 @@ impl Spec {
         if !matches!(kind, "settings" | "profile" | "node") {
             return Err(invalid());
         }
-        let body = if kind == "node" { intent.get("intent") } else { Some(&map["intent"]) };
-        let body = body.and_then(Value::as_object).ok_or_else(|| code("force_invalid_identity"))?;
+        let body = if kind == "node" {
+            intent.get("intent")
+        } else {
+            Some(&map["intent"])
+        };
+        let body = body
+            .and_then(Value::as_object)
+            .ok_or_else(|| code("force_invalid_identity"))?;
         if body.get("command_id").and_then(Value::as_str) != Some(&command_id) {
             return Err(code("force_invalid_identity"));
         }
-        if !body.get("revision").is_some_and(|revision| revision.as_i64().is_some_and(|r| r >= 1)) {
+        if !body
+            .get("revision")
+            .is_some_and(|revision| revision.as_i64().is_some_and(|r| r >= 1))
+        {
             return Err(code("force_invalid_revision"));
         }
         if kind != "profile" && body.get("node_key").and_then(Value::as_str) != Some(node) {
@@ -125,7 +139,14 @@ impl Spec {
                 }
             }
             "settings" => {
-                let required = ["kind", "node_key", "command_id", "revision", "protocols", "settings"];
+                let required = [
+                    "kind",
+                    "node_key",
+                    "command_id",
+                    "revision",
+                    "protocols",
+                    "settings",
+                ];
                 let valid = required.iter().all(|key| body.contains_key(*key))
                     && body
                         .keys()
@@ -146,7 +167,9 @@ impl Spec {
             }
         }
         if kind != "profile" {
-            if !body.get("protocols").is_some_and(protocols) || !body.get("settings").is_some_and(Value::is_object) {
+            if !body.get("protocols").is_some_and(protocols)
+                || !body.get("settings").is_some_and(Value::is_object)
+            {
                 return Err(invalid());
             }
             if let Some(plan) = body.get("protocol_plan") {
@@ -161,7 +184,12 @@ impl Spec {
         // A node operation's fingerprint is its journal's: Python's default
         // separators.
         let fingerprint = sha256_hex(
-            if kind == "node" { sorted_dumps(&map["intent"]) } else { canonical(&map["intent"]) }.as_bytes(),
+            if kind == "node" {
+                sorted_dumps(&map["intent"])
+            } else {
+                canonical(&map["intent"])
+            }
+            .as_bytes(),
         );
         Ok(Self {
             ticket_id,
@@ -216,7 +244,10 @@ fn read_record(path: &Path) -> Result<Value, String> {
 /// one. An existing record must carry the same binding.
 fn publish(dir: &Path, path: &Path, value: Value) -> Result<Value, String> {
     let failed = |_| code("force_recovery_failed");
-    let staged = dir.join(format!(".staged-{}", crate::protocols::deploy::random_hex(8)?));
+    let staged = dir.join(format!(
+        ".staged-{}",
+        crate::protocols::deploy::random_hex(8)?
+    ));
     let result = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -238,7 +269,9 @@ fn publish(dir: &Path, path: &Path, value: Value) -> Result<Value, String> {
             }
             Err(err) => return Err(failed(err)),
         };
-        fs::File::open(dir).and_then(|dir| dir.sync_all()).map_err(failed)?;
+        fs::File::open(dir)
+            .and_then(|dir| dir.sync_all())
+            .map_err(failed)?;
         Ok(value)
     })();
     let _ = fs::remove_file(&staged);
@@ -246,7 +279,12 @@ fn publish(dir: &Path, path: &Path, value: Value) -> Result<Value, String> {
 }
 
 /// Publishes the ticket and the dispatch fence of the command.
-pub(crate) fn prepare(spec: &Spec, instance: &str, dir: &Path, journal: &Path) -> Result<Value, String> {
+pub(crate) fn prepare(
+    spec: &Spec,
+    instance: &str,
+    dir: &Path,
+    journal: &Path,
+) -> Result<Value, String> {
     if instance.is_empty() {
         return Err(code("force_instance_missing"));
     }
@@ -255,18 +293,19 @@ pub(crate) fn prepare(spec: &Spec, instance: &str, dir: &Path, journal: &Path) -
             return Err(code("force_journal_untrusted"));
         }
         let connection = open_readonly(journal).map_err(|_| code("force_recovery_failed"))?;
-        let row: Option<(String, String)> = if has_table(&connection, "commands").map_err(|_| code("force_recovery_failed"))? {
-            connection
-                .query_row(
-                    "SELECT fingerprint,status FROM commands WHERE id=?",
-                    [&spec.command_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()
-                .map_err(|_| code("force_recovery_failed"))?
-        } else {
-            None
-        };
+        let row: Option<(String, String)> =
+            if has_table(&connection, "commands").map_err(|_| code("force_recovery_failed"))? {
+                connection
+                    .query_row(
+                        "SELECT fingerprint,status FROM commands WHERE id=?",
+                        [&spec.command_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|_| code("force_recovery_failed"))?
+            } else {
+                None
+            };
         if let Some((fingerprint, status)) = row {
             if fingerprint != spec.fingerprint {
                 return Err(code("force_command_conflict"));
@@ -287,13 +326,20 @@ pub(crate) fn prepare(spec: &Spec, instance: &str, dir: &Path, journal: &Path) -
         &dir.join(format!("command-{}.fence", spec.command_id)),
         json!({"binding": spec.binding, "command_id": spec.command_id, "node_key": spec.node_key}),
     )?;
-    Ok(json!({"ticket_id": spec.ticket_id, "node_key": spec.node_key,
-              "restart_required": ticket["old_instance"] == instance}))
+    Ok(
+        json!({"ticket_id": spec.ticket_id, "node_key": spec.node_key,
+              "restart_required": ticket["old_instance"] == instance}),
+    )
 }
 
 /// Closes the command with a forced receipt and advances its fence, once a
 /// restarted agent holds the journal lock nobody else holds.
-pub(crate) fn retire(spec: &Spec, instance: &str, dir: &Path, journal: &Path) -> Result<Value, String> {
+pub(crate) fn retire(
+    spec: &Spec,
+    instance: &str,
+    dir: &Path,
+    journal: &Path,
+) -> Result<Value, String> {
     let dir = private_directory(dir)?;
     let ticket = read_record(&dir.join(format!("{}.json", spec.ticket_id)))?;
     let fence = read_record(&dir.join(format!("command-{}.fence", spec.command_id)))?;
@@ -333,7 +379,11 @@ pub(crate) fn retire(spec: &Spec, instance: &str, dir: &Path, journal: &Path) ->
         )
         .optional()
         .map_err(|err| failed(database(err)))?;
-    let terminal = if spec.kind == "node" { "retired" } else { "superseded" };
+    let terminal = if spec.kind == "node" {
+        "retired"
+    } else {
+        "superseded"
+    };
     let receipt = spec.receipt();
     if let Some((fingerprint, status, response)) = &row {
         if *fingerprint != spec.fingerprint {
@@ -363,7 +413,13 @@ pub(crate) fn retire(spec: &Spec, instance: &str, dir: &Path, journal: &Path) ->
     } else {
         transaction.execute(
             "INSERT INTO commands VALUES (?,?,?,?,?)",
-            params![spec.command_id, spec.fingerprint, terminal, stored, instance],
+            params![
+                spec.command_id,
+                spec.fingerprint,
+                terminal,
+                stored,
+                instance
+            ],
         )
     };
     changed.map_err(|err| failed(database(err)))?;
@@ -422,10 +478,14 @@ mod tests {
             "settings" => json!({"kind": "node_settings", "command_id": command, "node_key": NODE,
                 "revision": revision, "protocols": ["awg"],
                 "settings": {"public_host": "127.0.0.1", "awg_port": 51820}}),
-            "profile" => json!({"command_id": command, "protocol": "awg", "runtime_name": "test-user",
-                "revision": revision, "action": "ensure", "uuid": "", "short_id": ""}),
-            _ => json!({"action": "sync_runtime", "intent": {"command_id": command, "node_key": NODE,
-                "revision": revision, "protocols": ["awg"], "settings": {"awg_port": 51820}}}),
+            "profile" => {
+                json!({"command_id": command, "protocol": "awg", "runtime_name": "test-user",
+                "revision": revision, "action": "ensure", "uuid": "", "short_id": ""})
+            }
+            _ => {
+                json!({"action": "sync_runtime", "intent": {"command_id": command, "node_key": NODE,
+                "revision": revision, "protocols": ["awg"], "settings": {"awg_port": 51820}}})
+            }
         };
         json!({"ticket_id": command.replacen("-0000-", "-1111-", 1), "node_key": NODE, "command_id": command,
                "kind": kind, "intent": intent})
@@ -438,7 +498,10 @@ mod tests {
 
     fn store(name: &str) -> Store {
         let journal = test_journal(&format!("force-{name}"));
-        Store { dir: journal.with_file_name("tickets"), journal }
+        Store {
+            dir: journal.with_file_name("tickets"),
+            journal,
+        }
     }
 
     impl Store {
@@ -451,7 +514,10 @@ mod tests {
         }
 
         fn query<T: rusqlite::types::FromSql>(&self, sql: &str) -> T {
-            Connection::open(&self.journal).unwrap().query_row(sql, [], |row| row.get(0)).unwrap()
+            Connection::open(&self.journal)
+                .unwrap()
+                .query_row(sql, [], |row| row.get(0))
+                .unwrap()
         }
     }
 
@@ -462,8 +528,14 @@ mod tests {
             let mut node = spec("node", 2, &id(seed as u8));
             node["intent"]["action"] = json!(action);
             store.prepare(&node, "before").unwrap();
-            assert_eq!(store.retire(&node, "after").unwrap()["outcome_unknown"], true);
-            let status: String = store.query(&format!("SELECT status FROM commands WHERE id='{}'", id(seed as u8)));
+            assert_eq!(
+                store.retire(&node, "after").unwrap()["outcome_unknown"],
+                true
+            );
+            let status: String = store.query(&format!(
+                "SELECT status FROM commands WHERE id='{}'",
+                id(seed as u8)
+            ));
             assert_eq!(status, "retired");
         }
     }
@@ -472,15 +544,27 @@ mod tests {
     fn retirement_needs_a_restarted_agent_and_a_free_journal_lock() {
         let store = store("restart");
         let settings = spec("settings", 2, &id(1));
-        assert_eq!(store.prepare(&settings, "").unwrap_err(), "force_instance_missing");
+        assert_eq!(
+            store.prepare(&settings, "").unwrap_err(),
+            "force_instance_missing"
+        );
         let ticket = store.prepare(&settings, "inst-1").unwrap();
         assert_eq!(ticket["restart_required"], true);
-        assert_eq!(store.retire(&settings, "inst-1").unwrap_err(), "force_restart_required");
+        assert_eq!(
+            store.retire(&settings, "inst-1").unwrap_err(),
+            "force_restart_required"
+        );
         let orphan = Lock::exclusive(&store.journal).unwrap();
-        assert_eq!(store.retire(&settings, "inst-2").unwrap_err(), "force_execution_still_running");
+        assert_eq!(
+            store.retire(&settings, "inst-2").unwrap_err(),
+            "force_execution_still_running"
+        );
         drop(orphan);
         let receipt = store.retire(&settings, "inst-2").unwrap();
-        assert_eq!((receipt["forced"].clone(), receipt["node_key"].clone()), (json!(true), json!(NODE)));
+        assert_eq!(
+            (receipt["forced"].clone(), receipt["node_key"].clone()),
+            (json!(true), json!(NODE))
+        );
     }
 
     #[test]
@@ -491,16 +575,42 @@ mod tests {
             change(&mut bad);
             assert_eq!(Spec::check(&bad).err().as_deref(), Some(expected), "{bad}");
         };
-        reject(&|spec| { spec.as_object_mut().unwrap().remove("kind"); }, "force_invalid_request");
-        reject(&|spec| spec["ticket_id"] = json!("0".repeat(32)), "force_invalid_identity");
-        reject(&|spec| spec["ticket_id"] = json!("not-a-uuid"), "force_invalid_identity");
-        reject(&|spec| spec["node_key"] = json!("!invalid_node!"), "force_invalid_identity");
-        reject(&|spec| spec["command_id"] = json!(id(9)), "force_invalid_identity");
-        reject(&|spec| spec["intent"]["revision"] = json!(0), "force_invalid_revision");
-        reject(&|spec| spec["intent"]["revision"] = json!("two"), "force_invalid_revision");
+        reject(
+            &|spec| {
+                spec.as_object_mut().unwrap().remove("kind");
+            },
+            "force_invalid_request",
+        );
+        reject(
+            &|spec| spec["ticket_id"] = json!("0".repeat(32)),
+            "force_invalid_identity",
+        );
+        reject(
+            &|spec| spec["ticket_id"] = json!("not-a-uuid"),
+            "force_invalid_identity",
+        );
+        reject(
+            &|spec| spec["node_key"] = json!("!invalid_node!"),
+            "force_invalid_identity",
+        );
+        reject(
+            &|spec| spec["command_id"] = json!(id(9)),
+            "force_invalid_identity",
+        );
+        reject(
+            &|spec| spec["intent"]["revision"] = json!(0),
+            "force_invalid_revision",
+        );
+        reject(
+            &|spec| spec["intent"]["revision"] = json!("two"),
+            "force_invalid_revision",
+        );
         let mut profile = spec("profile", 2, &id(1));
         profile["intent"]["action"] = json!("restart");
-        assert_eq!(Spec::check(&profile).err().as_deref(), Some("force_invalid_request"));
+        assert_eq!(
+            Spec::check(&profile).err().as_deref(),
+            Some("force_invalid_request")
+        );
         assert!(Spec::check(&json!({"sensitive_token": "secret"})).is_err());
     }
 
@@ -512,14 +622,16 @@ mod tests {
             store.prepare(&settings, "old").unwrap();
             store.retire(&settings, "new").unwrap();
         }
-        let revision: i64 = store.query("SELECT revision FROM node_settings_fence WHERE node_key='node-1'");
+        let revision: i64 =
+            store.query("SELECT revision FROM node_settings_fence WHERE node_key='node-1'");
         assert_eq!(revision, 8);
         for (seed, revision) in [(4, 5), (5, 3)] {
             let profile = spec("profile", revision, &id(seed));
             store.prepare(&profile, "old").unwrap();
             store.retire(&profile, "new").unwrap();
         }
-        let command: String = store.query("SELECT command_id FROM fences WHERE profile='test-user'");
+        let command: String =
+            store.query("SELECT command_id FROM fences WHERE profile='test-user'");
         assert_eq!(command, id(4));
     }
 
@@ -529,18 +641,27 @@ mod tests {
         let profile = spec("profile", 2, &id(1));
         store.prepare(&profile, "inst-1").unwrap();
         let fence = read_record(&store.dir.join(format!("command-{}.fence", id(1)))).unwrap();
-        assert_eq!((fence["command_id"].clone(), fence["node_key"].clone()), (json!(id(1)), json!(NODE)));
+        assert_eq!(
+            (fence["command_id"].clone(), fence["node_key"].clone()),
+            (json!(id(1)), json!(NODE))
+        );
         let receipt = store.retire(&profile, "inst-2").unwrap();
         let status: String = store.query("SELECT status FROM commands");
         assert_eq!(status, "superseded");
         let original = Intent::parse(&profile["intent"]).unwrap();
-        let err = apply(&original, &store.journal, "inst-3", &mut |_: &Intent, _| Ok(Response::ok())).unwrap_err();
+        let err = apply(&original, &store.journal, "inst-3", &mut |_: &Intent, _| {
+            Ok(Response::ok())
+        })
+        .unwrap_err();
         assert_eq!(err, "previous command did not complete successfully");
         store.prepare(&profile, "inst-2").unwrap();
         assert_eq!(store.retire(&profile, "inst-3").unwrap(), receipt);
         let mut changed = profile.clone();
         changed["intent"]["revision"] = json!(99);
-        assert_eq!(store.prepare(&changed, "inst-4").unwrap_err(), "force_command_conflict");
+        assert_eq!(
+            store.prepare(&changed, "inst-4").unwrap_err(),
+            "force_command_conflict"
+        );
     }
 
     #[test]
@@ -551,15 +672,32 @@ mod tests {
         let connection = Connection::open(&store.journal).unwrap();
         commands_schema(&connection).unwrap();
         connection
-            .execute("INSERT INTO commands VALUES (?, ?, 'succeeded', '{}', 'inst-0')", params![id(1), checked.fingerprint])
+            .execute(
+                "INSERT INTO commands VALUES (?, ?, 'succeeded', '{}', 'inst-0')",
+                params![id(1), checked.fingerprint],
+            )
             .unwrap();
-        assert_eq!(store.prepare(&settings, "inst-1").unwrap_err(), "force_command_already_terminal");
+        assert_eq!(
+            store.prepare(&settings, "inst-1").unwrap_err(),
+            "force_command_already_terminal"
+        );
         let dir = private_directory(&store.dir).unwrap();
-        publish(&dir, &dir.join(format!("{}.json", checked.ticket_id)),
-                json!({"binding": checked.binding, "old_instance": "inst-1"})).unwrap();
-        publish(&dir, &dir.join(format!("command-{}.fence", id(1))),
-                json!({"binding": checked.binding, "command_id": id(1), "node_key": NODE})).unwrap();
-        assert_eq!(store.retire(&settings, "inst-2").unwrap_err(), "force_command_already_terminal");
+        publish(
+            &dir,
+            &dir.join(format!("{}.json", checked.ticket_id)),
+            json!({"binding": checked.binding, "old_instance": "inst-1"}),
+        )
+        .unwrap();
+        publish(
+            &dir,
+            &dir.join(format!("command-{}.fence", id(1))),
+            json!({"binding": checked.binding, "command_id": id(1), "node_key": NODE}),
+        )
+        .unwrap();
+        assert_eq!(
+            store.retire(&settings, "inst-2").unwrap_err(),
+            "force_command_already_terminal"
+        );
         let status: String = store.query("SELECT status FROM commands");
         assert_eq!(status, "succeeded");
     }
@@ -570,7 +708,10 @@ mod tests {
         let profile = spec("profile", 2, &id(1));
         store.prepare(&profile, "inst-1").unwrap();
         assert!(!store.journal.exists());
-        assert_eq!(store.retire(&profile, "inst-2").unwrap()["command_id"], id(1));
+        assert_eq!(
+            store.retire(&profile, "inst-2").unwrap()["command_id"],
+            id(1)
+        );
         assert!(store.journal.exists());
     }
 
@@ -582,16 +723,28 @@ mod tests {
         fs::create_dir_all(base.join("real")).unwrap();
         std::os::unix::fs::symlink(base.join("real"), base.join("linked")).unwrap();
         let checked = Spec::check(&settings).unwrap();
-        assert_eq!(prepare(&checked, "inst-1", &base.join("linked"), &store.journal).unwrap_err(), "force_ticket_store_untrusted");
+        assert_eq!(
+            prepare(&checked, "inst-1", &base.join("linked"), &store.journal).unwrap_err(),
+            "force_ticket_store_untrusted"
+        );
         fs::create_dir_all(base.join("open")).unwrap();
         fs::set_permissions(base.join("open"), fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(prepare(&checked, "inst-1", &base.join("open"), &store.journal).unwrap_err(), "force_ticket_store_untrusted");
+        assert_eq!(
+            prepare(&checked, "inst-1", &base.join("open"), &store.journal).unwrap_err(),
+            "force_ticket_store_untrusted"
+        );
         fs::write(base.join("real.sqlite3"), "").unwrap();
         std::os::unix::fs::symlink(base.join("real.sqlite3"), base.join("link.sqlite3")).unwrap();
-        assert_eq!(prepare(&checked, "inst-1", &store.dir, &base.join("link.sqlite3")).unwrap_err(), "force_journal_untrusted");
+        assert_eq!(
+            prepare(&checked, "inst-1", &store.dir, &base.join("link.sqlite3")).unwrap_err(),
+            "force_journal_untrusted"
+        );
         store.prepare(&settings, "inst-1").unwrap();
         fs::write(sidecar(&store.journal, ".disabled"), "").unwrap();
-        assert_eq!(store.retire(&settings, "inst-2").unwrap_err(), "force_agent_removal_pending");
+        assert_eq!(
+            store.retire(&settings, "inst-2").unwrap_err(),
+            "force_agent_removal_pending"
+        );
     }
 
     #[test]
@@ -600,11 +753,18 @@ mod tests {
         let settings = spec("settings", 2, &id(1));
         let first = store.prepare(&settings, "inst-1").unwrap();
         assert_eq!(store.prepare(&settings, "inst-1").unwrap(), first);
-        let ticket = read_record(&store.dir.join(format!("{}.json", Spec::check(&settings).unwrap().ticket_id))).unwrap();
+        let ticket = read_record(&store.dir.join(format!(
+            "{}.json",
+            Spec::check(&settings).unwrap().ticket_id
+        )))
+        .unwrap();
         assert_eq!(ticket["old_instance"], "inst-1");
         let mut conflicting = settings.clone();
         conflicting["node_key"] = json!("node-2");
         conflicting["intent"]["node_key"] = json!("node-2");
-        assert_eq!(store.prepare(&conflicting, "inst-1").unwrap_err(), "force_ticket_conflict");
+        assert_eq!(
+            store.prepare(&conflicting, "inst-1").unwrap_err(),
+            "force_ticket_conflict"
+        );
     }
 }

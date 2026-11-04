@@ -141,15 +141,6 @@ class AgentContainerFaultTests(unittest.TestCase):
             openssl('x509', '-req', '-in', identity+'.csr', '-CA', 'ca.crt',
                     '-CAkey', 'ca.key', '-CAcreateserial', '-days', '1',
                     '-extfile', str(extension), '-out', identity+'.crt')
-        shutil.copy(REPO/'runtime_assets/apply-profile-intent.py', cls.root/'production.py')
-        (cls.root/'apply-profile-intent.py').write_text('''#!/usr/bin/python3
-import subprocess, sys
-result = subprocess.run(['/usr/bin/python3', '/test/production.py', *sys.argv[1:]],
-                        capture_output=True)
-sys.stdout.buffer.write(result.stdout)
-sys.stderr.buffer.write(result.stderr)
-sys.exit(result.returncode)
-''')
         (cls.root/'xray-add-user-existing.sh').write_text('''#!/usr/bin/python3
 import os, pathlib, time
 root = pathlib.Path('/test')
@@ -163,8 +154,7 @@ with (root/'counter').open('a') as stream:
 if mode == 'during_mutation': pause()
 print('OK')
 ''')
-        for name in ('apply-profile-intent.py', 'xray-add-user-existing.sh'):
-            (cls.root/name).chmod(0o755)
+        (cls.root/'xray-add-user-existing.sh').chmod(0o755)
         (cls.root/'agent.toml').write_text('''node_key = "fault-node"
 listen_addr = "0.0.0.0:50061"
 heartbeat_seconds = 1
@@ -279,10 +269,10 @@ tls_client_ca_path = "/test/ca.crt"
         self.assertLessEqual(metrics['cpu_sample_age_seconds'],15)
         self.assertEqual(self.count(),'0')
 
-    def test_agent_only_recovers_missing_helper_and_journal_and_fences_late_apply(self):
+    def test_agent_only_recovers_a_missing_journal_and_fences_late_apply(self):
         import json
         docker('exec', self.name, 'sh', '-c',
-            'rm /test/apply-profile-intent.py; printf foreign > /test/config.json; printf SERVER_KEY=other > /etc/node-plane/node.env')
+            'printf foreign > /test/config.json; printf SERVER_KEY=other > /etc/node-plane/node.env')
         request = self.pb.ApplyBackendNodeSettingsRequest(node_key='fault-node', command_id=str(uuid4()),
             desired_revision=1, protocols_json='[]', settings_json=json.dumps({'ipv6_outbound': 'on', 'awg_parameters': {}}))
         with self.assertRaises(grpc.RpcError):
@@ -292,15 +282,13 @@ tls_client_ca_path = "/test/ca.crt"
         self.assertEqual(json.loads(first.payload_json), {'config_matches': False, 'containers_running': False})
         self.assertEqual(self.stub.ResolveBackendNodeSettings(request, timeout=5).payload_json, first.payload_json)
         self.assertEqual(self.journal_status(), 'superseded')
-        # A later deployment of runtime files must still honor the tombstone.
-        docker('cp', str(self.root/'apply-profile-intent.py'), self.name+':/test/apply-profile-intent.py')
+        # A late original request still meets the tombstone.
         with self.assertRaises(grpc.RpcError):
             self.stub.ApplyBackendNodeSettings(request, timeout=5)
         self.assertEqual(self.count(), '0')
         self.assertEqual(docker('exec', self.name, 'cat', '/test/config.json').stdout, 'foreign')
         self.assertEqual(docker('exec', self.name, 'cat', '/etc/node-plane/node.env').stdout, 'SERVER_KEY=other')
         # Control-only journals remain verifiable without invoking runtime cleanup.
-        docker('exec', self.name, 'rm', '/test/apply-profile-intent.py')
         self.stub.PrepareDecommission(self.pb.DecommissionRequest(command_id=str(uuid4())), timeout=5)
         self.assertEqual(docker('exec', self.name, 'test', '-e', '/etc/node-plane/profile-intents.sqlite3.disabled').returncode, 0)
         self.assertEqual(self.count(), '0')

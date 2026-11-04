@@ -38,6 +38,14 @@
 - Prepare node decommission and run forced recovery in the node agent;
   `force-recovery.py` is removed. Tickets and dispatch fences keep their
   location and format.
+- Apply node settings and run backend node operations (bootstrap,
+  reinstalls, runtime cleanup, ports, inspection, temporary access) in the
+  node agent; `backend-node-operation.py`, `awg-peer-state.py`,
+  `awg_ipv6.py` and the node copy of `awg_ports.py` are removed, and
+  `apply-profile-intent.py` only starts the agent for lease units of
+  earlier releases. `node-plane-agent node-operation` runs one operation
+  from a shell. A settings command with neither protocols nor a protocol
+  removal is now refused before it is journaled.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

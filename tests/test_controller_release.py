@@ -148,14 +148,14 @@ class ControllerReleaseTests(unittest.TestCase):
             name = 'runtime_assets/' + entry['asset_path']
             self.assertEqual((self.root / 'runtime-copy' / name).read_bytes(),
                              (ROOT / name).read_bytes())
-        (self.source / 'runtime_assets/awg_ports.py').unlink()
+        (self.source / 'runtime_assets/awg_profile.py').unlink()
         subprocess.run(['git', '-C', str(self.source), 'add', '-u'], check=True, timeout=30)
-        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_ports.py'):
+        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_profile.py'):
             release.build(self.source, self.root / 'incomplete.tar.gz', self.tag, self.commit)
 
     def test_manifest_checksums_do_not_hide_missing_runtime_dependency(self):
         manifest, contents = release.verify(self.archive)
-        name = 'runtime_assets/awg_ports.py'
+        name = 'runtime_assets/awg_profile.py'
         contents.pop(name)
         manifest['files'].pop(name)
         contents[release.MANIFEST] = json.dumps(manifest).encode()
@@ -165,7 +165,7 @@ class ControllerReleaseTests(unittest.TestCase):
                 info = tarfile.TarInfo(name)
                 info.size = len(value)
                 output.addfile(info, io.BytesIO(value))
-        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_ports.py'):
+        with self.assertRaisesRegex(ValueError, 'Missing runtime asset: awg_profile.py'):
             release.extract(incomplete, self.root / 'incomplete')
         self.assertFalse((self.root / 'incomplete').exists())
 

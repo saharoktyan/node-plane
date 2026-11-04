@@ -1,10 +1,5 @@
 [
   {
-    "target_path": "/opt/node-plane-runtime/awg_ports.py",
-    "asset_path": "awg_ports.py",
-    "mode": "0644"
-  },
-  {
     "target_path": "/etc/node-plane/node.env.example",
     "asset_path": "node.env.example",
     "mode": "0644"
@@ -85,28 +80,13 @@
     "mode": "0755"
   },
   {
-    "target_path": "/opt/node-plane-runtime/awg-peer-state.py",
-    "asset_path": "awg-peer-state.py",
-    "mode": "0644"
-  },
-  {
     "target_path": "/opt/node-plane-runtime/inspect-profile.sh",
     "asset_path": "inspect-profile.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/backend-node-operation.py",
-    "asset_path": "backend-node-operation.py",
     "mode": "0755"
   },
   {
     "target_path": "/opt/node-plane-runtime/apply-profile-intent.py",
     "asset_path": "apply-profile-intent.py",
     "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/awg_ipv6.py",
-    "asset_path": "awg_ipv6.py",
-    "mode": "0644"
   }
 ]

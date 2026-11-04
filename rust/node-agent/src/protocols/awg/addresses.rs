@@ -1,6 +1,5 @@
 //! Tunnel addresses: a stable IPv6 address for every IPv4 peer address,
-//! and full-tunnel capture for both families. Replaces `awg_ipv6.py`, which
-//! stays for `awg-peer-state.py` of the profile intent journal.
+//! and full-tunnel capture for both families. Replaces `awg_ipv6.py`.
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// `fd42:6e70:6177:2::/64`; a peer's IPv4 address is its host part.

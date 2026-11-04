@@ -7,16 +7,21 @@
 //! commands. One flock on `<journal>.lock` serializes every mutation of the
 //! node, and the mutation subprocesses inherit it.
 //!
-//! `apply-profile-intent.py` shares the journal for the commands not moved
-//! here yet; both keep its schema.
+//! The schema is the one `apply-profile-intent.py` of earlier releases
+//! kept.
+pub(crate) mod apply;
 pub(crate) mod decommission;
 pub(crate) mod expiry;
 pub(crate) mod force;
 pub(crate) mod leases;
 pub(crate) mod legacy;
+pub(crate) mod operation;
 pub(crate) mod profile;
+pub(crate) mod runtime;
 pub(crate) mod scheduler;
+pub(crate) mod settings;
 pub(crate) mod supervisor;
+pub(crate) mod verify;
 
 use std::fs;
 use std::os::fd::{AsRawFd, RawFd};
@@ -39,7 +44,7 @@ pub(crate) fn journal_path() -> PathBuf {
 }
 
 /// The agent instance a subcommand records; the expiry service has none.
-fn instance() -> String {
+pub(crate) fn instance() -> String {
     std::env::var("NODE_PLANE_AGENT_INSTANCE_ID").unwrap_or_else(|_| "standalone".into())
 }
 
@@ -149,6 +154,14 @@ impl Lock {
     pub(crate) fn exclusive(journal: &Path) -> Result<Self, String> {
         let file = Self::open(journal)?;
         file.lock()
+            .map_err(|err| format!("journal lock unavailable: {err}"))?;
+        Ok(Self(file))
+    }
+
+    /// Waits for running mutations; readers share it.
+    pub(crate) fn shared(journal: &Path) -> Result<Self, String> {
+        let file = Self::open(journal)?;
+        file.lock_shared()
             .map_err(|err| format!("journal lock unavailable: {err}"))?;
         Ok(Self(file))
     }
@@ -373,7 +386,10 @@ mod tests {
             canonical(&json!({"b": [1, true, null], "a": "é\n\u{1}\"\\/"})),
             r#"{"a":"\u00e9\n\u0001\"\\/","b":[1,true,null]}"#
         );
-        assert_eq!(sorted_dumps(&json!({"b": [1, 2], "a": {"c": "d"}})), r#"{"a": {"c": "d"}, "b": [1, 2]}"#);
+        assert_eq!(
+            sorted_dumps(&json!({"b": [1, 2], "a": {"c": "d"}})),
+            r#"{"a": {"c": "d"}, "b": [1, 2]}"#
+        );
     }
 
     #[test]

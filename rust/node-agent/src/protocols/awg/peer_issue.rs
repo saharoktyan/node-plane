@@ -1,7 +1,7 @@
 //! `node-plane-agent awg-peer add NAME`: one AWG peer with its client config
 //! and AmneziaVPN key. Replaces `awg-add-user.sh` and the restore path of
-//! `awg-peer-state.py`; the profile intent journal still runs
-//! `awg-add-user.sh`, which only starts this subcommand.
+//! `awg-peer-state.py`; profile intents still run `awg-add-user.sh`, which
+//! only starts this subcommand.
 //!
 //! An issued peer keeps its config in `<clients>/<name>.txt`, and a repeated
 //! add returns it. A revoked peer comes back from its archive with the same
@@ -138,7 +138,7 @@ pub(crate) struct Issue {
     pub(crate) keepalive: String,
 }
 
-/// AllowedIPs lines get the peer's managed IPv6 address (`awg_ipv6.migrate`).
+/// AllowedIPs lines get the peer's managed IPv6 address.
 fn migrate_peer(block: &str) -> Result<String, String> {
     let mut seen_peer = false;
     let mut lines = Vec::new();

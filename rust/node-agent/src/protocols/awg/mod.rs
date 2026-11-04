@@ -7,6 +7,7 @@ pub(crate) mod inspection;
 pub(crate) mod peer_issue;
 pub(crate) mod peer_sync;
 pub(crate) mod peers;
+pub(crate) mod ports;
 pub(crate) mod rate;
 pub(crate) mod refresh;
 pub(crate) mod runtime;

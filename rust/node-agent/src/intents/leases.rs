@@ -44,6 +44,17 @@ pub(crate) trait Host {
         self.run(args, timeout)
             .is_ok_and(|output| output.code == Some(0))
     }
+
+    /// Whether `program` is on PATH, like `shutil.which`.
+    fn installed(&self, program: &str) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path).any(|dir| {
+                fs::metadata(dir.join(program))
+                    .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            })
+        })
+    }
 }
 
 /// The real host.
@@ -344,6 +355,58 @@ pub(crate) mod fake {
 
         pub(crate) fn ran(&self, args: &[&str]) -> bool {
             self.calls.borrow().iter().any(|call| call == args)
+        }
+    }
+
+    /// The exit code and stdout of a command.
+    type Answer = Box<dyn Fn(&[&str]) -> (i32, String)>;
+
+    /// A host whose commands an answer function handles; it records them.
+    pub(crate) struct Scripted {
+        pub(crate) answer: Answer,
+        pub(crate) programs: Vec<&'static str>,
+        pub(crate) calls: RefCell<Vec<Vec<String>>>,
+    }
+
+    impl Scripted {
+        pub(crate) fn new(answer: impl Fn(&[&str]) -> (i32, String) + 'static) -> Self {
+            Self {
+                answer: Box::new(answer),
+                programs: vec!["docker", "ufw"],
+                calls: RefCell::new(Vec::new()),
+            }
+        }
+
+        /// The recorded commands that start with `prefix`.
+        pub(crate) fn ran(&self, prefix: &[&str]) -> Vec<Vec<String>> {
+            self.calls
+                .borrow()
+                .iter()
+                .filter(|call| {
+                    call.iter()
+                        .map(String::as_str)
+                        .take(prefix.len())
+                        .eq(prefix.iter().copied())
+                })
+                .cloned()
+                .collect()
+        }
+    }
+
+    impl Host for Scripted {
+        fn run(&self, args: &[&str], _: Option<u64>) -> Result<Output, String> {
+            self.calls
+                .borrow_mut()
+                .push(args.iter().map(|arg| arg.to_string()).collect());
+            let (code, stdout) = (self.answer)(args);
+            Ok(Output {
+                code: Some(code),
+                stdout,
+            })
+        }
+
+        fn installed(&self, program: &str) -> bool {
+            self.programs.contains(&program)
         }
     }
 

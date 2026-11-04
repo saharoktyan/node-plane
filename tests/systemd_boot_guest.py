@@ -3,7 +3,6 @@
 Never run against a production installation. This script changes lease deadlines
 in its disposable journal; product durations remain 12h / 1d / 3d.
 """
-import importlib.util
 import json
 from pathlib import Path
 import sqlite3
@@ -18,25 +17,38 @@ JOURNAL=Path('/etc/node-plane/profile-intents.sqlite3')
 STATE=Path('/root/boot-test-state.json')
 def run(*args):
     return subprocess.run(args,check=True,capture_output=True,text=True,timeout=90).stdout.strip()
-def load(name,file):
-    spec=importlib.util.spec_from_file_location(name,ROOT/file)
-    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 if (subprocess.run(['systemd-detect-virt'],capture_output=True,text=True).stdout.strip()!='qemu'
         or Path('/etc/hostname').read_text().strip()!='np-boot-test'
         or not Path('/root/boot-fixture-ready').is_file()):
     raise SystemExit('This check requires the explicitly prepared disposable np-boot-test QEMU guest')
-engine=load('boot_intents','apply-profile-intent.py')
+def operation(action,intent,recover=False):
+    """A node operation through the installed agent, as the controller runs it."""
+    return json.loads(run('/usr/local/bin/node-plane-agent','node-operation',action,intent['command_id'],
+                          json.dumps(intent),*(['--recover'] if recover else [])))
+def ready(protocol):
+    """Expiry enforcement of a protocol, as the agent reports it."""
+    state=json.loads(STATE.read_text())
+    return operation('temporary_status',state['protocols'][protocol]['valid'],recover=True)['enforcement_ready']
+def running(container):
+    result=subprocess.run(['docker','inspect','-f','{{.State.Running}}',container],capture_output=True,text=True,timeout=30)
+    return result.stdout.strip()=='true'
 def xray_users(tag):
     # The container's Xray CLI: the guest needs no agent binary for this read.
     response=json.loads(run('docker','exec','xray','xray','api','inbounduser','--server=127.0.0.1:10085','-tag='+tag))
     return {user['email']:user for user in response.get('users',[]) if user.get('email')}
 def issue(protocol,name,temporary=False):
+    """A permanent profile through its entry point; a temporary one, with its
+    lease and expiry units, through the agent. Returns the temporary intent."""
     intent=dict(command_id=str(uuid4()),protocol=protocol,runtime_name=name,revision=1,
                 action='ensure',uuid=str(uuid4()) if protocol=='xray' else '',
                 short_id='0123456789abcdef' if protocol=='xray' else '')
-    if temporary:intent['lease_seconds']=43200
-    engine.apply(intent,JOURNAL,engine.run)
-    return name
+    if not temporary:
+        script='xray-add-user-existing.sh' if protocol=='xray' else 'awg-add-user.sh'
+        run(str(ROOT/script),name,*([intent['uuid'],intent['short_id']] if protocol=='xray' else []))
+        return intent
+    intent['lease_seconds']=43200
+    operation('temporary_ensure',intent)
+    return intent
 def setup():
     ROOT.joinpath('xray').mkdir(exist_ok=True)
     Path('/etc/node-plane').mkdir(exist_ok=True)
@@ -60,7 +72,6 @@ def setup():
     state={'boot_before':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'protocols':{}}
     for protocol in ('xray','awg'):
         issue(protocol,'permanent')
-        engine.ensure_lease_scheduler(protocol=protocol)
         state['protocols'][protocol]={'due':issue(protocol,'tmp_'+uuid4().hex,True),
                                      'valid':issue(protocol,'tmp_'+uuid4().hex,True)}
     STATE.write_text(json.dumps(state))
@@ -71,7 +82,7 @@ def arm():
     with sqlite3.connect(JOURNAL) as conn:
         for protocol,values in state['protocols'].items():
             conn.execute('UPDATE temporary_leases SET expires_at=? WHERE protocol=? AND profile=?',
-                 ((datetime.now(timezone.utc)+timedelta(seconds=2)).isoformat(),protocol,values['due']))
+                 ((datetime.now(timezone.utc)+timedelta(seconds=2)).isoformat(),protocol,values['due']['runtime_name']))
     state['boot_before']=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     STATE.write_text(json.dumps(state))
     print(json.dumps({'armed':'passed','boot_id':state['boot_before']}))
@@ -82,32 +93,33 @@ def verify():
     deadline=time.monotonic()+40
     while True:
         with sqlite3.connect(JOURNAL) as conn:
-            settled=all(conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',(p,v['due'])).fetchone()[0]=='expired' for p,v in state['protocols'].items())
-        if settled and all(engine.lease_enforcement_ready(p) for p in state['protocols']):break
+            settled=all(conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',(p,v['due']['runtime_name'])).fetchone()[0]=='expired' for p,v in state['protocols'].items())
+        if settled and all(ready(p) for p in state['protocols']):break
         if time.monotonic()>deadline:raise AssertionError('Lease services did not become healthy')
         time.sleep(.5)
     for protocol,values in state['protocols'].items():
-        assert engine.lease_enforcement_ready(protocol)
+        assert ready(protocol)
+        due,valid=values['due']['runtime_name'],values['valid']['runtime_name']
         with sqlite3.connect(JOURNAL) as conn:
             leases=dict(conn.execute('SELECT profile,status FROM temporary_leases WHERE protocol=?',(protocol,)))
-        assert leases[values['due']]=='expired',leases
-        assert leases[values['valid']]=='active',leases
+        assert leases[due]=='expired',leases
+        assert leases[valid]=='active',leases
         if protocol=='xray':
             for tag in ('reality-tcp','reality-xhttp'):
                 users=xray_users(tag)
-                assert 'permanent' in users and values['valid'] in users,users
-                assert values['due'] not in users,users
+                assert 'permanent' in users and valid in users,users
+                assert due not in users,users
         else:
             config=ROOT.joinpath('amnezia-awg/data/wg0.conf').read_text()
-            assert 'bootnode-permanent' in config and 'bootnode-'+values['valid'] in config
-            assert 'bootnode-'+values['due'] not in config
+            assert 'bootnode-permanent' in config and 'bootnode-'+valid in config
+            assert 'bootnode-'+due not in config
             assert len(run('docker','exec','amnezia-awg','wg','show','wg0','peers').splitlines())==2
     print(json.dumps({'boot_check':'passed','boot_id':boot,'old_boot_id':state['boot_before'],
                       'protocols':['AWG','VLESS'],'expired_absent':True,'permanent_preserved':True,
                       'valid_temporary_preserved':True,'agent':run('systemctl','is-active','node-plane-agent')}))
 def offline():
     run('systemctl','stop','node-plane-agent')
-    created={p:issue(p,'tmp_'+uuid4().hex,True) for p in ('awg','xray')}
+    created={p:issue(p,'tmp_'+uuid4().hex,True)['runtime_name'] for p in ('awg','xray')}
     with sqlite3.connect(JOURNAL) as conn:
         for protocol,name in created.items():
             conn.execute('UPDATE temporary_leases SET expires_at=? WHERE protocol=? AND profile=?',
@@ -125,7 +137,7 @@ def offline():
 def docker_restart():
     run('systemctl','restart','docker')
     deadline=time.monotonic()+40
-    while not all(engine.lease_enforcement_ready(p) for p in ('awg','xray')):
+    while not all(ready(p) for p in ('awg','xray')):
         if time.monotonic()>deadline:raise AssertionError('Docker restart did not recover supervisors')
         time.sleep(.5)
     print(json.dumps({'docker_restart':'passed'}))
@@ -143,26 +155,24 @@ def verify_guard():
     assert subprocess.run(['systemctl','is-active','--quiet','node-plane-lease-expiry.timer']).returncode!=0
     deadline=time.monotonic()+40
     for protocol,values in state['protocols'].items():
-        config,container,_=engine.leased_runtime_settings(protocol)
-        while True:
-            try:
-                if engine.leased_container(protocol,config,container)['State']['Running']:break
-            except Exception:pass
+        container='xray' if protocol=='xray' else 'amnezia-awg'
+        while not running(container):
             if time.monotonic()>deadline:raise AssertionError('Guard did not start '+protocol)
             time.sleep(.5)
-        assert not engine.lease_enforcement_ready(protocol),'Disabled expiry timer reported healthy'
+        assert not ready(protocol),'Disabled expiry timer reported healthy'
+        due,valid=values['due']['runtime_name'],values['valid']['runtime_name']
         with sqlite3.connect(JOURNAL) as conn:
             assert conn.execute('SELECT status FROM temporary_leases WHERE protocol=? AND profile=?',
-                                (protocol,values['due'])).fetchone()[0]=='revoking'
+                                (protocol,due)).fetchone()[0]=='revoking'
         if protocol=='xray':
             for tag in ('reality-tcp','reality-xhttp'):
                 users=xray_users(tag)
-                assert values['due'] not in users
-                assert 'permanent' in users and values['valid'] in users
+                assert due not in users
+                assert 'permanent' in users and valid in users
         else:
-            text=config.read_text()
-            assert 'bootnode-'+values['due'] not in text
-            assert 'bootnode-permanent' in text and 'bootnode-'+values['valid'] in text
+            text=ROOT.joinpath('amnezia-awg/data/wg0.conf').read_text()
+            assert 'bootnode-'+due not in text
+            assert 'bootnode-permanent' in text and 'bootnode-'+valid in text
             assert len(run('docker','exec',container,'wg','show','wg0','peers').splitlines())==2
     print(json.dumps({'guard_without_timer':'passed','boot_id':boot,
                       'expired_absent_before_scan':True,'enforcement_ready':False}))

@@ -13,13 +13,12 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from tests.test_runtime_docker import AGENT_BINARY, XRAY_IMAGE, docker, load
+from tests.test_runtime_docker import AGENT_BINARY, XRAY_IMAGE, docker
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_IMAGE = 'postgres:16-alpine'  # BusyBox nc/ip; already required by the Docker suite.
 PUBLIC = '93.184.216.34'
 CLIENT_ID = str(uuid4())
-INTENT = load('routing_policy_intent', 'apply-profile-intent.py')
 BITTORRENT_HANDSHAKE = '\\023BitTorrent protocol' + '\\000' * 8 + 'A' * 40
 
 
@@ -88,7 +87,6 @@ class XrayRoutingPolicyDockerTests(unittest.TestCase):
         server = directory / 'server.json'
         server.write_text(json.dumps(server_config()))
         apply_node_settings(server, bittorrent)
-        INTENT.verify_xray_routing_policy(json.loads(server.read_text()), bittorrent == 'block')
         (directory / 'client.json').write_text(json.dumps(client_config(self.TARGETS)))
         (directory / 'client.json').chmod(0o644)
         shared = ('--network', f'container:{anchor}', '-v', f'{directory}:/etc/xray:ro')

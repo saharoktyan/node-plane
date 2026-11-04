@@ -1,7 +1,7 @@
 //! `node-plane-agent awg-peer revoke NAME`: removes one AWG peer from
 //! wg0.conf and the live interface. Replaces the revoke path of
-//! `awg-del-user.sh` and `awg-peer-state.py`; the profile intent journal
-//! still runs `awg-del-user.sh`, which only starts this subcommand.
+//! `awg-del-user.sh` and `awg-peer-state.py`; profile intents still run
+//! `awg-del-user.sh`, which only starts this subcommand.
 //!
 //! The peer is archived as `<clients>/<name>.revoked.json` and removed from
 //! the file before the live interface, so a restarted container does not
