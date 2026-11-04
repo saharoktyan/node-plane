@@ -1,6 +1,4 @@
 //! Xray runtime: init, deploy, settings sync and public metadata.
-use std::process::Command;
-
 use serde_json::Value;
 use tonic::Status;
 
@@ -58,26 +56,18 @@ impl AgentState {
     }
 
     pub(crate) fn get_backend_xray_public(&self) -> Result<agent::v1::BackendXrayPublic, Status> {
-        let script = self.resolve_runtime_path("/opt/node-plane-runtime/sync-xray.sh");
         let config = self.node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
         let image = crate::runtime::images::Kind::Xray
             .resolve(&self.node_env_value("XRAY_DOCKER_IMAGE", ""));
-        let output = Command::new(script)
-            .args([
-                config,
-                "localhost".to_string(),
-                "xtls-rprx-vision".to_string(),
-                image,
-            ])
-            .output()
-            .map_err(|_| Status::failed_precondition("Xray public metadata is unavailable"))?;
-        if !output.status.success() {
-            return Err(Status::failed_precondition(
-                "Xray public metadata is unavailable",
-            ));
-        }
-        let mut value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| Status::internal("invalid Xray public metadata"))?;
+        let container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
+        let mut value = super::setup::public(
+            &config,
+            "localhost",
+            super::user_sync::VISION,
+            &image,
+            &container,
+        )
+        .map_err(|_| Status::failed_precondition("Xray public metadata is unavailable"))?;
         value["xray_fp"] = serde_json::json!(self.node_env_value("XRAY_FP", "chrome"));
         // The helper returns public identity only. Never return the private
         // server key even if a future helper accidentally emits it.

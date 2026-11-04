@@ -7,6 +7,8 @@
   are removed; `inspect-profile.sh` only starts the agent.
 - Revoke AWG peers and show AWG obfuscation parameters in the node agent;
   `awg-del-user.sh` and `show-awg-entropy.sh` only start it.
+- Create the Xray config and read its public parameters in the node agent;
+  `init-xray.sh` and `sync-xray.sh` only start it.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

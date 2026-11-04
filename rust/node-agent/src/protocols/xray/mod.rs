@@ -5,6 +5,7 @@ pub(crate) mod inspection;
 pub(crate) mod rate;
 pub(crate) mod revocation;
 pub(crate) mod runtime;
+pub(crate) mod setup;
 pub(crate) mod traffic;
 pub(crate) mod user_sync;
 pub(crate) mod users;

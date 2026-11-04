@@ -62,7 +62,8 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertRegex(XRAY_IMAGE, r'ghcr\.io/saharoktyan/xray-core:v26\.10\.31-np\.2@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
         # Check the runtime entry points that select an image.
-        for name in ('deploy-xray.sh', 'init-xray.sh', 'sync-xray.sh', 'apply-profile-intent.py'):
+        # The agent's own default lives in runtime/images.rs (checked there).
+        for name in ('deploy-xray.sh', 'apply-profile-intent.py'):
             with self.subTest(path=name):
                 path = root / 'runtime_assets' / name
                 self.assertIn(XRAY_IMAGE, path.read_text())
@@ -481,6 +482,30 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertIn('0% packet loss', result.stdout)
         self.assertGreaterEqual(handshake() - first, 8)
         self.assertEqual(len(docker('exec', server, 'awg', 'show', 'awg0', 'peers').stdout.split()), 1)
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
+    def test_agent_creates_a_valid_xray_config_and_reads_its_public_key(self):
+        directory = self.root / 'xray-init'
+        path = directory / 'config.json'
+        env = {**os.environ, 'XRAY_CONTAINER_NAME': self.prefix + '-absent'}
+        created = subprocess.run([str(AGENT_BINARY), 'xray-config', 'init', str(path), 'vpn.example',
+                                  'www.example.com', '443', '8443', '/x', '', XRAY_IMAGE],
+                                 env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        metadata = json.loads(created.stdout)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(json.loads(path.read_text())['inbounds'][1]['streamSettings']['realitySettings']['privateKey'],
+                         created.stdout)
+        self.assertEqual((metadata['xray_host'], metadata['xray_sni'], metadata['xray_xhttp_path_prefix']),
+                         ('vpn.example', 'www.example.com', '/x'))
+        # Without a running container the image derives the same public key.
+        read = subprocess.run([str(AGENT_BINARY), 'xray-config', 'public', str(path), 'vpn.example', '', XRAY_IMAGE],
+                              env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertEqual(json.loads(read.stdout), metadata)
+        path.chmod(0o644)
+        docker('run', '--rm', '--user', '0:0', '-v', f'{directory}:/etc/xray:ro', XRAY_IMAGE,
+               'run', '-test', '-c', '/etc/xray/config.json')
 
     @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
     def test_agent_inspects_a_live_awg_peer(self):
