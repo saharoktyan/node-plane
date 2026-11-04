@@ -55,6 +55,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = protocols::inspection::run(&args).await {
         std::process::exit(code);
     }
+    if let Some(code) = protocols::awg::peer_sync::run(&args) {
+        std::process::exit(code);
+    }
+    if let Some(code) = protocols::awg::entropy::run(&args) {
+        std::process::exit(code);
+    }
     let config = AgentConfig::load();
     let state = AgentState::new(config.clone());
     let api = NodeAgentApi {

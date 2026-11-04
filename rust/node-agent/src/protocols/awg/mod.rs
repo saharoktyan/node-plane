@@ -1,5 +1,7 @@
 //! AmneziaWG on this node.
+pub(crate) mod entropy;
 pub(crate) mod inspection;
+pub(crate) mod peer_sync;
 pub(crate) mod peers;
 pub(crate) mod rate;
 pub(crate) mod runtime;

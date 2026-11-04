@@ -64,14 +64,6 @@ impl AgentState {
         })
     }
 
-    pub(crate) fn get_awg_entropy(&self) -> Result<RuntimeCommandResponse, Status> {
-        let summary = self.run_runtime_command("show-awg-entropy.sh", &[])?;
-        Ok(RuntimeCommandResponse {
-            summary,
-            payload_json: String::new(),
-        })
-    }
-
     pub(crate) fn regenerate_awg_entropy(&self) -> Result<RuntimeCommandResponse, Status> {
         let summary = self.run_runtime_command("regenerate-awg-entropy.sh", &[])?;
         Ok(RuntimeCommandResponse {

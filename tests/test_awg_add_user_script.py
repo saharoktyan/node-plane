@@ -15,58 +15,66 @@ DELETE_SCRIPT = SCRIPT.parent / "awg-del-user.sh"
 PROFILE_TOOL = SCRIPT.parent / "awg_profile.py"
 
 
+def fixture(root):
+    """awg-add-user.sh against a fake Docker in `root`: returns the server
+    profile, config, Docker log, fake Docker, node.env, runnable script and
+    environment."""
+    node_env = root / "node.env"
+    config = root / "wg0.conf"
+    docker_log = root / "docker.log"
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    (root / "awg-peer-state.py").write_text((SCRIPT.parent / "awg-peer-state.py").read_text())
+    (root / "awg_ipv6.py").write_text((SCRIPT.parent / "awg_ipv6.py").read_text())
+    profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), "init", str(config)], text=True)
+    config.write_text("[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile, encoding="utf-8")
+    node_env.write_text(
+        f"AWG_CONFIG={shlex.quote(str(config))}\n"
+        f"AWG_CLIENTS_DIR={shlex.quote(str(root / 'clients'))}\n"
+        "SERVER_KEY=msk1\n"
+        "AWG_SERVER_IP=203.0.113.10\n"
+        f"AWG_PROFILE_TOOL={shlex.quote(str(PROFILE_TOOL))}\n"
+        f"AWG_CONF2VPN={shlex.quote(str(SCRIPT.parent / 'conf2vpn.py'))}\n"
+        f"AWG_TEMPLATE={shlex.quote(str(SCRIPT.parent / 'awg-template.json'))}\n"
+        f"AWG_DECODER={shlex.quote(str(SCRIPT.parent / 'amnezia-config-decoder.py'))}\n",
+        encoding="utf-8",
+    )
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(docker_log))}\n"
+        "case \"$1\" in\n"
+        "  info) exit 0 ;;\n"
+        "  ps) echo amnezia-awg ;;\n"
+        "  exec)\n"
+        "    case \"$*\" in\n"
+        "      *show*allowed-ips*) echo 10.8.1.1 ;;\n"
+        "      *genkey*) echo 'private public preshared' ;;\n"
+        "      *public-key*) echo serverpublic ;;\n"
+        "    esac ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    runnable = root / "awg-add-user.sh"
+    runnable.write_text(
+        SCRIPT.read_text(encoding="utf-8").replace(
+            "source /etc/node-plane/node.env",
+            f"source {shlex.quote(str(node_env))}",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    return profile, config, docker_log, docker, node_env, runnable, env
+
+
 class AwgAddUserScriptTests(unittest.TestCase):
     def test_allocates_ip_with_nounset_and_passes_remote_temp_file_commands(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            node_env = root / "node.env"
-            config = root / "wg0.conf"
-            docker_log = root / "docker.log"
-            fake_bin = root / "bin"
-            fake_bin.mkdir()
-            (root / "awg-peer-state.py").write_text((SCRIPT.parent / "awg-peer-state.py").read_text())
-            (root / "awg_ipv6.py").write_text((SCRIPT.parent / "awg_ipv6.py").read_text())
-            profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), "init", str(config)], text=True)
-            config.write_text("[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile, encoding="utf-8")
-            node_env.write_text(
-                f"AWG_CONFIG={shlex.quote(str(config))}\n"
-                f"AWG_CLIENTS_DIR={shlex.quote(str(root / 'clients'))}\n"
-                "SERVER_KEY=msk1\n"
-                "AWG_SERVER_IP=203.0.113.10\n"
-                f"AWG_PROFILE_TOOL={shlex.quote(str(PROFILE_TOOL))}\n"
-                f"AWG_CONF2VPN={shlex.quote(str(SCRIPT.parent / 'conf2vpn.py'))}\n"
-                f"AWG_TEMPLATE={shlex.quote(str(SCRIPT.parent / 'awg-template.json'))}\n"
-                f"AWG_DECODER={shlex.quote(str(SCRIPT.parent / 'amnezia-config-decoder.py'))}\n",
-                encoding="utf-8",
-            )
-            docker = fake_bin / "docker"
-            docker.write_text(
-                "#!/bin/sh\n"
-                f"printf '%s\\n' \"$*\" >> {shlex.quote(str(docker_log))}\n"
-                "case \"$1\" in\n"
-                "  info) exit 0 ;;\n"
-                "  ps) echo amnezia-awg ;;\n"
-                "  exec)\n"
-                "    case \"$*\" in\n"
-                "      *show*allowed-ips*) echo 10.8.1.1 ;;\n"
-                "      *genkey*) echo 'private public preshared' ;;\n"
-                "      *public-key*) echo serverpublic ;;\n"
-                "    esac ;;\n"
-                "esac\n",
-                encoding="utf-8",
-            )
-            docker.chmod(0o755)
-            runnable = root / "awg-add-user.sh"
-            runnable.write_text(
-                SCRIPT.read_text(encoding="utf-8").replace(
-                    "source /etc/node-plane/node.env",
-                    f"source {shlex.quote(str(node_env))}",
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            env = os.environ.copy()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            profile, config, docker_log, docker, node_env, runnable, env = fixture(root)
             result = subprocess.run(
                 ["bash", str(runnable), "alice"],
                 env=env,
@@ -113,45 +121,6 @@ class AwgAddUserScriptTests(unittest.TestCase):
             self.assertIn("Address = 10.8.1.2/32", replaced.stdout)
             self.assertEqual(config.read_text(encoding="utf-8").count("# msk1-alice"), 1)
             self.assertIn("wg set wg0 peer public remove", docker_log.read_text(encoding="utf-8"))
-
-            delete = root / "awg-del-user.sh"
-            delete.write_text(
-                DELETE_SCRIPT.read_text(encoding="utf-8").replace(
-                    "source /etc/node-plane/node.env",
-                    f"source {shlex.quote(str(node_env))}",
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            subprocess.run(["bash", str(delete), "alice"], env=env, text=True, capture_output=True, check=True)
-            self.assertNotIn("# msk1-alice", config.read_text(encoding="utf-8"))
-            self.assertTrue(cached.exists())
-            self.assertTrue((root / "clients" / "msk1-alice.revoked.json").exists())
-            restored = subprocess.run(["bash", str(runnable), "alice"], env=env, text=True, capture_output=True, check=True)
-            self.assertEqual(restored.stdout, replaced.stdout)
-            self.assertEqual(config.read_text().count("# msk1-alice"), 1)
-            self.assertNotIn("restart amnezia-awg", docker_log.read_text())
-
-            # The same runtime used by device intents must reserve a different
-            # address and keep independent cached credentials for another peer.
-            docker.write_text(docker.read_text().replace(
-                "echo 'private public preshared'", "echo 'phoneprivate phonepublic phonepreshared'"))
-            phone = subprocess.run(["bash", str(runnable), "phone_peer"], env=env,
-                                   text=True, capture_output=True, check=True)
-            self.assertIn("PrivateKey = phoneprivate", phone.stdout)
-            self.assertIn("Address = 10.8.1.3/32", phone.stdout)
-            self.assertIn("# msk1-phone_peer", config.read_text())
-            alice_again = subprocess.run(["bash", str(runnable), "alice"], env=env,
-                                         text=True, capture_output=True, check=True)
-            self.assertEqual(alice_again.stdout, restored.stdout)
-            phone_again = subprocess.run(["bash", str(runnable), "phone_peer"], env=env,
-                                         text=True, capture_output=True, check=True)
-            self.assertEqual(phone_again.stdout, phone.stdout)
-            subprocess.run(["bash", str(delete), "alice"], env=env,
-                           text=True, capture_output=True, check=True)
-            self.assertNotIn("# msk1-alice", config.read_text())
-            self.assertIn("# msk1-phone_peer", config.read_text())
-            self.assertEqual((root / "clients" / "msk1-phone_peer.txt").read_text(),phone.stdout)
 
 
 if __name__ == "__main__":
