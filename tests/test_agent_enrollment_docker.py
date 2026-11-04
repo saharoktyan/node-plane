@@ -1,6 +1,7 @@
 """Token enrollment end to end: the built agent in a disposable container
 waits for the controller, the built driver on the host enrolls it, and then
 reaches it over mutual TLS with the key the agent generated itself."""
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -50,15 +51,23 @@ class AgentEnrollmentDockerTests(unittest.TestCase):
         for source in re.findall(r'(/[^\s()]+)', subprocess.run(
                 ['ldd', str(AGENT)], check=True, capture_output=True, text=True).stdout):
             shutil.copy(Path(source).resolve(), node / 'libs' / Path(source).name)
-        (node / 'agent.toml').write_text('''node_key = "n1"
-listen_addr = "0.0.0.0:50061"
-runtime_root = "/test"
-tls_certificate_path = "/test/tls/server.crt"
-tls_key_path = "/test/tls/server.key"
-tls_client_ca_path = "/test/tls/ca.crt"
-''')
+        # The release archive, served to the installer from the node's disk.
+        archive = self.root / 'archive'
+        archive.mkdir()
+        shutil.copy(AGENT, archive / 'node-plane-agent-linux-amd64')
+        subprocess.run(['tar', '-C', str(archive), '-czf', str(node / 'agent.tar.gz'),
+                        'node-plane-agent-linux-amd64'], check=True)
+        self.agent_sha256 = hashlib.sha256((node / 'agent.tar.gz').read_bytes()).hexdigest()
+        shutil.copy(REPO / 'scripts/install_agent.sh', node / 'install_agent.sh')
+        # The node's systemd and an active ufw record what they are asked.
+        (node / 'bin').mkdir()
+        (node / 'bin/systemctl').write_text('#!/bin/sh\necho "$*" >> /test/systemctl.log\n')
+        (node / 'bin/ufw').write_text('#!/bin/sh\nif [ "$1" = status ]; then echo "Status: active"; exit 0; fi\n'
+                                      'echo "$*" >> /test/ufw.log\n')
+        # Speed-limit tools are present: no package installation.
+        for tool in ('tc', 'nft', 'nsenter'):
+            (node / 'bin' / tool).write_text('#!/bin/sh\n')
         self.token = f'{int(time.time()) + 600}.{secrets.token_hex(32)}'
-        (node / 'tls' / 'enrollment.token').write_text(self.token + '\n')
 
         controller = self.root / 'controller'
         controller.mkdir()
@@ -83,6 +92,8 @@ tls_client_ca_path = "/test/tls/ca.crt"
         self.addCleanup(lambda: docker('rm', '-f', identity, check=False))
         docker('cp', f'{node}/.', f'{self.name}:/test')
         docker('start', self.name)
+        docker('exec', self.name, 'sh', '-c', 'for tool in /test/bin/*; do install -m 755 "$tool" /usr/local/bin/; done; '
+               'mkdir -p /etc/systemd/system')
         self.target = '127.0.0.1:' + docker('port', self.name, '50061/tcp').stdout.strip().rsplit(':', 1)[1]
 
         shared = self.root / 'shared'
@@ -99,16 +110,24 @@ tls_client_ca_path = "/test/tls/ca.crt"
         }
         self.driver = self.start_driver()
 
+    def install(self, token=None):
+        return docker('exec', self.name, 'sh', '/test/install_agent.sh', '--node-key', 'n1',
+                      '--token', token or self.token, '--release', 'v0.0.0-test',
+                      '--agent-sha256', self.agent_sha256, '--agent-url', 'file:///test/agent.tar.gz', check=False)
+
     def start_agent(self, previous_node=None):
         if previous_node:
-            # Reinstalled over node `previous_node` of this controller.
+            # The server was node `previous_node` of this controller.
             docker('exec', self.name, 'sh', '-c',
-                   f'mkdir -p /var/lib/node-plane-agent && echo {CONTROLLER} > '
+                   f'mkdir -p /var/lib/node-plane-agent /etc/node-plane && echo {CONTROLLER} > '
                    f'/var/lib/node-plane-agent/controller-installation-id && '
-                   f'echo {previous_node} > /test/tls/enrollment.previous-node')
+                   f'echo \'node_key = "{previous_node}"\' > /etc/node-plane/agent.toml')
+        installed = self.install()
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        self.assertIn('waits for the controller on TCP port 50061', installed.stdout)
         docker('exec', '-d', self.name, 'sh', '-c',
-               'export NODE_AGENT_CONFIG_PATH=/test/agent.toml; '
-               'exec /test/libs/ld-linux-x86-64.so.2 --library-path /test/libs /test/agent-bin '
+               'export NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml; '
+               'exec /test/libs/ld-linux-x86-64.so.2 --library-path /test/libs /usr/local/bin/node-plane-agent '
                '> /test/agent.log 2>&1')
 
     def start_driver(self):
@@ -146,6 +165,15 @@ tls_client_ca_path = "/test/tls/ca.crt"
         self.assertEqual(result['journal_archive'], '')
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
 
+    def test_the_installer_refuses_a_tampered_agent(self):
+        docker('exec', self.name, 'sh', '-c', 'echo tampered >> /test/agent.tar.gz')
+        installed = self.install()
+        self.assertEqual(installed.returncode, 1)
+        self.assertIn("does not match the controller's checksum", installed.stderr)
+        self.assertNotEqual(docker('exec', self.name, 'test', '-e', '/usr/local/bin/node-plane-agent',
+                                   check=False).returncode, 0)
+        self.assertNotEqual(self.install(token='not-a-token').returncode, 0)
+
     def test_the_driver_enrolls_a_token_agent_and_then_reaches_it_over_mutual_tls(self):
         self.start_agent()
         # Before enrollment the driver does not know the node.
@@ -160,12 +188,21 @@ tls_client_ca_path = "/test/tls/ca.crt"
         self.assertFalse(self.registry.exists())
 
         result = self.enroll(self.token)
-        # The node image has no ufw; the agent says so instead of failing.
-        self.assertEqual(result, {'firewall': 'ufw is not installed', 'journal_archive': ''}, self.agent_log())
+        self.assertEqual(result['journal_archive'], '')
+        # The installer opened the port for enrollment; then only the
+        # controller's address (Docker's gateway here) keeps it.
+        peer = re.fullmatch(r'agent port 50061 allowed from (\S+) only', result['firewall'])
+        self.assertIsNotNone(peer, result)
+        ufw = docker('exec', self.name, 'cat', '/test/ufw.log').stdout.splitlines()
+        self.assertEqual(ufw, ["allow 50061/tcp comment Node Plane agent enrollment",
+                               f"allow proto tcp from {peer[1]} to any port 50061 comment Node Plane agent",
+                               "delete allow 50061/tcp"])
+        self.assertIn('restart node-plane-agent', docker('exec', self.name, 'cat', '/test/systemctl.log').stdout)
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
         files = docker('exec', self.name, 'sh', '-c',
-                       'ls /test/tls; stat -c %a /test/tls/server.key').stdout.split()
-        self.assertEqual(files, ['ca.crt', 'server.crt', 'server.key', '600'])
+                       'ls /etc/node-plane/tls; stat -c %a /etc/node-plane/tls /etc/node-plane/tls/server.key'
+                       ).stdout.split()
+        self.assertEqual(files, ['ca.crt', 'server.crt', 'server.key', '700', '600'])
 
         def inspected():
             deadline = time.monotonic() + 10

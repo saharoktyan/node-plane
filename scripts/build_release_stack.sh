@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 cd "$ROOT_DIR"
 if [[ "${1:-}" == --from-ci && "${CI:-}" == true ]]; then
   mkdir -p "$OUT_DIR"
-  for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 SHA256SUMS.txt RELEASE_METADATA.txt; do
+  for name in node-plane-controller.tar.gz node-plane-driver-linux-amd64.tar.gz node-plane-agent-linux-amd64.tar.gz node-plane-agent-installer.sh node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 SHA256SUMS.txt RELEASE_METADATA.txt; do
     cp "$ROOT_DIR/dist/server-input/$name" "$OUT_DIR/$name"
   done
   (cd "$OUT_DIR" && sha256sum --check SHA256SUMS.txt)
@@ -79,6 +79,7 @@ tar -C "$TMP_DIR" -czf "$OUT_DIR/$DRIVER_NAME.tar.gz" "$DRIVER_NAME" LICENSE THI
 tar -C "$TMP_DIR" -czf "$OUT_DIR/$AGENT_NAME.tar.gz" "$AGENT_NAME" LICENSE THIRD_PARTY_LICENSES
 python3 scripts/controller_release.py build --root "$ROOT_DIR" \
   --archive "$OUT_DIR/$CONTROLLER_NAME" --ref "$TAG" --commit "$COMMIT"
+cp scripts/install_agent.sh "$OUT_DIR/node-plane-agent-installer.sh"
 cp scripts/install_workstation.sh "$OUT_DIR/node-plane-workstation-installer.sh"
 cp scripts/install_workstation.ps1 "$OUT_DIR/node-plane-workstation-installer.ps1"
 python3 scripts/validate_release.py --tag "$TAG" --commit "$COMMIT" \
@@ -86,7 +87,7 @@ python3 scripts/validate_release.py --tag "$TAG" --commit "$COMMIT" \
 
 (
   cd "$OUT_DIR"
-  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" \
+  sha256sum "$CONTROLLER_NAME" "$DRIVER_NAME.tar.gz" "$AGENT_NAME.tar.gz" node-plane-agent-installer.sh \
     node-plane-workstation-installer.sh node-plane-workstation-installer.ps1 RELEASE_METADATA.txt > SHA256SUMS.txt
 )
 

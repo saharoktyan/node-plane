@@ -38,7 +38,7 @@ class CargoDistReleaseTests(unittest.TestCase):
             cargo = root / 'rust/node-plane-cli/Cargo.toml'
             cargo.parent.mkdir(parents=True, exist_ok=True)
             cargo.write_text('[package]\nversion = "0.4.3-alpha.59"\n')
-            for name in ('install_workstation.sh', 'install_workstation.ps1'):
+            for name in ('install_agent.sh', 'install_workstation.sh', 'install_workstation.ps1'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             (root / '.env').write_text('must not be packaged\n')
             subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)
@@ -75,6 +75,8 @@ class CargoDistReleaseTests(unittest.TestCase):
                 digest, name = line.split()
                 self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
             self.assertFalse((out / 'node-plane-cli-linux-amd64.tar.gz').exists())
+            self.assertEqual((out / 'node-plane-agent-installer.sh').read_bytes(),
+                             (ROOT / 'scripts/install_agent.sh').read_bytes())
             self.assertEqual((out / 'node-plane-workstation-installer.sh').read_bytes(),
                              (ROOT / 'scripts/install_workstation.sh').read_bytes())
             self.assertEqual((out / 'node-plane-workstation-installer.ps1').read_bytes(),
@@ -132,7 +134,7 @@ class CargoDistReleaseTests(unittest.TestCase):
             cargo = root / 'rust/node-plane-cli/Cargo.toml'
             cargo.parent.mkdir(parents=True, exist_ok=True)
             cargo.write_text('[package]\nversion = "0.4.3-alpha.59"\n')
-            for name in ('install_workstation.sh', 'install_workstation.ps1'):
+            for name in ('install_agent.sh', 'install_workstation.sh', 'install_workstation.ps1'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)
             subprocess.run(['git', '-C', str(root), 'add', '.'], check=True, capture_output=True)
