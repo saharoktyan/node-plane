@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-source "${SCRIPT_DIR}/lib/agent_ssh.sh"
 
 checkout_env_value() {
   local key="$1"
@@ -42,15 +41,10 @@ SKIP_DRIVER=0
 SKIP_AGENTS=0
 STRICT_MODE=0
 DRY_RUN=0
-CHECK_AGENT_OWNER=0
 AGENT_PORT="${NODE_AGENT_PORT:-50061}"
 ONLY_NODE_KEY=""
 BACKEND_NODE_KEY=""
 BACKEND_NODE_MODE=""
-BACKEND_SSH_TARGET=""
-BACKEND_SSH_PORT="22"
-BACKEND_SSH_IDENTITY=""
-BACKEND_AGENT_HOST=""
 BIN_SOURCE="${NODE_PLANE_BIN_SOURCE:-auto}" # auto|release
 BIN_SOURCE_EXPLICIT=0
 GITHUB_REPO="${NODE_PLANE_GITHUB_REPO:-saharoktyan/node-plane}"
@@ -80,13 +74,6 @@ set_step() {
     PYTHONPATH="${APP_ROOT}/app" "${PYTHON_BIN:-python3}" -m backend.installation_progress \
       "$NODE_PLANE_AGENT_PROGRESS_FILE" "$NODE_PLANE_AGENT_PROGRESS_ID" "$CURRENT_STEP" 2>/dev/null || true
   fi
-}
-
-show_agent_service_diagnostics() {
-  local target="$1"
-  shift
-  echo "node-plane-agent systemd status on ${target}:" >&2
-  agent_ssh "$@" "$target" 'sudo systemctl status node-plane-agent --no-pager -l || true; echo "Recent node-plane-agent journal:"; sudo journalctl -u node-plane-agent -n 30 --no-pager || true' >&2 || true
 }
 
 on_error() {
@@ -481,11 +468,6 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
-    --check-agent-owner)
-      CHECK_AGENT_OWNER=1
-      SKIP_DRIVER=1
-      shift
-      ;;
     --agent-port)
       AGENT_PORT="${2:-}"
       shift 2
@@ -507,27 +489,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --backend-local)
-      if [[ -n "$BACKEND_NODE_MODE" ]]; then echo "Choose one backend transport." >&2; exit 1; fi
       BACKEND_NODE_MODE="local"
       shift
-      ;;
-    --backend-ssh-target)
-      if [[ -n "$BACKEND_NODE_MODE" ]]; then echo "Choose one backend transport." >&2; exit 1; fi
-      BACKEND_NODE_MODE="ssh"
-      BACKEND_SSH_TARGET="${2:-}"
-      shift 2
-      ;;
-    --backend-ssh-port)
-      BACKEND_SSH_PORT="${2:-}"
-      shift 2
-      ;;
-    --backend-ssh-identity)
-      BACKEND_SSH_IDENTITY="${2:-}"
-      shift 2
-      ;;
-    --backend-agent-host)
-      BACKEND_AGENT_HOST="${2:-}"
-      shift 2
       ;;
     --bin-source)
       BIN_SOURCE="${2:-}"
@@ -543,12 +506,14 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 Usage:
   scripts/setup_driver_agents.sh [--skip-driver] [--skip-agents] [--node-key KEY] [--agent-port 50061] [--strict] [--dry-run] [--bin-source auto|release]
-  scripts/setup_driver_agents.sh --backend-node-key KEY (--backend-local | --backend-ssh-target user@host) [--backend-ssh-port 22] [--backend-ssh-identity PATH] [--backend-agent-host HOST] [--bin-source release]
+  scripts/setup_driver_agents.sh --backend-node-key KEY --backend-local [--bin-source release]
 
 Purpose:
   - Install local node-plane-driver as a systemd service.
-  - Deploy node-plane-agent to local and SSH-managed nodes from the server registry, or one node with --node-key.
-  - Backend mode installs one agent for an existing backend node without reading the legacy server registry.
+  - Deploy node-plane-agent to the controller's own node from the server registry.
+    Remote servers install their agent with the one-time install command and
+    are never reached over SSH from here; their routes are kept.
+  - Backend mode installs the agent for an existing local backend node.
   - Write NODE_AGENT_TARGETS and driver mTLS settings in the shared .env.
 
 Binary source modes:
@@ -556,7 +521,7 @@ Binary source modes:
   release  Use GitHub release binaries only.
 
 Dry run:
-  --dry-run validates binary source resolution, local registration and SSH reachability.
+  --dry-run validates binary source resolution and local registration.
   It does not install binaries, write systemd units, or restart services.
 
 Key env overrides:
@@ -579,52 +544,25 @@ EOF
   esac
 done
 
-if [[ -n "$BACKEND_NODE_KEY" || -n "$BACKEND_NODE_MODE" || -n "$BACKEND_SSH_TARGET" || -n "$BACKEND_AGENT_HOST" || -n "$BACKEND_SSH_IDENTITY" || "$BACKEND_SSH_PORT" != 22 ]]; then
+if [[ -n "$BACKEND_NODE_KEY" || -n "$BACKEND_NODE_MODE" ]]; then
   if [[ ! "$BACKEND_NODE_KEY" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
     echo "Backend node key must match the backend inventory key format." >&2
     exit 1
   fi
-  if [[ "$BACKEND_NODE_MODE" != local && "$BACKEND_NODE_MODE" != ssh ]]; then
-    echo "Choose exactly one backend transport: --backend-local or --backend-ssh-target." >&2
+  if [[ "$BACKEND_NODE_MODE" != local ]]; then
+    # Remote servers install their agent with the one-time install command.
+    echo "Backend onboarding needs --backend-local; remote servers use the agent install command." >&2
     exit 1
   fi
   if [[ -n "$ONLY_NODE_KEY" || $SKIP_AGENTS -eq 1 ]]; then
     echo "Backend onboarding cannot combine with --node-key or --skip-agents." >&2
     exit 1
   fi
-  if [[ "$BACKEND_NODE_MODE" == local ]]; then
-    if [[ -n "$BACKEND_SSH_TARGET" || -n "$BACKEND_SSH_IDENTITY" || "$BACKEND_SSH_PORT" != 22 || -n "$BACKEND_AGENT_HOST" ]]; then
-      echo "SSH options cannot be used with --backend-local." >&2
-      exit 1
-    fi
-  else
-    if [[ ! "$BACKEND_SSH_TARGET" =~ ^([A-Za-z_][A-Za-z0-9._-]*@)?([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])$ ]]; then
-      echo "Invalid --backend-ssh-target." >&2
-      exit 1
-    fi
-    if [[ ! "$BACKEND_SSH_PORT" =~ ^[0-9]+$ ]] || (( BACKEND_SSH_PORT < 1 || BACKEND_SSH_PORT > 65535 )); then
-      echo "Invalid --backend-ssh-port." >&2
-      exit 1
-    fi
-    if [[ -n "$BACKEND_SSH_IDENTITY" && ! -f "$BACKEND_SSH_IDENTITY" ]]; then
-      echo "SSH identity file is missing." >&2
-      exit 1
-    fi
-    if [[ -n "$BACKEND_AGENT_HOST" && ! "$BACKEND_AGENT_HOST" =~ ^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])$ ]]; then
-      echo "Invalid --backend-agent-host." >&2
-      exit 1
-    fi
-  fi
   ONLY_NODE_KEY="$BACKEND_NODE_KEY"
   STRICT_MODE=1
 fi
 
 ensure_bin_source_mode
-
-if [[ $CHECK_AGENT_OWNER -eq 1 && ( -z "$BACKEND_NODE_KEY" || $DRY_RUN -eq 1 || $SKIP_AGENTS -eq 1 ) ]]; then
-  echo "--check-agent-owner requires a single backend node and no dry-run/skip-agents." >&2
-  exit 1
-fi
 
 if [[ ! "$AGENT_PORT" =~ ^[0-9]+$ ]]; then
   echo "Invalid --agent-port: $AGENT_PORT" >&2
@@ -696,13 +634,13 @@ validate_security_configuration
 # that default so the driver's EnvironmentFile cannot blank its unit fallback.
 if [[ -z "${SSH_KEY:-}" ]]; then
   SSH_KEY="${SHARED_ROOT}/ssh/id_ed25519"
-  if [[ $DRY_RUN -eq 0 && ${CHECK_AGENT_OWNER:-0} -eq 0 ]]; then
+  if [[ $DRY_RUN -eq 0 ]]; then
     if set_env_value_if_changed "$ENV_FILE" "SSH_KEY" "$SSH_KEY"; then ENV_CHANGED=1; fi
   fi
 fi
 export SSH_KEY
 
-if [[ $SKIP_DRIVER -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
+if [[ $SKIP_DRIVER -eq 0 ]]; then
   ensure_local_driver_token
 fi
 
@@ -930,8 +868,7 @@ EOF
 
 list_managed_servers_tsv() {
   if [[ -n "$BACKEND_NODE_KEY" ]]; then
-    # Trusted local confirmation only. SSH credentials remain CLI-only and are
-    # never added to the public backend node inventory or old bot registry.
+    # Trusted local confirmation only.
     PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" \
       "$PYTHON_BIN" - "$BACKEND_NODE_KEY" <<'PY'
 import sys
@@ -941,14 +878,7 @@ with get_db().connect() as conn:
 if row is None:
     raise SystemExit('Backend node is absent; create its draft before onboarding the agent')
 PY
-    if [[ "$BACKEND_NODE_MODE" == local ]]; then
-      printf '%s\x1flocal\x1f\x1f\x1f\x1f\x1f\n' "$BACKEND_NODE_KEY"
-    else
-      local ssh_host="$BACKEND_SSH_TARGET"
-      local agent_host="${BACKEND_AGENT_HOST:-${BACKEND_SSH_TARGET##*@}}"
-      printf '%s\x1fssh\x1f%s\x1f%s\x1f\x1f%s\x1f%s\n' \
-        "$BACKEND_NODE_KEY" "$ssh_host" "$BACKEND_SSH_PORT" "$BACKEND_SSH_IDENTITY" "$agent_host"
-    fi
+    printf '%s\x1flocal\x1f\x1f\x1f\x1f\x1f\n' "$BACKEND_NODE_KEY"
     return
   fi
   PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
@@ -1117,24 +1047,17 @@ deploy_agents() {
   fi
 
   if [[ $DRY_RUN -eq 0 ]]; then
-    if [[ $CHECK_AGENT_OWNER -eq 0 ]]; then
-      set_step "prepare driver-agent mutual TLS certificates"
-      prepare_driver_agent_tls
-    fi
+    set_step "prepare driver-agent mutual TLS certificates"
+    prepare_driver_agent_tls
     local identity_snapshot
     identity_snapshot="$(PYTHONPATH="${APP_ROOT}/app" NODE_PLANE_APP_DIR="${APP_ROOT}" \
-      NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - "$CHECK_AGENT_OWNER" <<'PY'
+      NODE_PLANE_SHARED_DIR="${SHARED_ROOT}" "$PYTHON_BIN" - <<'PY'
 import re
-import sys
 from db import get_db
 from backend.installation_identity import controller_identity
 from uuid import UUID
 db = get_db()
-if sys.argv[1] == '1':
-    with db.connect() as conn:
-        identity = conn.execute('SELECT id FROM backend_installation_identity WHERE singleton=1').fetchone()['id']
-else:
-    identity = controller_identity(db)
+identity = controller_identity(db)
 if str(UUID(identity)) != identity:
     raise SystemExit('Invalid controller identity')
 with db.connect() as conn:
@@ -1156,25 +1079,22 @@ PY
   local failed=0
   local matched=0
   local mappings=()
+  local local_mappings=()
   local local_agent_sum=""
-  if [[ $DRY_RUN -eq 0 && $CHECK_AGENT_OWNER -eq 0 ]]; then
+  if [[ $DRY_RUN -eq 0 ]]; then
     local_agent_sum="$(sha256_of_file "$agent_bin_path")"
   fi
   while IFS=$'\x1f' read -r server_key transport ssh_host ssh_port ssh_user ssh_key public_host; do
     [[ -z "$server_key" ]] && continue
     if [[ "$transport" == "local" ]]; then
       mappings+=("${server_key}=127.0.0.1:${AGENT_PORT}")
+      local_mappings+=("${server_key}=127.0.0.1:${AGENT_PORT}")
       if [[ -n "$ONLY_NODE_KEY" && "$server_key" != "$ONLY_NODE_KEY" ]]; then
         continue
       fi
       matched=$((matched + 1))
       echo
       echo "Deploying node-agent to local node ${server_key}..."
-      if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
-        sudo python3 "${SCRIPT_DIR}/lib/archive_agent_journals.py" --check \
-          "$CONTROLLER_ID" "$(sha256_of_file "$TLS_CA_CERT")" "$server_key" "$RETIRED_NODE_KEYS" || return 1
-        continue
-      fi
       if [[ $DRY_RUN -eq 1 ]]; then
         echo "Dry-run local agent check passed for ${server_key}"
       elif ! install_local_agent "$server_key" "$local_agent_sum"; then
@@ -1182,296 +1102,21 @@ PY
       fi
       continue
     fi
-    local target_host="$ssh_host"
-    local target_user="$ssh_user"
-    local target_key="$ssh_key"
-
-    # Backward-compat normalization for older/dirty registry rows.
-    # - If ssh_host already contains user@host, split it.
-    # - If ssh_user accidentally contains a key path, treat it as ssh_key.
-    if [[ "$target_host" == *"@"* ]]; then
-      if [[ -z "$target_user" ]]; then
-        target_user="${target_host%@*}"
-      fi
-      target_host="${target_host##*@}"
-    fi
-    # Treat path-like/key-like ssh_user as a misplaced key path and never as login.
-    # Accept absolute/relative/tilde paths and common key filename patterns.
-    if [[ "$target_user" == /* ]] || [[ "$target_user" == ~/* ]] || [[ "$target_user" == */* ]] || [[ "$target_user" == *".ssh"* ]] || [[ "$target_user" == id_* ]] || [[ "$target_user" == *.pem ]] || [[ "$target_user" == *.key ]]; then
-      if [[ -z "$target_key" ]]; then
-        target_key="$target_user"
-      fi
-      target_user=""
-    fi
-
-    local target="${target_user:+${target_user}@}${target_host}"
-    local reach_host="${public_host:-$target_host}"
-    if [[ "$reach_host" == *"@"* ]]; then
-      reach_host="${reach_host##*@}"
-    fi
+    # A remote server installs and updates its agent itself (the one-time
+    # install command, then signed self-update); only its route stays here.
+    local reach_host="${public_host:-${ssh_host##*@}}"
+    reach_host="${reach_host##*@}"
     if [[ "$reach_host" == *:* ]]; then
       reach_host="${reach_host#\[}"
       reach_host="${reach_host%\]}"
       reach_host="[${reach_host}]"
-      mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
-    else
-      mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
     fi
-
-    if [[ -n "$ONLY_NODE_KEY" && "$server_key" != "$ONLY_NODE_KEY" ]]; then
-      continue
-    fi
-    matched=$((matched + 1))
-    need_cmd ssh
-    need_cmd scp
-
-    echo
-    echo "Deploying node-agent to ${server_key} (${target}:${ssh_port})..."
-
-    local host_key_policy="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
-    if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
-      host_key_policy=yes
-    fi
-    local -a common_ssh_opts=("-o" "BatchMode=yes" "-o" "ConnectTimeout=15"
-      "-o" "ServerAliveInterval=15" "-o" "ServerAliveCountMax=3"
-      "-o" "StrictHostKeyChecking=${host_key_policy}")
-    if [[ -n "${SSH_KNOWN_HOSTS_PATH:-}" ]]; then
-      common_ssh_opts+=("-o" "UserKnownHostsFile=${SSH_KNOWN_HOSTS_PATH}")
-    fi
-    if [[ -n "$target_key" ]]; then
-      common_ssh_opts+=("-o" "IdentitiesOnly=yes" "-i" "$target_key")
-    elif [[ -n "${SSH_KEY:-}" ]]; then
-      common_ssh_opts+=("-o" "IdentitiesOnly=yes" "-i" "${SSH_KEY}")
-    fi
-
-    # Note: ssh uses -p for port, scp uses -P.
-    local -a ssh_opts=("-p" "$ssh_port" "${common_ssh_opts[@]}")
-    local -a scp_opts=("-P" "$ssh_port" "${common_ssh_opts[@]}")
-
-    if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
-      agent_ssh "${ssh_opts[@]}" "$target" \
-        "sudo python3 - --check '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}' '${RETIRED_NODE_KEYS}'" \
-        < "${SCRIPT_DIR}/lib/archive_agent_journals.py" || return 1
-      continue
-    fi
-
-    if [[ $DRY_RUN -eq 1 ]]; then
-      if ! agent_ssh "${ssh_opts[@]}" "$target" 'echo "node-plane-agent dry-run ok" >/dev/null'; then
-        echo "Dry-run SSH check failed for ${server_key}" >&2
-        failed=$((failed + 1))
-      else
-        echo "Dry-run SSH check passed for ${server_key}"
-      fi
-      continue
-    fi
-
-    set_step "check SSH prerequisites for ${server_key}"
-    if ! agent_ssh "${ssh_opts[@]}" "$target" 'sudo true && command -v systemctl >/dev/null && command -v sha256sum >/dev/null'; then
-      echo "SSH_PREREQUISITES_FAILED: ${server_key} requires root or passwordless sudo, systemd and sha256sum." >&2
-      failed=$((failed + 1))
-      continue
-    fi
-    # Before anything on the host changes: a VPN runtime of another node, for
-    # example from another installation, is never adopted or overwritten.
-    local runtime_owner owner_status=0
-    runtime_owner="$(agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- '${server_key}'" < <(runtime_owner_script))" || owner_status=$?
-    if [[ $owner_status -eq 3 ]]; then
-      echo "RUNTIME_OWNER_CONFLICT: ${server_key} already runs the VPN runtime of node '${runtime_owner//[^A-Za-z0-9_.-]/}'; nothing was changed." >&2
-      failed=$((failed + 1))
-      continue
-    elif [[ $owner_status -ne 0 ]]; then
-      echo "SSH_PREREQUISITES_FAILED: Could not check the VPN runtime owner on ${server_key}." >&2
-      failed=$((failed + 1))
-      continue
-    fi
-
-    set_step "configure agent firewall for ${server_key}"
-    if ! agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- '${AGENT_PORT}'" < <(agent_firewall_script); then
-      echo "AGENT_FIREWALL_FAILED: Could not prepare the agent port on ${server_key}." >&2
-      failed=$((failed + 1))
-      continue
-    fi
-
-    set_step "check previous controller journals for ${server_key}"
-    local archive_notice
-    if ! archive_notice="$(agent_ssh "${ssh_opts[@]}" "$target" \
-      "sudo python3 - '${CONTROLLER_ID}' '$(sha256_of_file "$TLS_CA_CERT")' '${server_key}' '${RETIRED_NODE_KEYS}'" \
-      < "${SCRIPT_DIR}/lib/archive_agent_journals.py")"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    if [[ -n "$archive_notice" ]]; then
-      JOURNAL_ARCHIVE_NOTICES+=("$archive_notice")
-      echo "$archive_notice"
-    else
-      set_step "skip previous controller journals for ${server_key}"
-    fi
-
-    set_step "prepare mutual TLS certificate for ${server_key}"
-    if ! prepare_node_tls "$server_key" "$reach_host"; then
-      failed=$((failed + 1))
-      continue
-    fi
-    local remote_tls_dir quoted_remote_tls_dir
-    if ! remote_tls_dir="$(agent_ssh "${ssh_opts[@]}" "$target" 'umask 077; mktemp -d "${HOME}/.node-plane-agent-tls.XXXXXX"')"; then
-      echo "Failed to create private TLS staging directory on ${server_key}" >&2
-      failed=$((failed + 1))
-      continue
-    fi
-    printf -v quoted_remote_tls_dir '%q' "$remote_tls_dir"
-    if ! scp "${scp_opts[@]}" \
-      "$TLS_CA_CERT" "$NODE_TLS_CERT" "$NODE_TLS_KEY" \
-      "${target}:${remote_tls_dir}/"; then
-      agent_ssh "${ssh_opts[@]}" "$target" "rm -rf -- ${quoted_remote_tls_dir}" >/dev/null 2>&1 || true
-      echo "Failed to transfer TLS material to ${server_key}" >&2
-      failed=$((failed + 1))
-      continue
-    fi
-
-    local tls_setup_script tls_changed
-    tls_setup_script="$(mktemp)"
-    cat > "$tls_setup_script" <<'TLSSETUP'
-set -euo pipefail
-stage="$1"
-trap 'rm -rf -- "$stage"' EXIT
-changed=0
-sudo mkdir -p /etc/node-plane/tls
-sudo chown root:root /etc/node-plane/tls
-sudo chmod 0700 /etc/node-plane/tls
-install_if_changed() {
-  local name="$1" destination="$2" mode="$3"
-  local source="${stage}/${name}"
-  if ! sudo test -f "$destination" || ! sudo cmp -s "$source" "$destination"; then
-    sudo install -o root -g root -m "$mode" "$source" "$destination"
-    changed=1
-  fi
-  sudo chown root:root "$destination"
-  sudo chmod "$mode" "$destination"
-}
-install_if_changed ca.crt /etc/node-plane/tls/ca.crt 0644
-install_if_changed server.crt /etc/node-plane/tls/server.crt 0644
-install_if_changed server.key /etc/node-plane/tls/server.key 0600
-echo "$changed"
-TLSSETUP
-    if ! tls_changed="$(agent_ssh "${ssh_opts[@]}" "$target" "bash -s -- ${quoted_remote_tls_dir}" < "$tls_setup_script")"; then
-      echo "Failed to install mutual TLS material on ${server_key}" >&2
-      failed=$((failed + 1))
-      agent_ssh "${ssh_opts[@]}" "$target" "rm -rf -- ${quoted_remote_tls_dir}" >/dev/null 2>&1 || true
-      rm -f "$tls_setup_script"
-      continue
-    fi
-    rm -f "$tls_setup_script"
-
-    local remote_sum=""
-    remote_sum="$(agent_ssh "${ssh_opts[@]}" "$target" 'if [ -x /usr/local/bin/node-plane-agent ]; then sha256sum /usr/local/bin/node-plane-agent | awk "{print \$1}"; fi' 2>/dev/null || true)"
-    # A matching binary alone is not enough: the node key, port or unit may
-    # have changed since the last rollout.
-    if [[ "$remote_sum" == "$local_agent_sum" ]] && agent_ssh "${ssh_opts[@]}" "$target" \
-      "sudo grep -Fxq 'node_key = \"${server_key}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'listen_addr = \"0.0.0.0:${AGENT_PORT}\"' /etc/node-plane/agent.toml && sudo grep -Fxq 'Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml' /etc/systemd/system/node-plane-agent.service" >/dev/null 2>&1; then
-      set_step "restart node-agent on ${server_key}"
-      if agent_ssh "${ssh_opts[@]}" "$target" 'sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
-        if [[ "$tls_changed" == "1" ]]; then
-          if agent_ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
-            echo "node-agent certificates rotated and service restarted on ${server_key}."
-            continue
-          fi
-          echo "node-agent restart after certificate update failed on ${server_key}" >&2
-          show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
-          failed=$((failed + 1))
-          continue
-        else
-          echo "node-agent is up to date and active on ${server_key}; skipping reinstall."
-          continue
-        fi
-      fi
-      if agent_ssh "${ssh_opts[@]}" "$target" 'sudo systemctl restart node-plane-agent && sudo systemctl is-active --quiet node-plane-agent' >/dev/null 2>&1; then
-        echo "node-agent binary unchanged; service restarted on ${server_key}."
-        continue
-      fi
-      echo "node-agent service restart failed on ${server_key}" >&2
-      show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
-      failed=$((failed + 1))
-      continue
-    fi
-
-    set_step "install node-agent on ${server_key}"
-    if ! scp "${scp_opts[@]}" "$agent_bin_path" "${target}:/tmp/node-plane-agent"; then
-      echo "Failed to copy agent binary to ${server_key}" >&2
-      failed=$((failed + 1))
-      continue
-    fi
-
-    local agent_link_check
-    if ! agent_link_check="$(agent_ssh "${ssh_opts[@]}" "$target" 'ldd /tmp/node-plane-agent 2>&1 || true')"; then
-      echo "Failed to check node-agent binary compatibility on ${server_key}" >&2
-      failed=$((failed + 1))
-      continue
-    fi
-    if [[ "$agent_link_check" == *"not found"* ]]; then
-      echo "node-agent binary is incompatible with ${server_key}; keeping the previously installed binary." >&2
-      echo "$agent_link_check" >&2
-      agent_ssh "${ssh_opts[@]}" "$target" 'rm -f /tmp/node-plane-agent' >/dev/null 2>&1 || true
-      failed=$((failed + 1))
-      continue
-    fi
-
-    local remote_script
-    remote_script="$(mktemp)"
-    cat > "$remote_script" <<EOF
-set -euo pipefail
-sudo install -m 0755 /tmp/node-plane-agent /usr/local/bin/node-plane-agent
-sudo rm -f /tmp/node-plane-agent
-( ${SHAPING_TOOLS_SCRIPT} ) || true
-sudo mkdir -p /etc/node-plane
-sudo tee /etc/node-plane/agent.toml >/dev/null <<'AGENTCFG'
-node_key = "${server_key}"
-listen_addr = "0.0.0.0:${AGENT_PORT}"
-tls_certificate_path = "/etc/node-plane/tls/server.crt"
-tls_key_path = "/etc/node-plane/tls/server.key"
-tls_client_ca_path = "/etc/node-plane/tls/ca.crt"
-AGENTCFG
-sudo tee /etc/systemd/system/node-plane-agent.service >/dev/null <<'UNIT'
-[Unit]
-Description=Node Plane Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-Environment=NODE_AGENT_CONFIG_PATH=/etc/node-plane/agent.toml
-Environment=NODE_AGENT_NODE_KEY=${server_key}
-Environment=NODE_AGENT_LISTEN_ADDR=0.0.0.0:${AGENT_PORT}
-ExecStart=/usr/local/bin/node-plane-agent
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-sudo timeout 30 /usr/local/bin/node-plane-agent harden >/dev/null
-sudo systemctl daemon-reload
-sudo systemctl enable --now node-plane-agent
-sudo systemctl restart node-plane-agent
-sudo systemctl is-active --quiet node-plane-agent
-EOF
-    if ! agent_ssh "${ssh_opts[@]}" "$target" 'bash -s' < "$remote_script"; then
-      echo "Failed to install/start node-agent on ${server_key}" >&2
-      show_agent_service_diagnostics "$target" "${ssh_opts[@]}"
-      failed=$((failed + 1))
-      rm -f "$remote_script"
-      continue
-    fi
-    rm -f "$remote_script"
-    echo "node-agent is active on ${server_key}"
+    mappings+=("${server_key}=${reach_host}:${AGENT_PORT}")
   done <<< "$lines"
 
   if [[ -n "$ONLY_NODE_KEY" && $matched -eq 0 ]]; then
     echo "No enabled managed server found for --node-key ${ONLY_NODE_KEY}" >&2
     return 1
-  fi
-
-  if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
-    return 0
   fi
 
   if [[ $STRICT_MODE -eq 1 && $failed -gt 0 ]]; then
@@ -1517,7 +1162,7 @@ EOF
       # driver must not keep its target over the one written here.
       local enrolled="${TLS_ROOT}/enrolled-agents" installed_mapping
       if [[ -f "$enrolled" ]]; then
-        for installed_mapping in "${mappings[@]}"; do
+        for installed_mapping in "${local_mappings[@]}"; do
           if grep -q "^${installed_mapping%%=*}=" "$enrolled"; then
             grep -v "^${installed_mapping%%=*}=" "$enrolled" > "${enrolled}.new" || true
             mv "${enrolled}.new" "$enrolled"
@@ -1535,11 +1180,6 @@ EOF
     echo "node-agent deploy completed with ${failed} failures (best-effort mode)."
   fi
 }
-
-if [[ $CHECK_AGENT_OWNER -eq 1 ]]; then
-  deploy_agents
-  exit 0
-fi
 
 if [[ $DRY_RUN -eq 1 ]]; then
   resolve_binaries_dry_run

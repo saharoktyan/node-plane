@@ -16,55 +16,14 @@ SETUP_SCRIPT = REPO_ROOT / "scripts" / "setup_driver_agents.sh"
 
 
 class DriverAgentSetupTests(unittest.TestCase):
-    def test_ownership_check_skips_downloads_firewall_and_installation(self):
-        from uuid import uuid4
-        controller = str(uuid4())
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            app, shared, binaries = root / 'current', root / 'shared', root / 'bin'
-            for path in (app, shared / 'driver-agent-tls', binaries):
-                path.mkdir(parents=True, exist_ok=True)
-            environment_file = shared / '.env'
-            environment_file.write_text('BOT_TOKEN=test\n')
-            (shared / 'driver-agent-tls/ca.crt').write_text('public CA fixture')
-            # Only the two controller DB reads are replaced. Any attempt to
-            # download, change firewall/services or copy a binary fails loudly.
-            python = binaries / 'python3'
-            python.write_text(f'''#!{sys.executable}
-import sys
-source = sys.stdin.read()
-if 'SELECT key FROM backend_nodes' in source:
-    pass
-elif 'SELECT id FROM backend_installation_identity' in source:
-    print({controller!r})
-    print('old1')
-else:
-    raise SystemExit('unexpected Python command')
-''')
-            python.chmod(0o755)
-            for name in ('sudo', 'scp', 'curl', 'openssl', 'systemctl', 'ufw'):
-                path = binaries / name
-                path.write_text('#!/bin/sh\necho "unexpected mutation: $0" >&2\nexit 91\n')
-                path.chmod(0o755)
-            ssh = binaries / 'ssh'
-            ssh.write_text(f'''#!{sys.executable}
-import sys
-source = sys.stdin.read()
-assert 'def archive(' in source
-assert '--check' in sys.argv[-1]
-assert "'old1'" in sys.argv[-1]
-print('AGENT_OWNER_CHECK|new1|' + '{{"reassignable":true,"previous_node":"old1","controller":"{controller}"}}')
-''')
-            ssh.chmod(0o755)
-            before = {p.relative_to(shared): p.read_bytes() for p in shared.rglob('*') if p.is_file()}
-            result = subprocess.run(['bash', str(SETUP_SCRIPT), '--backend-node-key', 'new1',
-                '--backend-ssh-target', 'root@192.0.2.7', '--check-agent-owner'],
-                env={**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
-                     'NODE_PLANE_APP_DIR': str(app), 'NODE_PLANE_SHARED_DIR': str(shared)},
+    def test_remote_backend_onboarding_is_refused_without_ssh(self):
+        # Remote servers install their agent with the one-time install command.
+        for arguments in (['--backend-node-key', 'new1'],
+                          ['--backend-node-key', 'new1', '--backend-ssh-target', 'root@192.0.2.7']):
+            result = subprocess.run(['bash', str(SETUP_SCRIPT), *arguments],
                 capture_output=True, text=True, timeout=15)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('AGENT_OWNER_CHECK|new1|', result.stdout)
-            self.assertEqual(before, {p.relative_to(shared): p.read_bytes() for p in shared.rglob('*') if p.is_file()})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--backend-local' if len(arguments) == 2 else 'Unknown argument', result.stderr)
 
     @staticmethod
     def write_backend_registry(app_root, rows):
@@ -168,28 +127,6 @@ esac
 """, encoding="utf-8")
         curl.chmod(0o755)
 
-    def test_remote_wrapper_preserves_quoting_stdin_and_noninteractive_privileges(self):
-        helper = (REPO_ROOT / 'scripts/lib/agent_ssh.sh').read_text()
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            ssh = root / 'ssh'
-            ssh.write_text('#!/bin/bash\nfor remote in "$@"; do :; done\nexec bash -c "$remote"\n')
-            ssh.chmod(0o755)
-            sudo = root / 'sudo'
-            sudo.write_text('#!/bin/bash\n[ "$1" = -n ] || exit 91\nshift\nexec "$@"\n')
-            sudo.chmod(0o755)
-            environment = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
-                'REMOTE_COMMAND': "sudo printf '%s\\n' \"quoted ' value\"; bash -s"}
-            for root_branch in (False, True):
-                # Exercise both remote privilege branches without requiring a
-                # root shell or touching system files on the test machine.
-                source = helper.replace('"$EUID"', '"0"') if root_branch else helper
-                result = subprocess.run(['bash', '-c', source + '\nagent_ssh -p 2222 test-host "$REMOTE_COMMAND"'],
-                    env=environment, input="sudo printf '%s\\n' 'streamed script'\n",
-                    text=True, capture_output=True, timeout=10)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "quoted ' value\nstreamed script\n")
-
     def test_backend_dry_run_uses_backend_draft_without_legacy_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -227,23 +164,12 @@ def get_db():
             environment.update(NODE_PLANE_APP_DIR=str(app_root),
                                NODE_PLANE_SHARED_DIR=str(shared_root),
                                PATH=f"{fake_bin}:{environment['PATH']}")
-            result = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
-                '--backend-node-key', 'lv1', '--backend-ssh-target', 'root@203.0.113.10',
-                '--backend-agent-host', 'vpn.example.test'], env=environment, text=True,
-                capture_output=True, check=False, timeout=15)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('Dry-run SSH check passed for lv1', result.stdout)
-            self.assertIn('lv1=vpn.example.test:50061', result.stdout)
-            self.assertIn('root@203.0.113.10', ssh_log.read_text(encoding='utf-8'))
-            self.assertIn('ConnectTimeout=15', ssh_log.read_text(encoding='utf-8'))
-            self.assertIn('ServerAliveCountMax=3', ssh_log.read_text(encoding='utf-8'))
-            self.assertNotIn('vpn.example.test', ssh_log.read_text(encoding='utf-8'))
-            self.assertEqual((shared_root / '.env').read_text(encoding='utf-8'), 'BOT_TOKEN=test\n')
             local = subprocess.run([str(SETUP_SCRIPT), '--dry-run', '--bin-source', 'auto',
                 '--backend-node-key', 'lv1', '--backend-local'], env=environment, text=True,
                 capture_output=True, check=False, timeout=15)
             self.assertEqual(local.returncode, 0, local.stderr)
             self.assertIn('lv1=127.0.0.1:50061', local.stdout)
+            self.assertFalse(ssh_log.exists())
 
     def test_github_api_downloads_assets_when_direct_links_return_404(self):
         self.release_download_case('-linux-amd64')
@@ -476,7 +402,7 @@ esac
             self.assertIn("RELEASE_BINARY_UNAVAILABLE", result.stderr)
             self.assertNotIn("mv: cannot stat", result.stderr)
 
-    def test_dry_run_uses_installed_backend_registry_and_preserves_empty_ssh_fields(self):
+    def test_dry_run_keeps_remote_routes_without_contacting_remote_servers(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             app_root = root / "current"
@@ -519,10 +445,8 @@ esac
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Dry-run SSH check passed for node-one", result.stdout)
             self.assertIn("node-one=vpn.example.test:50061", result.stdout)
-            self.assertIn("203.0.113.10", ssh_log.read_text(encoding="utf-8"))
-            self.assertNotIn("vpn.example.test", ssh_log.read_text(encoding="utf-8"))
+            self.assertFalse(ssh_log.exists())
             self.assertEqual((shared_root / ".env").read_text(encoding="utf-8"), "BOT_TOKEN=test\n")
 
     def test_dry_run_includes_local_node_without_ssh(self):
@@ -583,7 +507,7 @@ esac
                 PATH=f"{fake_bin}:{environment['PATH']}",
             )
             result = subprocess.run(
-                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "lv1"],
+                [str(SETUP_SCRIPT), "--dry-run", "--bin-source", "auto", "--node-key", "msk1"],
                 env=environment, text=True, capture_output=True, check=False, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr)

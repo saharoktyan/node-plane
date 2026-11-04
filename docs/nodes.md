@@ -24,7 +24,7 @@ On a node with protocols selected, **Server setup** installs the agent, installs
 
 - **Command for the server** in Telegram, **Manual** in Workstation: Node Plane shows a one-time command. Copy it and run it on the server as root, for example in your own SSH session. The controller needs no SSH access or sudo. The command works once and expires in an hour; a new command replaces an unused one. Once the agent answers, setup continues by itself: Telegram shows the command in the setup progress, which updates by itself, and Workstation's node card follows the progress. **Install command** on the card shows the command again.
 - **Auto** in Workstation: Workstation runs the same command over one SSH login with an existing key or a password. When the login is not root, it uses sudo and asks for the sudo password if needed. Nothing is saved and no key is added to the server.
-- **Install over SSH** in Telegram, when the controller already has SSH access to the server: the controller installs the agent over SSH. A local node is always set up this way.
+- **Install over SSH** in Telegram, when you have added the controller's SSH key to the server: the controller logs in once with it and runs the same command, as root or with passwordless sudo. It saves no session and does not use SSH for that server again. The controller's own node is set up by the controller directly.
 
 Before the command, choose access to the agent port: an open port protected by mutual TLS (recommended; works when the controller's address changes) or the controller's address only (for a static controller address). The controller connects to the node's client address on TCP 50061; allow it in the provider's firewall if there is one. See [Node agent](agent.md) for what the command does and why the agent runs as root.
 
@@ -50,6 +50,6 @@ A blocked outcome may be uncertain. Read the error and recovery choices before s
 
 ## Remove a node
 
-Open node maintenance and review full cleanup. The confirmation lists affected profiles and resources. Full cleanup revokes access, removes managed protocol resources and the agent, verifies the host and retires the node record.
+Open node maintenance and review full cleanup. The confirmation lists affected profiles and resources. Full cleanup revokes access and removes managed protocol resources; the agent checks that nothing of the runtime is left, removes itself, and the node record is retired once the agent stops answering. The agent's own removal is not verified; see [Removal](agent.md#removal). The controller's own node is checked by the controller.
 
 Registry-only removal retires the record without confirming host cleanup. Configurations on an unreachable host may still work. Docker, unrelated containers, host packages and unrelated SSH keys are shared resources and are retained.

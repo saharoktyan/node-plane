@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Stop reaching remote nodes over SSH from the controller. A remote agent is
+  installed only with the one-time install command: by hand, by
+  Workstation's Auto, or by the bot's **Install over SSH**, which now logs in
+  once with the controller's key (added to the server beforehand) and runs
+  that command. Updates, agent-only setup and restore no longer use SSH;
+  `setup_driver_agents.sh` installs only the controller's own agent and
+  keeps the routes of remote ones.
+- Remove remote nodes without SSH: before it removes itself, the agent
+  checks that the runtime, its configs and containers are gone and reports
+  that with the server's machine-id, recorded before draining. The node is
+  retired once that agent stops answering; its own removal is not verified,
+  and the bot, Workstation and the retirement record say so. Removal of
+  agents from before this release asks to update them first. The
+  independent SSH verification key (`NODE_PLANE_REMOVAL_SSH_KEY`), the SSH
+  target prompts and `admin_cli --ssh-target` are gone; the controller's own
+  node is still inspected by the controller.
 - Harden the agent service with a systemd drop-in the agent keeps in place
   (`node-plane-agent harden`): read-only home directories, no kernel module
   loading, kernel logs, cgroup or hostname changes, native system calls only.
@@ -12,8 +28,8 @@
   only when the release key signed its checksum, refuses older versions,
   checks that the new binary runs and keeps the previous one; a systemd timer
   puts the previous binary back unless the new agent starts serving within
-  three minutes. Agents from before this release are updated over SSH once
-  more. Releases now publish `node-plane-agent-linux-amd64.release` and its
+  three minutes. Agents from before this release need a new install command
+  once. Releases now publish `node-plane-agent-linux-amd64.release` and its
   `.sig`; publishing requires the `NODE_PLANE_RELEASE_SIGNING_KEY` secret.
 - Generate and check AWG profiles in the node agent
   (`node-plane-agent awg-profile`) instead of `awg_profile.py`, which is no
@@ -52,8 +68,7 @@
   command in the setup progress, which updates by itself; Workstation's
   Server setup offers Manual (the command with a copy button; the node card
   follows the progress) or Auto (runs it over one SSH login with a key or
-  password, nothing saved). Nodes with controller SSH access can still be
-  set up over SSH. [Node agent on the server](docs/agent.md) describes
+  password, nothing saved). [Node agent on the server](docs/agent.md) describes
   the command, enrollment, port access and why the agent runs as root.
 - Collect traffic once per node: the agent reads every identity of a node
   with one Xray statistics query and one AWG transfer listing

@@ -10,7 +10,7 @@ Workstation: **Node Plane Updates**. Telegram: administrator **Updates**.
 
 The screen shows the branch, installed version, component state, latest known release and last check time. Run **Check** to query releases. Enable **Auto checks** and choose **1 hour**, **6 hours** or **1 day**; frequency controls appear while automatic checks are enabled. Administrators receive a notification when a new release is found.
 
-Review an update and start it. Progress shows component steps. **Update results** appears when a completed result is available; Dismiss removes its shortcut from Updates. Failed node updates are shown separately, with links to their server cards for diagnostics and setup recovery. Agents update themselves to the controller's signed release; older agents are updated over SSH. See [Agent updates](agent.md#agent-updates). Changing branch or rolling back requires a separate confirmation because it can break installation compatibility.
+Review an update and start it. Progress shows component steps. **Update results** appears when a completed result is available; Dismiss removes its shortcut from Updates. Failed node updates are shown separately, with links to their server cards for diagnostics and setup recovery. Agents update themselves to the controller's signed release; older agents need a new install command once. See [Agent updates](agent.md#agent-updates). Changing branch or rolling back requires a separate confirmation because it can break installation compatibility.
 
 A controller update can restart the bot. Reopen Updates if progress is interrupted. A confirmed rollback ends with `rolled_back` and releases the update lock; fix the cause and start a new update. If the outcome is uncertain, use Operations before attempting another update.
 
@@ -59,9 +59,9 @@ The agent restarts, stops the old execution and permanently prevents that comman
 
 Cancellation does not undo changes already applied, including access changes. It does not automatically retry the work. After checking the node, use **Apply** for settings or **Reconcile access** to create a fresh operation. An unstarted protocol-removal task waiting for a cancelled access revocation is also stopped; the next Apply schedules a new revocation before cleanup.
 
-If an agent setup stops at **Archiving previous installation journals** after removing a node and adding the same VPS under a new key, check that operation's result in Operations. The controller checks the agent's old identity over SSH and verifies that its old key was permanently removed from this controller. When confirmed, Continue/Resume becomes available for the same operation. Its old journals are archived before rebinding; an agent belonging to another active node remains protected.
+When a removed node's VPS is added again under a new key, its new install command hands the server over: the agent archives the journals of the removed key when this controller confirms that key was permanently removed. An agent that belongs to another active node refuses to enroll (`agent_owned_by_another_node`).
 
-SSH agent setup permits its TCP port in active UFW only from the controller's observed SSH source IP. It does not enable UFW or change its default policy. VPN installation, reinstallation and settings application also allow the selected protocol ports, including the effective automatic AWG port. Provider firewalls and other firewall managers must be configured separately.
+The agent installer opens the agent port in active UFW; with the controller-address-only option, only from the controller's address. It does not enable UFW or change its default policy. VPN installation, reinstallation and settings application also allow the selected protocol ports, including the effective automatic AWG port. Provider firewalls and other firewall managers must be configured separately.
 
 ## Reset and removal
 

@@ -25,7 +25,7 @@ SCRIPTS = {
     'setup_driver_agents.sh', 'install_backend_systemd.sh',
     'install_telegram_client_systemd.sh', 'postgres_runtime.sh', 'python_runtime.sh',
     'uv_runtime.sh', 'release_retention.py', 'run_node_driver.sh', 'run_node_agent.sh',
-    'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
+    'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
     'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
     'verify_server_artifacts.py', 'install_agent.sh',
 }

@@ -13,7 +13,7 @@ The node agent is the only Node Plane component on a VPN server. The controller 
 
 ## What the install command does
 
-**Server setup** shows a one-time command, or Workstation's **Auto** runs it over SSH. Run it as root. The command:
+**Server setup** shows a one-time command; Workstation's **Auto** or the bot's **Install over SSH** can run it for you over one SSH login. Run it as root. The command:
 
 1. Downloads `node-plane-agent-installer.sh` from the GitHub release of the controller's version and checks its SHA-256. The controller refuses to issue a command when the released installer differs from its own copy.
 2. The installer downloads the agent archive of the same release, checks the SHA-256 given in the command and installs `/usr/local/bin/node-plane-agent`.
@@ -22,7 +22,7 @@ The node agent is the only Node Plane component on a VPN server. The controller 
 5. If `ufw` is active, opens the agent port.
 6. Installs and starts the `node-plane-agent` systemd service.
 
-The controller gets no SSH access, no SSH key and no sudo. Workstation's **Auto** logs in once with your key or password, uses `sudo` when the login is not root, and saves nothing.
+The controller gets no SSH access, no SSH key and no sudo. Workstation's **Auto** logs in once with your key or password, uses `sudo` when the login is not root, and saves nothing. The bot's **Install over SSH** logs in once with the controller's key, which you added to the server beforehand, and needs root or passwordless sudo; after that the controller uses SSH for nothing on that server.
 
 ## Enrollment
 
@@ -61,7 +61,7 @@ Because of Docker alone, a separate unprivileged user would not limit what a com
 
 The controller calls the agent's API: protocol deployment, profile access, settings, diagnostics, speed and connection limits, removal. Changes are journaled on the server.
 
-The controller sends nothing the agent executes: the runtime entry points, the AWG profile generator and the AmneziaWG container's start script are built into the agent, and the controller delivers only data such as `node.env`. On a node installed with the command, a compromised controller can therefore do only what the agent's API allows. A node set up over SSH also gives the controller its SSH access. Python is not needed on the server.
+The controller sends nothing the agent executes: the runtime entry points, the AWG profile generator and the AmneziaWG container's start script are built into the agent, and the controller delivers only data such as `node.env`. A compromised controller can therefore do only what the agent's API allows, unless you keep the controller's SSH key on the server after **Install over SSH**; removing the node takes that key off. Python is not needed on the server.
 
 ## Service hardening
 
@@ -83,7 +83,13 @@ The agent keeps the current binary as `node-plane-agent.previous`, replaces itse
 sudo node-plane-agent self-update https://github.com/saharoktyan/node-plane/releases/download/vX.Y.Z X.Y.Z
 ```
 
-Agents from before self-update, and agents built without a release key, are updated by the SSH installer as before. A node installed with the command has no SSH access for the controller; reinstall its agent with a new install command once.
+Agents from before self-update, and agents built without a release key, cannot update themselves, and the controller does not update agents over SSH: reinstall such an agent with a new install command once.
+
+## Removal
+
+Full removal of a server revokes access and asks the agent to remove the runtime. Before it removes itself, the agent checks the server: the runtime, `node.env`, the protocol configs and the managed containers must be gone. It reports that, with the server's `/etc/machine-id`, which the controller recorded before it started. The agent then removes its service, binary, configuration, keys, journals and lease units, and the controller's SSH key if the controller has one. The controller retires the node once the agent, having reported the same machine-id, stops answering.
+
+The agent's own removal is not verified: the controller cannot look at the server afterwards, and an agent that stopped answering for another reason looks the same. The node record and the bot say so. If the agent still answers ten minutes later, removal stops with `agent_still_running`; check the `node-plane-agent` service on the server. Agents from before this check report no machine-id; update them first. The controller's own node is still inspected by the controller after removal.
 
 ## Files on the server
 

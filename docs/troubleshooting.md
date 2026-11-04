@@ -68,7 +68,7 @@ Do not publish full container configuration or VPN credentials in a bug report.
 
 ## Unknown operation outcome
 
-Blocked means the system needs observation or recovery before it can safely continue. Inspect the original operation rather than issuing a second reinstall/delete. Keep driver and node journals. For removal, check the reported leftover resource and independent host verification result.
+Blocked means the system needs observation or recovery before it can safely continue. Inspect the original operation rather than issuing a second reinstall/delete. Keep driver and node journals. For removal, check the reported leftover resource or the agent's host check; `agent_still_running` means the agent checked the server but did not remove itself.
 
 ## Interface problems
 
