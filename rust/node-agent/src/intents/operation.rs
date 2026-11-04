@@ -287,7 +287,8 @@ pub(crate) fn run(
         }
         "regenerate_entropy" => {
             profile::run_locked(
-                &runtime.root.join("regenerate-awg-entropy.sh"),
+                &runtime.root,
+                "regenerate-awg-entropy.sh",
                 &[],
                 lock,
                 &runtime.instance,
@@ -487,7 +488,7 @@ impl Temporary for Node<'_> {
     }
 
     fn inspect(&mut self, intent: &Intent) -> Result<Value, String> {
-        let mut command = std::process::Command::new(self.runtime.root.join("inspect-profile.sh"));
+        let mut command = crate::entry::command(&self.runtime.root, "inspect-profile.sh")?;
         command.args([&intent.protocol, &intent.runtime_name]);
         if intent.protocol == "xray" {
             command.arg(&intent.uuid);
@@ -1032,7 +1033,6 @@ mod tests {
         // Cleanup is checked before the settings: a refused cleanup proves
         // it ran, and a missing runtime stops the settings path.
         let root = test_dir("operation-paths");
-        fs::write(root.join("node.env"), "SERVER_KEY=n1\n").unwrap();
         let runtime = Runtime {
             root: root.clone(),
             env: root.join("node.env"),
@@ -1043,6 +1043,8 @@ mod tests {
         let host = Scripted::new(|_| (0, String::new()));
         for action in ["bootstrap", "reinstall_keep", "reinstall_clean"] {
             let err = run(&host, &runtime, action, &intent(), 0, &Progress::none()).unwrap_err();
+            // node.env is what makes a bootstrapped runtime.
+            fs::write(root.join("node.env"), "SERVER_KEY=n1\n").unwrap();
             let expected = match action {
                 "reinstall_keep" => "reusable protocol config is missing",
                 "reinstall_clean" => "runtime cleanup path is outside managed directories",

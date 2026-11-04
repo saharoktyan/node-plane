@@ -5,64 +5,9 @@
     "mode": "0644"
   },
   {
-    "target_path": "/opt/node-plane-runtime/init-xray.sh",
-    "asset_path": "init-xray.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/sync-xray.sh",
-    "asset_path": "sync-xray.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/apply-node-settings.sh",
-    "asset_path": "apply-node-settings.sh",
-    "mode": "0755"
-  },
-  {
     "target_path": "/opt/node-plane-runtime/awg_profile.py",
     "asset_path": "awg_profile.py",
     "mode": "0644"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/deploy-xray.sh",
-    "asset_path": "deploy-xray.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/xray-add-user-existing.sh",
-    "asset_path": "xray-add-user-existing.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/xray-del-user.sh",
-    "asset_path": "xray-del-user.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/awg-add-user.sh",
-    "asset_path": "awg-add-user.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/awg-del-user.sh",
-    "asset_path": "awg-del-user.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/show-awg-entropy.sh",
-    "asset_path": "show-awg-entropy.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/init-awg.sh",
-    "asset_path": "init-awg.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/regenerate-awg-entropy.sh",
-    "asset_path": "regenerate-awg-entropy.sh",
-    "mode": "0755"
   },
   {
     "target_path": "/opt/node-plane-runtime/amnezia-awg/Dockerfile",
@@ -72,21 +17,6 @@
   {
     "target_path": "/opt/node-plane-runtime/amnezia-awg/start.sh",
     "asset_path": "amnezia-awg/start.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/deploy-awg.sh",
-    "asset_path": "deploy-awg.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/inspect-profile.sh",
-    "asset_path": "inspect-profile.sh",
-    "mode": "0755"
-  },
-  {
-    "target_path": "/opt/node-plane-runtime/apply-profile-intent.py",
-    "asset_path": "apply-profile-intent.py",
     "mode": "0755"
   }
 ]

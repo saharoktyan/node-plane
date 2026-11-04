@@ -480,16 +480,16 @@ pub(crate) fn resolve_interrupted(
 }
 
 /// Starts a runtime entry point that inherits the journal lock.
-pub(crate) fn locked_command(script: &Path, lock: RawFd, instance: &str) -> Command {
-    let mut command = Command::new(script);
+pub(crate) fn locked_command(
+    runtime: &Path,
+    name: &str,
+    lock: RawFd,
+    instance: &str,
+) -> Result<Command, String> {
+    let mut command = crate::entry::command(runtime, name)?;
     command
         .env("NODE_PLANE_PROFILE_LOCK_FD", lock.to_string())
-        .env("NODE_PLANE_AGENT_INSTANCE_ID", instance)
-        // Entry points start this exact binary.
-        .env(
-            "NODE_PLANE_AGENT_BIN",
-            std::env::current_exe().unwrap_or_default(),
-        );
+        .env("NODE_PLANE_AGENT_INSTANCE_ID", instance);
     // SAFETY: fcntl is async-signal-safe; it only clears close-on-exec of
     // the lock in the child, which then inherits it.
     unsafe {
@@ -500,18 +500,18 @@ pub(crate) fn locked_command(script: &Path, lock: RawFd, instance: &str) -> Comm
             Ok(())
         });
     }
-    command
+    Ok(command)
 }
 
 /// Stdout of a locked runtime entry point, or its error.
 pub(crate) fn run_locked(
-    script: &Path,
+    runtime: &Path,
+    name: &str,
     args: &[String],
     lock: RawFd,
     instance: &str,
 ) -> Result<String, String> {
-    let name = script.file_name().unwrap_or_default().to_string_lossy();
-    let output = locked_command(script, lock, instance)
+    let output = locked_command(runtime, name, lock, instance)?
         .args(args)
         .output()
         .map_err(|err| format!("failed to execute {name}: {err}"))?;
@@ -575,7 +575,7 @@ pub(crate) fn run(
     }
     // The AWG output keeps its format: the agent extracts the client config.
     Ok(Response {
-        summary: run_locked(&runtime.join(script), &args, lock, instance)?,
+        summary: run_locked(runtime, &script, &args, lock, instance)?,
         payload_json: String::new(),
     })
 }

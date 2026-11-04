@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Build the runtime entry points into the node agent: `init-*`, `deploy-*`,
+  `sync-xray.sh`, `apply-node-settings.sh`, `regenerate-awg-entropy.sh`,
+  `show-awg-entropy.sh`, `inspect-profile.sh`, the profile add/delete
+  scripts and `apply-profile-intent.py` are no longer delivered to nodes.
+  The agent keeps their names for journals of earlier releases, removes the
+  old files at start once no lease unit runs them, and
+  `node-plane-agent entry NAME [ARG...]` runs one by hand.
 - Install a node agent from a one-time command, without SSH or sudo for
   the controller. The command downloads the release's
   `node-plane-agent-installer.sh`, checks its SHA-256 and runs it as root;

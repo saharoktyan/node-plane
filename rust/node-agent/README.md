@@ -17,6 +17,6 @@ Mutual TLS is required. `tls_certificate_path`, `tls_key_path` and `tls_client_c
 
 Profile and node helpers operate under local locks and durable journals. Preserve command identity, intent fingerprints and fences on restart/update. Unknown outcomes require inspection rather than unconditional replay.
 
-The runtime bundle contains the Python/shell protocol adapters. Check actual runtime facts before reporting installation success. Full decommissioning disables scheduling, stops the agent and removes owned resources with independent host verification.
+Runtime entry points (`init-awg.sh`, `deploy-xray.sh`, `awg-add-user.sh` and the others journals name) are built into the agent (`src/entry.rs`); `node-plane-agent entry NAME [ARG...]` runs one. The delivered runtime bundle holds only `awg_profile.py`, the AmneziaWG image files and `node.env.example`. Check actual runtime facts before reporting installation success. Full decommissioning disables scheduling, stops the agent and removes owned resources with independent host verification.
 
 See [Architecture](../../docs/development/architecture.md), [Temporary access](../../docs/development/temporary-access.md) and [Testing](../../docs/development/testing.md). RPC definitions are under [`proto/`](../../proto/).

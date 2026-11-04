@@ -1,4 +1,4 @@
-"""init-awg.sh and regenerate-awg-entropy.sh through the built agent, with
+"""The agent's init-awg.sh and regenerate-awg-entropy.sh entry points, with
 awg_profile.py and a fake Docker. In the Docker suite, where CI builds the
 agent."""
 import base64
@@ -38,15 +38,10 @@ class AwgSetupTests(unittest.TestCase):
             f'AWG_PROFILE_TOOL={shlex.quote(str(ASSETS / "awg_profile.py"))}\n'
             'AWG_SERVER_ADDRESS=10.8.1.1/24\nAWG_I1_PRESET=dns\nAWG_CONTAINER_NAME=awg-test\n')
 
-    def script(self, name):
-        script = self.root / name
-        script.write_text((ASSETS / name).read_text().replace(
-            'source /etc/node-plane/node.env', f'source {shlex.quote(str(self.node_env))}', 1))
-        return script
-
     def run_script(self, name, check=True):
-        return subprocess.run(['/bin/bash', str(self.script(name))], capture_output=True, text=True, check=check,
-                              env={**os.environ, 'PATH': str(self.tools), 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY)})
+        return subprocess.run([str(AGENT_BINARY), 'entry', name], capture_output=True, text=True, check=check,
+                              env={**os.environ, 'PATH': str(self.tools), 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY),
+                                   'NODE_PLANE_NODE_ENV': str(self.node_env)})
 
     def test_init_creates_a_valid_config_once(self):
         self.run_script('init-awg.sh')
@@ -66,7 +61,7 @@ class AwgSetupTests(unittest.TestCase):
         self.assertNotEqual(regenerated['PrivateKey'], values['PrivateKey'])
         self.assertNotEqual(regenerated['HeaderProtectionKey'], values['HeaderProtectionKey'])
         self.assertTrue(3 <= int(regenerated['Jc']) <= 7)
-        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ['bin', 'init-awg.sh', 'node.env', 'wg0.conf'])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ['bin', 'node.env', 'wg0.conf'])
 
     def fake_docker(self, state):
         docker = self.tools / 'docker'

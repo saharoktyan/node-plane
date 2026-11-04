@@ -9,11 +9,9 @@ use crate::state::AgentState;
 impl AgentState {
     pub(crate) fn prepare_decommission(&self, command_id: &str) -> Result<(), Status> {
         let runtime = self.resolve_runtime_path("/opt/node-plane-runtime");
-        // Without the deletion entry points only the fences are checked; no
-        // revocation is attempted.
-        let revocable = ["awg-del-user.sh", "xray-del-user.sh"]
-            .iter()
-            .any(|script| Path::new(&runtime).join(script).exists());
+        // Without a runtime only the fences are checked; no revocation is
+        // attempted.
+        let revocable = Path::new(&self.config.node_env_path).is_file();
         let mut runner = |intent: &profile::Intent, lock| {
             profile::run(intent, lock, Path::new(&runtime), &self.instance_id)
         };

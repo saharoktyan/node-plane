@@ -1,5 +1,5 @@
-"""AWG peers through awg-add-user.sh and awg-del-user.sh, which start the
-built agent, against a fake Docker and the real awg_profile.py. In the
+"""AWG peers through the agent's awg-add-user.sh and awg-del-user.sh entry
+points, against a fake Docker and the real awg_profile.py. In the
 Docker suite, where CI builds the agent."""
 import base64
 import json
@@ -47,10 +47,8 @@ def fixture(root):
         '    esac ;;\n'
         'esac\n')
     docker.chmod(0o755)
-    for name in ('awg-add-user.sh', 'awg-del-user.sh'):
-        (root / name).write_text((ASSETS / name).read_text().replace(
-            'source /etc/node-plane/node.env', f'source {shlex.quote(str(node_env))}', 1))
-    env = {**os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}', 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY)}
+    env = {**os.environ, 'PATH': f'{fake_bin}:{os.environ["PATH"]}', 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY),
+           'NODE_PLANE_NODE_ENV': str(node_env)}
     return profile, config, docker_log, docker, env
 
 
@@ -71,7 +69,7 @@ class AwgPeerCycleTests(unittest.TestCase):
         self.profile, self.config, self.log, self.docker, self.env = fixture(self.root)
 
     def run_script(self, name, profile, check=True):
-        result = subprocess.run(['bash', str(self.root / name), profile], env=self.env,
+        result = subprocess.run([str(AGENT_BINARY), 'entry', name, profile], env=self.env,
                                 text=True, capture_output=True)
         if check:
             self.assertEqual(result.returncode, 0, result.stderr)

@@ -117,15 +117,11 @@ class DockerRuntimeTests(unittest.TestCase):
 
     def lease_environment(self, **settings):
         """The agent's lease commands on a test node.env, journal and runtime;
-        the runtime has the AWG revocation entry point on that node.env."""
+        the agent's AWG revocation entry point reads that node.env."""
         node_env = self.root / 'lease-node.env'
         node_env.write_text(''.join(f'{key}={shlex.quote(str(value))}\n' for key, value in settings.items()))
         runtime = self.root / 'lease-runtime'
         runtime.mkdir(exist_ok=True)
-        script = runtime / 'awg-del-user.sh'
-        script.write_text((Path(__file__).resolve().parents[1] / 'runtime_assets/awg-del-user.sh').read_text()
-                          .replace('source /etc/node-plane/node.env', f'source {shlex.quote(str(node_env))}', 1))
-        script.chmod(0o755)
         return {**os.environ, 'NODE_PLANE_NODE_ENV': str(node_env), 'NODE_PLANE_RUNTIME_ROOT': str(runtime),
                 'NODE_PLANE_PROFILE_JOURNAL': str(self.root / 'lease-journal.sqlite3'),
                 'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY)}

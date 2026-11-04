@@ -17,7 +17,7 @@ use super::api::cli::{valid_email, valid_uuid};
 use super::api::{DEFAULT_ADDRESS, InboundUser, XrayApi};
 
 pub(crate) const VISION: &str = "xtls-rprx-vision";
-const DEPLOY: &str = "/opt/node-plane-runtime/deploy-xray.sh";
+const DEPLOY: &str = "deploy-xray.sh";
 
 /// What Xray holds for one user: UUID and flow.
 pub(crate) type Live = (String, String);
@@ -229,7 +229,7 @@ fn ensure_api(target: &Target, config: &mut Value, container: &str) -> Result<()
             .push(json!("HandlerService"));
         write_config(&target.config, config)?;
     }
-    let status = Command::new(DEPLOY)
+    let status = crate::entry::command(std::path::Path::new("/opt/node-plane-runtime"), DEPLOY)?
         .status()
         .map_err(|err| format!("{DEPLOY} failed: {err}"))?;
     if !status.success() {

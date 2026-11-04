@@ -1,6 +1,5 @@
 //! VPN profile intents, protocol-independent: apply, recover, resolve, inspect.
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 use tonic::Status;
@@ -26,7 +25,7 @@ fn intent(req: &ApplyProfileIntentRequest) -> Intent {
 
 /// What `inspect-profile.sh` sees of the profile on disk and live.
 fn inspect(runtime: &Path, intent: &Intent) -> Result<Value, String> {
-    let mut command = Command::new(runtime.join("inspect-profile.sh"));
+    let mut command = crate::entry::command(runtime, "inspect-profile.sh")?;
     command.args([&intent.protocol, &intent.runtime_name]);
     if intent.protocol == "xray" {
         // A deletion carries no identity: the repair compares presence only.

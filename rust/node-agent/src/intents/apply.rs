@@ -95,8 +95,7 @@ pub(crate) fn run(
     if requested.empty() {
         return Err("no VPN settings or authorized protocol removal requested".into());
     }
-    let script = |name: &str| runtime.root.join(name);
-    if !runtime.env.is_file() || !script("apply-node-settings.sh").is_file() {
+    if !runtime.env.is_file() {
         return Err("node runtime is not bootstrapped".into());
     }
     let [owner]: [String; 1] = sourced(&runtime.env, &[("SERVER_KEY", "")])?
@@ -186,8 +185,9 @@ pub(crate) fn run(
     fs::File::open(dir)
         .and_then(|dir| dir.sync_all())
         .map_err(|err| format!("{}: {err}", dir.display()))?;
-    let locked =
-        |name: &str, args: &[String]| run_locked(&script(name), args, lock, &runtime.instance);
+    let locked = |name: &str, args: &[String]| {
+        run_locked(&runtime.root, name, args, lock, &runtime.instance)
+    };
     // A prepared agent has the entry points and node.env but no configs:
     // only missing ones are created, under this same command. Existing keys
     // are never regenerated on a retry.

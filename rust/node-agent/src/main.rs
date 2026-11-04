@@ -6,6 +6,7 @@ mod api;
 mod config;
 mod enforcement;
 mod enrollment;
+mod entry;
 mod fencing;
 mod host;
 mod intents;
@@ -48,6 +49,9 @@ fn print_startup(config: &AgentConfig) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = entry::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = protocols::xray::api::cli::run(&args).await {
         std::process::exit(code);
     }
@@ -88,12 +92,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if enrollment::pending(&config) {
         enrollment::serve(&config).await?;
     }
-    // Lease units of earlier releases ran the removed script.
-    if let Err(err) = intents::scheduler::migrate(
+    // Lease units of earlier releases ran the removed script; the wrapper
+    // files go once no unit runs them.
+    match intents::scheduler::migrate(
         &intents::leases::System,
         std::path::Path::new(intents::scheduler::UNITS),
     ) {
-        eprintln!("lease unit migration failed: {err}");
+        Ok(()) => entry::remove_delivered(std::path::Path::new(&config.runtime_root)),
+        Err(err) => eprintln!("lease unit migration failed: {err}"),
     }
     let state = AgentState::new(config.clone());
     let api = NodeAgentApi {

@@ -103,7 +103,7 @@ pub(crate) fn run(
     };
     let lock = Lock::exclusive(journal)?;
     guard(journal, target)?;
-    run_locked(&runtime.join(script), args, lock.fd(), instance)
+    run_locked(runtime, script, args, lock.fd(), instance)
 }
 
 #[cfg(test)]

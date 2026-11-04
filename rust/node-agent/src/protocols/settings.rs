@@ -80,7 +80,9 @@ fn quiet(program: &str, args: &[&str]) -> bool {
 /// Runs a deploy script; its report joins this command's output, or goes
 /// to stderr for a rollback deployment.
 fn deploy(script: &str, to_stderr: bool) -> bool {
-    let mut command = Command::new(runtime().join(script));
+    let Ok(mut command) = crate::entry::command(&runtime(), script) else {
+        return false;
+    };
     if to_stderr {
         command.stdout(std::io::stderr());
     }

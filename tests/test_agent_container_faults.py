@@ -141,8 +141,10 @@ class AgentContainerFaultTests(unittest.TestCase):
             openssl('x509', '-req', '-in', identity+'.csr', '-CA', 'ca.crt',
                     '-CAkey', 'ca.key', '-CAcreateserial', '-days', '1',
                     '-extfile', str(extension), '-out', identity+'.crt')
-        (cls.root/'xray-add-user-existing.sh').write_text('''#!/usr/bin/python3
-import os, pathlib, time
+        # The binary the agent's entry points start: a pausable Xray mutation.
+        (cls.root/'fake-agent').write_text('''#!/usr/bin/python3
+import os, pathlib, sys, time
+if sys.argv[1:3] != ['xray-user', 'add']: sys.exit('unexpected entry point: ' + ' '.join(sys.argv[1:]))
 root = pathlib.Path('/test')
 mode = (root/'mode').read_text()
 def pause():
@@ -154,7 +156,7 @@ with (root/'counter').open('a') as stream:
 if mode == 'during_mutation': pause()
 print('OK')
 ''')
-        (cls.root/'xray-add-user-existing.sh').chmod(0o755)
+        (cls.root/'fake-agent').chmod(0o755)
         (cls.root/'agent.toml').write_text('''node_key = "fault-node"
 listen_addr = "0.0.0.0:50061"
 heartbeat_seconds = 1
@@ -178,7 +180,7 @@ tls_client_ca_path = "/test/ca.crt"
         docker('cp', str(self.root)+'/.', self.name+':/test')
         docker('start', self.name)
         docker('exec', self.name, 'sh', '-c',
-               'mkdir -p /etc/node-plane; printf none > /test/mode')
+               'mkdir -p /etc/node-plane; touch /etc/node-plane/node.env; printf none > /test/mode')
         self.port = docker('port', self.name, '50061/tcp').stdout.strip().rsplit(':',1)[1]
         self.bridge = LocalTLSBridge(self.port,self.root)
         self.addCleanup(self.bridge.close)
@@ -195,7 +197,8 @@ tls_client_ca_path = "/test/ca.crt"
         self.port = docker('port', self.name, '50061/tcp').stdout.strip().rsplit(':',1)[1]
         self.bridge.remote = int(self.port)
         docker('exec', '-d', self.name, 'sh', '-c',
-               'echo $$ > /test/agent.pid; export NODE_AGENT_CONFIG_PATH=/test/agent.toml; '
+               'echo $$ > /test/agent.pid; export NODE_AGENT_CONFIG_PATH=/test/agent.toml '
+               'NODE_PLANE_AGENT_BIN=/test/fake-agent; '
                'exec /test/libs/ld-linux-x86-64.so.2 --library-path /test/libs '
                '/test/agent-bin > /test/agent.log 2>&1')
         deadline = time.monotonic()+12

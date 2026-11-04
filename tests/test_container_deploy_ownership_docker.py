@@ -1,4 +1,4 @@
-"""Container deployments through deploy-xray.sh and deploy-awg.sh, which
+"""Container deployments through the agent's deploy-xray.sh and deploy-awg.sh entry points, which
 start the built agent, against a stateful fake Docker. In the Docker suite,
 where CI builds the agent."""
 import json
@@ -608,16 +608,10 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
     else:
         raise ValueError(f"Unknown protocol: {protocol}")
 
-    script_dst = root / f"deploy-{protocol}.sh"
-    script_content = (ASSETS / script_dst.name).read_text(encoding="utf-8").replace(
-        "source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
-    script_dst.write_text(script_content, encoding="utf-8")
-    script_dst.chmod(0o755)
-
     return {
         "root": root,
         "protocol": protocol,
-        "script": script_dst,
+        "script": f"deploy-{protocol}.sh",
         "env_file": node_env,
         "installation_id": installation_id,
         "installation_file": installation_file,
@@ -636,8 +630,9 @@ def execute_deploy(dep_env: dict, timeout: int = 15) -> subprocess.CompletedProc
     env["PATH"] = f"{dep_env['bin_dir']}:{env['PATH']}"
     env["TMPDIR"] = str(dep_env["root"])
     env["NODE_PLANE_AGENT_BIN"] = str(AGENT_BINARY)
+    env["NODE_PLANE_NODE_ENV"] = str(dep_env["env_file"])
     return subprocess.run(
-        ["bash", str(dep_env["script"])],
+        [str(AGENT_BINARY), "entry", dep_env["script"]],
         env=env,
         capture_output=True,
         text=True,

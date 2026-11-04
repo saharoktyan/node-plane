@@ -61,7 +61,7 @@ Because of Docker alone, a separate unprivileged user would not limit what a com
 
 The controller calls the agent's API: protocol deployment, profile access, settings, diagnostics, speed and connection limits, removal. Changes are journaled on the server.
 
-Current limitation: the controller still sends runtime scripts that the agent runs as root, so a compromised controller can run code on its nodes. Planned next: moving the remaining scripts into the agent, signed agent self-update instead of updates over SSH, and a systemd sandbox for the agent. Until signed self-update, agent updates of nodes installed with the command are not delivered from the controller.
+Current limitation: the controller still sends `awg_profile.py`, which the agent runs as root, and the AmneziaWG container's `start.sh`, so a compromised controller can run code on its nodes. The other runtime entry points are built into the agent. Planned next: moving these into the agent, signed agent self-update instead of updates over SSH, and a systemd sandbox for the agent. Until signed self-update, agent updates of nodes installed with the command are not delivered from the controller.
 
 ## Files on the server
 

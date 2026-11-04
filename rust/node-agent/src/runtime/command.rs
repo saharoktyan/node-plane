@@ -1,7 +1,6 @@
-//! Runtime helper scripts; mutating ones run under the profile intent
+//! Runtime entry points (`entry`) the RPCs run, under the profile intent
 //! journal's lock and fences (`intents::legacy`).
 use std::path::Path;
-use std::process::Command;
 
 use tonic::Status;
 
@@ -31,31 +30,8 @@ impl AgentState {
                 Status::failed_precondition(format!("{script_name} failed: {detail}"))
             });
         }
-        let script_path =
-            self.resolve_runtime_path(&format!("/opt/node-plane-runtime/{script_name}"));
-        let output = Command::new(&script_path)
-            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
-            // Helpers reach the Xray API through this exact binary.
-            .env(
-                "NODE_PLANE_AGENT_BIN",
-                std::env::current_exe().unwrap_or_default(),
-            )
-            .args(args)
-            .output()
-            .map_err(|err| Status::internal(format!("failed to execute {script_name}: {err}")))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if output.status.success() {
-            return Ok(stdout);
-        }
-        let detail = if stderr.is_empty() { stdout } else { stderr };
-        Err(Status::failed_precondition(format!(
-            "{script_name} failed: {}",
-            if detail.is_empty() {
-                "unknown error".to_string()
-            } else {
-                detail
-            }
+        Err(Status::invalid_argument(format!(
+            "unknown runtime entry point: {script_name}"
         )))
     }
 }

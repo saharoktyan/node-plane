@@ -44,7 +44,7 @@ def issue(protocol,name,temporary=False):
                 short_id='0123456789abcdef' if protocol=='xray' else '')
     if not temporary:
         script='xray-add-user-existing.sh' if protocol=='xray' else 'awg-add-user.sh'
-        run(str(ROOT/script),name,*([intent['uuid'],intent['short_id']] if protocol=='xray' else []))
+        run('/usr/local/bin/node-plane-agent','entry',script,name,*([intent['uuid'],intent['short_id']] if protocol=='xray' else []))
         return intent
     intent['lease_seconds']=43200
     operation('temporary_ensure',intent)
@@ -62,7 +62,7 @@ def setup():
     ROOT.joinpath('xray/config.json').write_text(json.dumps(config))
     run('docker','run','-d','--name','xray','--restart','unless-stopped','--user','0:0','--network','host',
         '-v',str(ROOT/'xray')+':/etc/xray:ro','ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0','run','-c','/etc/xray/config.json')
-    run('bash',str(ROOT/'init-awg.sh'))
+    run('/usr/local/bin/node-plane-agent','entry','init-awg.sh')
     run('modprobe','tun')
     run('docker','run','-d','--name','amnezia-awg','--restart','unless-stopped','--cap-add','NET_ADMIN',
         '--device','/dev/net/tun:/dev/net/tun','--sysctl','net.ipv4.ip_forward=1','-e','AWG_IFACE=wg0',

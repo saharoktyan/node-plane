@@ -1,5 +1,5 @@
-"""Node settings through the built agent and the real apply-node-settings.sh,
-with fake deploy scripts, Docker and ufw. In the Docker suite, where CI
+"""Node settings through the built agent and its apply-node-settings.sh entry
+point, with fake deployments, Docker and ufw. In the Docker suite, where CI
 builds the agent."""
 import json
 import os
@@ -26,14 +26,14 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
         self.awg = self.root / 'wg0.conf'
         self.env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={self.xray}\nAWG_CONFIG={self.awg}\n'
                             'XRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
-        script = (ASSETS / 'apply-node-settings.sh').read_text().replace(
-            'source /etc/node-plane/node.env', f'source {shlex.quote(str(self.env))}')
-        (self.root / 'apply-node-settings.sh').write_text(script)
         (self.root / 'awg_profile.py').write_text((ASSETS / 'awg_profile.py').read_text())
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
+        # Entry points start this agent; it deploys no containers.
+        agent = bin_dir / 'agent'
+        agent.write_text(f'#!/bin/sh\n[ "$1" = container-deploy ] && exit 0\nexec {shlex.quote(str(AGENT_BINARY))} "$@"\n')
+        agent.chmod(0o755)
         fakes = {
-            'deploy-xray.sh': self.root, 'deploy-awg.sh': self.root,
             # Every container runs; nothing is published.
             'docker': bin_dir, 'ufw': bin_dir,
         }
@@ -41,10 +41,10 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
             text = ('#!/bin/sh\nif [ "$1" = inspect ]; then echo true; fi\nexit 0\n'
                     if name == 'docker' else '#!/bin/sh\nexit 0\n')
             (directory / name).write_text(text)
-        for path in (*[directory / name for name, directory in fakes.items()], self.root / 'apply-node-settings.sh'):
+        for path in (directory / name for name, directory in fakes.items()):
             path.chmod(0o755)
         self.environment = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
-            'NODE_PLANE_AGENT_BIN': str(AGENT_BINARY), 'NODE_PLANE_RUNTIME_ROOT': str(self.root),
+            'NODE_PLANE_AGENT_BIN': str(agent), 'NODE_PLANE_RUNTIME_ROOT': str(self.root),
             'NODE_PLANE_NODE_ENV': str(self.env),
             'NODE_PLANE_PROFILE_JOURNAL': str(self.root / 'journal' / 'intents.sqlite3')}
 
