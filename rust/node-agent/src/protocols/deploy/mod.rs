@@ -13,6 +13,7 @@ use std::time::Duration;
 use ring::rand::{SecureRandom, SystemRandom};
 
 use super::{Setting, process_setting};
+use crate::runtime::images::Kind;
 
 fn succeeds(program: &str, args: &[&str]) -> bool {
     Command::new(program)
@@ -112,6 +113,25 @@ impl Docker {
     pub(crate) fn report(&self, args: &[&str]) {
         let _ = self.command(args).stdout(std::io::stderr()).status();
     }
+}
+
+/// Makes `image` available to `docker run`. The release tag is made from
+/// the pinned upstream image; another image is pulled unless the node
+/// already has it, as a locally built override.
+pub(crate) fn fetch(docker: &Docker, kind: Kind, image: &str) -> Result<(), String> {
+    if image != kind.release() {
+        if docker.quiet(&["image", "inspect", image]) {
+            return Ok(());
+        }
+        return docker.status(&["pull", image]);
+    }
+    let upstream = kind.upstream();
+    docker.status(&["pull", upstream])?;
+    let id = docker.output(&["image", "inspect", "-f", "{{.Id}}", upstream])?;
+    if !id.starts_with("sha256:") {
+        return Err(format!("unexpected image identity of {upstream}"));
+    }
+    docker.status(&["tag", &id, image])
 }
 
 /// Random hex digits.

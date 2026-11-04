@@ -63,8 +63,9 @@ const ENTRIES: [(&str, Prelude, &str); 13] = [
     ),
 ];
 
-/// Wrapper files earlier releases delivered next to these.
-const FORMER: [&str; 1] = ["apply-profile-intent.py"];
+/// Files earlier releases delivered next to these: a wrapper, and the AWG
+/// image the node built.
+const FORMER: [&str; 2] = ["apply-profile-intent.py", "amnezia-awg/Dockerfile"];
 
 #[derive(Clone, Copy)]
 enum Prelude {

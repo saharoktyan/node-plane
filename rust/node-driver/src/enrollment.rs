@@ -260,8 +260,11 @@ pub(crate) async fn enroll(
         })
         .await
         .map_err(|status| match status.code() {
-            // Nothing answered on the connection.
-            tonic::Code::Unknown => Status::unavailable("agent is not waiting for enrollment"),
+            // Nothing answered on the connection, or it dropped while the
+            // agent was starting.
+            tonic::Code::Unknown | tonic::Code::Cancelled => {
+                Status::unavailable("agent is not waiting for enrollment")
+            }
             _ => status,
         })?
         .into_inner();

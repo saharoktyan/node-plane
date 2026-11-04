@@ -12,9 +12,8 @@ docker load -i /root/awg-image.tar > /root/awg-load.log
 base=$(sed -n 's/Loaded image ID: //p' /root/awg-load.log | tail -1)
 if [ -z "$base" ]; then base=$(docker images -q amneziavpn/amneziawg-go | head -1); fi
 test -n "$base"
-docker tag "$base" node-plane-awg-base:boot-test
-sed -i '1cFROM node-plane-awg-base:boot-test' /opt/node-plane-runtime/amnezia-awg/Dockerfile
-docker build -t node-plane-awg:boot-test /opt/node-plane-runtime/amnezia-awg > /root/awg-build.log 2>&1
+docker tag "$base" node-plane-awg:boot-test
+install -D -m 0644 /root/awg-start.sh /opt/node-plane-runtime/amnezia-awg/start.sh
 install -m 0755 /root/node-plane-agent /usr/local/bin/node-plane-agent
 mkdir -p /etc/node-plane/tls
 cd /etc/node-plane/tls

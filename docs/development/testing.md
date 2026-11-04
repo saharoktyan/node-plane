@@ -84,7 +84,8 @@ Copy these files into `/root` in the guest:
 - [`systemd_boot_prepare.sh`](../../tests/systemd_boot_prepare.sh) and [`systemd_boot_guest.py`](../../tests/systemd_boot_guest.py).
 - The release `node-plane-agent` binary.
 - `runtime.tar`, with current runtime assets under `node-plane-runtime`.
-- `xray-image.tar` and `awg-image.tar`, exported from the release's pinned runtime images; inspect the preparation script for required base-image retagging.
+- `xray-image.tar` and `awg-image.tar`, exported from the release's pinned upstream images (`Kind::upstream` in `rust/node-agent/src/runtime/images.rs`); the preparation script tags them.
+- `awg-start.sh`: the AWG container's start script, [`rust/node-agent/src/protocols/awg/start.sh`](../../rust/node-agent/src/protocols/awg/start.sh).
 
 Inside the guest:
 

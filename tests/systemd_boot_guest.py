@@ -67,7 +67,9 @@ def setup():
     run('docker','run','-d','--name','amnezia-awg','--restart','unless-stopped','--cap-add','NET_ADMIN',
         '--device','/dev/net/tun:/dev/net/tun','--sysctl','net.ipv4.ip_forward=1','-e','AWG_IFACE=wg0',
         '-e','AWG_NETWORK=10.8.1.0/24','-p','51820:51820/udp',
-        '-v',str(ROOT/'amnezia-awg/data')+':/opt/amnezia/awg','node-plane-awg:boot-test')
+        '-v',str(ROOT/'amnezia-awg/data')+':/opt/amnezia/awg',
+        '-v',str(ROOT/'amnezia-awg/start.sh')+':/opt/amnezia/start.sh:ro',
+        '--entrypoint','/bin/sh','node-plane-awg:boot-test','/opt/amnezia/start.sh')
     time.sleep(3)
     state={'boot_before':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'protocols':{}}
     for protocol in ('xray','awg'):

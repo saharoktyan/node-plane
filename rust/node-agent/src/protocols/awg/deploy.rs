@@ -1,8 +1,9 @@
-//! The AWG container: the image is built on the node, the config takes the
-//! current parameters and tunnel addresses, and a failed start brings back
+//! The AWG container: the release image is AmneziaWG's own, running the
+//! agent's start script; the config takes the current parameters and tunnel
+//! addresses, and a failed start brings back
 //! the previous config and container. Replaces the body of `deploy-awg.sh`.
 use std::fs;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -11,7 +12,7 @@ use super::peer_sync::atomic_write;
 use super::setup::{profile, profile_tool};
 use crate::protocols::Setting;
 use crate::protocols::deploy::guard::Guard;
-use crate::protocols::deploy::{Docker, leased, leased_deploy, prepare_leased, settle};
+use crate::protocols::deploy::{Docker, fetch, leased, leased_deploy, prepare_leased, settle};
 use crate::protocols::settings::Backup;
 use crate::runtime::images::Kind;
 
@@ -165,7 +166,16 @@ impl Deployment<'_> {
         run.extend(labels.iter().map(String::as_str));
         run.extend(["--restart", "no"]);
         run.extend(self.host.iter().map(String::as_str));
-        run.extend(["-p", &published, "-v", &volume, &self.image]);
+        run.extend([
+            "-p",
+            &published,
+            "-v",
+            &volume,
+            "--entrypoint",
+            "/bin/sh",
+            &self.image,
+            START_PATH,
+        ]);
         docker.status(&run)?;
 
         settle(self.setting, 3);
@@ -269,44 +279,42 @@ impl Deployment<'_> {
     }
 }
 
-/// Builds the image from the delivered Dockerfile, so its tag names the
-/// version.
-fn build(docker: &Docker, guard: &Guard<'_>, image: &str, dir: &Path) -> Result<(), String> {
-    let log_path = guard.scratch().join("build.log");
-    let log = fs::File::create(&log_path).map_err(|err| err.to_string())?;
-    let built = docker
-        .command(&["build", "--no-cache", "-t", image, &dir.to_string_lossy()])
-        .stdout(log.try_clone().map_err(|err| err.to_string())?)
-        .stderr(log)
-        .status()
-        .is_ok_and(|status| status.success());
-    if !built {
-        let output = fs::read_to_string(&log_path).unwrap_or_default();
-        let lines: Vec<&str> = output.lines().collect();
-        let tail = lines[lines.len().saturating_sub(120)..].join("\n");
-        return Err(format!("AWG image build failed.\n{tail}"));
-    }
-    println!("AWG image built: {image}");
+/// The container's entry point, built into the agent.
+const START: &str = include_str!("start.sh");
+/// Where the container reads it.
+const START_PATH: &str = "/opt/amnezia/start.sh";
+
+/// Writes the start script to `dir`, makes the image available and checks
+/// the script's syntax in it. Returns the script's bind mount.
+fn prepare(docker: &Docker, image: &str, dir: &Path) -> Result<String, String> {
+    let script = dir.join("start.sh");
+    atomic_write(&script, START)?;
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o644))
+        .map_err(|err| format!("{}: {err}", script.display()))?;
+    fetch(docker, Kind::Awg, image)?;
+    let mount = format!("{}:{START_PATH}:ro", script.display());
     let output = docker
         .command(&[
             "run",
             "--rm",
+            "-v",
+            &mount,
             "--entrypoint",
             "/bin/sh",
             image,
             "-n",
-            "/opt/amnezia/start.sh",
+            START_PATH,
         ])
         .output()
         .map_err(|err| format!("docker failed: {err}"))?;
     if !output.status.success() {
         return Err(format!(
-            "AWG image syntax check failed.\n{}{}",
+            "AWG start script syntax check failed.\n{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(())
+    Ok(mount)
 }
 
 pub(crate) fn deploy(setting: Setting<'_>) -> Result<String, String> {
@@ -389,7 +397,8 @@ pub(crate) fn deploy(setting: Setting<'_>) -> Result<String, String> {
 
     let guard = Guard::new(&docker, setting, "awg", &container, &data, DATA)?;
     let previous = guard.existing()?;
-    build(&docker, &guard, &image, &docker_dir)?;
+    let start = prepare(&docker, &image, &docker_dir)?;
+    host.extend(["-v".into(), start]);
 
     let backup = Backup::take(&config, ".awg-deploy-backup-")?;
     let deployment = Deployment {

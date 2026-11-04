@@ -158,11 +158,6 @@ impl<'a> Guard<'a> {
         })
     }
 
-    /// A private directory removed with the guard.
-    pub(crate) fn scratch(&self) -> &Path {
-        &self.scratch
-    }
-
     /// Where `docker run --cidfile` records the new container.
     pub(crate) fn cidfile(&self) -> PathBuf {
         self.scratch.join("container-id")

@@ -57,14 +57,25 @@ impl Kind {
         }
     }
 
-    /// The image deployments of this release run by default.
+    /// The image deployments of this release run by default: a local tag
+    /// that names Node Plane and the version, made from `upstream`.
     pub(crate) fn release(self) -> &'static str {
+        match self {
+            Kind::Xray => "node-plane-xray:26.10.31-np.2",
+            Kind::Awg => "node-plane-awg:3.1.20260828",
+        }
+    }
+
+    /// The digest-pinned image the release tag is made from. The AWG image
+    /// runs the agent's start script (`protocols/awg/start.sh`).
+    pub(crate) fn upstream(self) -> &'static str {
         match self {
             Kind::Xray => {
                 "ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0"
             }
-            // Built on the node from the delivered Dockerfile; the tag names the version.
-            Kind::Awg => "node-plane-amnezia-awg:3.1.20260828",
+            Kind::Awg => {
+                "amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72"
+            }
         }
     }
 
@@ -76,8 +87,13 @@ impl Kind {
                 "ghcr.io/xtls/xray-core:25.12.8",
                 "ghcr.io/xtls/xray-core:26.3.27",
                 "ghcr.io/xtls/xray-core:26.10.29@sha256:c9443f3ee297f6481bc245269d61720c6f989195ee9b58fa90fdd99f03c21044",
+                "ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0",
             ],
-            Kind::Awg => &["node-plane-amnezia-awg:0.2.16"],
+            // Built on the node by earlier releases.
+            Kind::Awg => &[
+                "node-plane-amnezia-awg:0.2.16",
+                "node-plane-amnezia-awg:3.1.20260828",
+            ],
         }
     }
 
@@ -244,6 +260,15 @@ impl AgentState {
                 serde_json::json!({"image": item.image, "replaced": replaced}),
             );
         }
+        // Images earlier releases built on the node; Docker keeps one that
+        // a container still uses.
+        for image in Kind::ALL
+            .iter()
+            .flat_map(|kind| kind.former())
+            .filter(|image| image.starts_with("node-plane-"))
+        {
+            let _ = Command::new("docker").args(["image", "rm", image]).output();
+        }
         Ok(serde_json::Value::Object(report))
     }
 }
@@ -266,10 +291,13 @@ mod tests {
             assert!(Kind::Xray.managed(configured), "{configured}");
             assert_eq!(Kind::Xray.resolve(configured), Kind::Xray.release());
         }
-        assert_eq!(
-            Kind::Awg.resolve("node-plane-amnezia-awg:0.2.16"),
-            Kind::Awg.release()
-        );
+        for former in [
+            "node-plane-amnezia-awg:0.2.16",
+            "node-plane-amnezia-awg:3.1.20260828",
+        ] {
+            assert_eq!(Kind::Awg.resolve(former), Kind::Awg.release());
+        }
+        assert!(Kind::Xray.managed(Kind::Xray.upstream()));
         assert!(!Kind::Xray.managed("registry.example/xray:1"));
         assert_eq!(
             Kind::Xray.resolve("registry.example/xray:1"),
@@ -277,6 +305,8 @@ mod tests {
         );
         for kind in Kind::ALL {
             assert!(!kind.former().contains(&kind.release()));
+            assert!(kind.release().starts_with("node-plane-"));
+            assert!(kind.upstream().contains("@sha256:"));
         }
     }
 

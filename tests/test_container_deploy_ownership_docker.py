@@ -92,7 +92,7 @@ def main():
         sys.exit(0)
     elif cmd == "pull":
         sys.exit(0)
-    elif cmd == "build":
+    elif cmd == "tag":
         sys.exit(0)
     elif cmd == "network":
         # Network inspect or create dummy responses
@@ -126,6 +126,9 @@ def main():
         inspect_args = args[1:]
         _handle_inspect(inspect_args, state)
     elif cmd == "image" and len(args) > 1 and args[1] == "inspect":
+        if "{{{{.Id}}}}" in args:
+            sys.stdout.write("sha256:" + "a" * 64 + "\\n")
+            sys.exit(0)
         sys.stdout.write("image_os=linux image_arch=amd64\\n")
         sys.exit(0)
     elif cmd == "run":

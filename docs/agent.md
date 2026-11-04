@@ -47,7 +47,7 @@ Without an active `ufw`, the agent does not change the firewall; restrict the po
 
 The agent does work that requires root on the server:
 
-- runs the Xray and AmneziaWG containers through Docker; access to the Docker socket is already equivalent to root;
+- runs the Xray and AmneziaWG containers through Docker; access to the Docker socket is already equivalent to root. Images are pulled by digest and tagged locally as `node-plane-xray:<version>` and `node-plane-awg:<version>`; nothing is built on the server;
 - installs Docker and system packages with `apt-get` during server setup;
 - opens VPN ports in `ufw`;
 - limits speed with `tc` and `nft`, and enters the AmneziaWG container's network namespace with `nsenter`;
@@ -61,7 +61,7 @@ Because of Docker alone, a separate unprivileged user would not limit what a com
 
 The controller calls the agent's API: protocol deployment, profile access, settings, diagnostics, speed and connection limits, removal. Changes are journaled on the server.
 
-Current limitation: the controller still sends `awg_profile.py`, which the agent runs as root, and the AmneziaWG container's `start.sh`, so a compromised controller can run code on its nodes. The other runtime entry points are built into the agent. Planned next: moving these into the agent, signed agent self-update instead of updates over SSH, and a systemd sandbox for the agent. Until signed self-update, agent updates of nodes installed with the command are not delivered from the controller.
+Current limitation: the controller still sends `awg_profile.py`, which the agent runs as root, so a compromised controller can run code on its nodes. The other runtime entry points and the AmneziaWG container's start script are built into the agent. Planned next: moving it into the agent, signed agent self-update instead of updates over SSH, and a systemd sandbox for the agent. Until signed self-update, agent updates of nodes installed with the command are not delivered from the controller.
 
 ## Files on the server
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Pull the VPN container images by digest instead of building AWG on the
+  node: the agent tags them locally as `node-plane-xray:26.10.31-np.2` and
+  `node-plane-awg:3.1.20260828`, and runs AmneziaWG's own image with the
+  start script built into the agent, mounted read-only. The AWG `Dockerfile`
+  and `start.sh` are no longer delivered; a runtime update redeploys the
+  containers on the new tags and removes the images earlier releases built.
+- Keep waiting for an agent whose enrollment connection drops while it
+  starts, instead of reporting the enrollment as failed.
 - Build the runtime entry points into the node agent: `init-*`, `deploy-*`,
   `sync-xray.sh`, `apply-node-settings.sh`, `regenerate-awg-entropy.sh`,
   `show-awg-entropy.sh`, `inspect-profile.sh`, the profile add/delete

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::protocols::Setting;
 use crate::protocols::deploy::guard::Guard;
 use crate::protocols::deploy::{
-    Docker, leased, leased_deploy, open_directory, prepare_leased, settle,
+    Docker, fetch, leased, leased_deploy, open_directory, prepare_leased, settle,
 };
 use crate::protocols::settings::runtime;
 use crate::runtime::images::Kind;
@@ -46,7 +46,7 @@ pub(crate) fn deploy(setting: Setting<'_>) -> Result<String, String> {
     let guard = Guard::new(&docker, setting, "xray", &container, source, "/etc/xray")?;
     let previous_id = guard.existing()?;
     prepare_leased("xray")?;
-    docker.status(&["pull", &image])?;
+    fetch(&docker, Kind::Xray, &image)?;
     docker.status(&[
         "run",
         "--rm",
