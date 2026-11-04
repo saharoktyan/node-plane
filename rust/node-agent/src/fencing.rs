@@ -1,5 +1,5 @@
 //! Command fences shared by mutating operations.
-use std::path::Path;
+use std::path::PathBuf;
 
 use tonic::Status;
 
@@ -10,13 +10,19 @@ use crate::state::AgentState;
 impl AgentState {
     pub(crate) fn check_force_dispatch_fence(&self, command_id: &str) -> Result<(), Status> {
         if valid_force_identity(command_id)
-            && Path::new("/etc/node-plane/force-recovery")
+            && self
+                .force_tickets()
                 .join(format!("command-{command_id}.fence"))
                 .exists()
         {
             return Err(Status::failed_precondition("force_command_cancelled"));
         }
         Ok(())
+    }
+
+    /// Forced recovery tickets and dispatch fences, beside the journal.
+    pub(crate) fn force_tickets(&self) -> PathBuf {
+        self.journal().with_file_name("force-recovery")
     }
 
     /// Holds the journal lock for a maintenance change, once no backend

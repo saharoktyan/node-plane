@@ -1,5 +1,6 @@
 """Production entrypoints and restart guards on disposable journals/configs."""
 import fcntl
+import importlib.util
 import json
 from pathlib import Path
 import sqlite3
@@ -9,7 +10,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from tests.test_agent_profile_intents import MODULE
+SPEC = importlib.util.spec_from_file_location('agent_intents', Path(__file__).resolve().parents[1] / 'runtime_assets/apply-profile-intent.py')
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
 
 
 class LeasedRuntimeTests(unittest.TestCase):

@@ -1,12 +1,12 @@
 //! Explicit forced recovery of an interrupted command.
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde_json::Value;
 use tonic::Status;
 
 use crate::agent::v1::{ForceRecoveryRequest, RuntimeCommandResponse};
 use crate::fencing::valid_force_identity;
+use crate::intents::force;
 use crate::state::AgentState;
 
 impl AgentState {
@@ -31,41 +31,16 @@ impl AgentState {
             "node_key": req.node_key, "ticket_id": req.ticket_id,
             "command_id": req.command_id, "kind": req.operation_kind, "intent": intent,
         });
-        let mut child = Command::new("python3")
-            .args([
-                "-c",
-                include_str!("../../../../runtime_assets/force-recovery.py"),
-                &req.phase,
-            ])
-            .env("NODE_PLANE_AGENT_INSTANCE_ID", &self.instance_id)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| Status::failed_precondition("force_helper_unavailable"))?
-            .write_all(spec.to_string().as_bytes())
-            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
-        let output = child
-            .wait_with_output()
-            .map_err(|_| Status::failed_precondition("force_helper_unavailable"))?;
-        if !output.status.success() {
-            let reason = String::from_utf8_lossy(&output.stderr);
-            let reason = reason.trim();
-            let safe = reason.starts_with("force_")
-                && reason.len() <= 100
-                && reason.bytes().all(|c| c.is_ascii_lowercase() || c == b'_');
-            return Err(Status::failed_precondition(if safe {
-                reason
-            } else {
-                "force_recovery_failed"
-            }));
+        // Codes only: errors never carry the request.
+        let spec = force::Spec::check(&spec).map_err(Status::failed_precondition)?;
+        let journal = self.journal();
+        let tickets = self.force_tickets();
+        let value = if req.phase == "prepare" {
+            force::prepare(&spec, &self.instance_id, &tickets, &journal)
+        } else {
+            force::retire(&spec, &self.instance_id, &tickets, &journal)
         }
-        let value: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|_| Status::internal("invalid force recovery receipt"))?;
+        .map_err(Status::failed_precondition)?;
         if req.phase == "prepare" && value["restart_required"] == true {
             // The normal service stop kills its entire cgroup, including child
             // mutation scripts. The journal flock independently verifies this

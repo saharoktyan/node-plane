@@ -1,4 +1,5 @@
 """Node-local lease expiry: no Docker or controller needed for these tests."""
+import importlib.util
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -8,7 +9,9 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from tests.test_agent_profile_intents import MODULE
+SPEC = importlib.util.spec_from_file_location('agent_intents', Path(__file__).resolve().parents[1] / 'runtime_assets/apply-profile-intent.py')
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
 from tests.test_agent_node_operations import MODULE as OPERATIONS
 
 

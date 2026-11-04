@@ -9,7 +9,9 @@
 //!
 //! `apply-profile-intent.py` shares the journal for the commands not moved
 //! here yet; both keep its schema.
+pub(crate) mod decommission;
 pub(crate) mod expiry;
+pub(crate) mod force;
 pub(crate) mod leases;
 pub(crate) mod legacy;
 pub(crate) mod profile;
@@ -157,7 +159,7 @@ impl Lock {
     }
 }
 
-fn database(err: rusqlite::Error) -> String {
+pub(crate) fn database(err: rusqlite::Error) -> String {
     format!("command journal: {err}")
 }
 
@@ -245,6 +247,16 @@ pub(crate) fn leases_schema(connection: &Connection) -> Result<(), String> {
 /// Python's `json.dumps(value, sort_keys=True, separators=(',', ':'))`, the
 /// form command fingerprints hash.
 pub(crate) fn canonical(value: &Value) -> String {
+    sorted_json(value, ",", ":")
+}
+
+/// Python's `json.dumps(value, sort_keys=True)`, which node operation
+/// fingerprints hash.
+pub(crate) fn sorted_dumps(value: &Value) -> String {
+    sorted_json(value, ", ", ": ")
+}
+
+fn sorted_json(value: &Value, item: &str, key: &str) -> String {
     fn string(out: &mut String, text: &str) {
         out.push('"');
         for unit in text.encode_utf16() {
@@ -262,7 +274,7 @@ pub(crate) fn canonical(value: &Value) -> String {
         }
         out.push('"');
     }
-    fn write(out: &mut String, value: &Value) {
+    fn write(out: &mut String, value: &Value, item: &str, key_separator: &str) {
         match value {
             Value::Object(map) => {
                 out.push('{');
@@ -270,21 +282,22 @@ pub(crate) fn canonical(value: &Value) -> String {
                 keys.sort();
                 for (index, key) in keys.into_iter().enumerate() {
                     if index > 0 {
-                        out.push(',');
+                        out.push_str(item);
                     }
                     string(out, key);
-                    out.push(':');
-                    write(out, &map[key]);
+                    out.push_str(key_separator);
+                    write(out, &map[key], item, key_separator);
                 }
                 out.push('}');
             }
             Value::Array(items) => {
                 out.push('[');
-                for (index, item) in items.iter().enumerate() {
+                let separator = item;
+                for (index, element) in items.iter().enumerate() {
                     if index > 0 {
-                        out.push(',');
+                        out.push_str(separator);
                     }
-                    write(out, item);
+                    write(out, element, separator, key_separator);
                 }
                 out.push(']');
             }
@@ -293,7 +306,7 @@ pub(crate) fn canonical(value: &Value) -> String {
         }
     }
     let mut out = String::new();
-    write(&mut out, value);
+    write(&mut out, value, item, key);
     out
 }
 
@@ -360,6 +373,7 @@ mod tests {
             canonical(&json!({"b": [1, true, null], "a": "é\n\u{1}\"\\/"})),
             r#"{"a":"\u00e9\n\u0001\"\\/","b":[1,true,null]}"#
         );
+        assert_eq!(sorted_dumps(&json!({"b": [1, 2], "a": {"c": "d"}})), r#"{"a": {"c": "d"}, "b": [1, 2]}"#);
     }
 
     #[test]

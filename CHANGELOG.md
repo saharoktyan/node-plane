@@ -35,6 +35,9 @@
   agent (`node-plane-agent lease monitor|expire|supervise|prepare|deploy`).
   The lease units run the agent; units of earlier releases are rewritten
   when the agent starts.
+- Prepare node decommission and run forced recovery in the node agent;
+  `force-recovery.py` is removed. Tickets and dispatch fences keep their
+  location and format.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning
