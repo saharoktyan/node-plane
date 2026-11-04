@@ -27,7 +27,7 @@ SCRIPTS = {
     'uv_runtime.sh', 'release_retention.py', 'run_node_driver.sh', 'run_node_agent.sh',
     'lib/agent_ssh.sh', 'lib/install_progress.sh', 'lib/stack_update.sh', 'lib/controller_archive.sh',
     'lib/archive_agent_journals.py', 'lib/install_credentials.sh',
-    'verify_server_artifacts.py',
+    'verify_server_artifacts.py', 'install_agent.sh',
 }
 LEGAL_FILES = {'LICENSE', 'THIRD_PARTY_LICENSES'}
 PYTHON_PROJECT_FILES = {'pyproject.toml', 'uv.lock'}

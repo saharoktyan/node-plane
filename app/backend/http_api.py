@@ -687,6 +687,13 @@ class NodeActionInput(BaseModel):
     revision: StrictInt
 
 
+class AgentEnrollmentInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision: StrictInt
+    restrict_to_controller: StrictBool = False
+    agent_host: str | None = Field(default=None, max_length=253)
+
+
 class NodeRemovalInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     retry: StrictBool = False
@@ -1838,6 +1845,21 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if body.action != 'bootstrap':
             raise AccessDenied('invalid_input', 422)
         return node_bootstraps.queue(current, node_key, body.revision, idempotency_key)
+
+    from .agent_enrollment import AgentEnrollmentService
+    agent_enrollments = AgentEnrollmentService(db)
+
+    @app.post('/api/v1/nodes/{node_key}/agent-enrollment', status_code=201)
+    def enroll_node_agent(node_key: str, body: AgentEnrollmentInput,
+                          idempotency_key: str | None = Header(default=None), current=Depends(actor)):
+        """A one-time install command for the server; server setup waits for it."""
+        return agent_enrollments.issue(current, node_key, body.revision, idempotency_key,
+                                       restrict_to_controller=body.restrict_to_controller,
+                                       agent_host=body.agent_host)
+
+    @app.get('/api/v1/nodes/{node_key}/agent-enrollment')
+    def get_node_agent_enrollment(node_key: str, current=Depends(actor)):
+        return agent_enrollments.get(current, node_key)
 
     @app.get('/api/v1/node-bootstraps/{identity}')
     def get_node_bootstrap(identity: UUID, current=Depends(actor)):

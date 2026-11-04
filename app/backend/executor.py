@@ -283,6 +283,8 @@ class Worker:
         self.rollout_executor = AgentRolloutService(self.executor.db)
         from .node_bootstrap import NodeBootstrapService
         self.bootstrap_executor = NodeBootstrapService(self.executor.db, self.executor.driver)
+        from .agent_enrollment import AgentEnrollmentService
+        self.enrollment_executor = AgentEnrollmentService(self.executor.db, self.executor.driver)
         from .updates import UpdateService
         self.update_executor = UpdateService(self.executor.db, self.executor.driver)
         from .backups import BackupService
@@ -299,7 +301,7 @@ class Worker:
 
     def drain(self, stop):
         services = (self.system_cleanup, self.backup_executor, self.update_executor,
-                    self.bootstrap_executor, self.rollout_executor, self.removals,
+                    self.enrollment_executor, self.bootstrap_executor, self.rollout_executor, self.removals,
                     self.node_jobs, self.node_executor, self.executor,
                     self.temporary_executor, self.config_executor)
         while not stop.is_set():

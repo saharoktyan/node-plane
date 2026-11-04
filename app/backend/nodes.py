@@ -187,6 +187,8 @@ class NodeService:
     def initialize_schema(self):
         from .node_bootstrap import NodeBootstrapService
         NodeBootstrapService(self.db).initialize_schema()
+        from .agent_enrollment import AgentEnrollmentService
+        AgentEnrollmentService(self.db).initialize_schema()
         from .backups import BackupService
         BackupService(self.db).initialize_schema()
         from .updates import UpdateService
