@@ -1,5 +1,5 @@
 """AWG peers through the agent's awg-add-user.sh and awg-del-user.sh entry
-points, against a fake Docker and the real awg_profile.py. In the
+points, against a fake Docker. In the
 Docker suite, where CI builds the agent."""
 import base64
 import json
@@ -7,14 +7,12 @@ import os
 import pathlib
 import shlex
 import subprocess
-import sys
 import tempfile
 import unittest
 import zlib
 
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / 'runtime_assets'
 AGENT_BINARY = ASSETS.parent / 'rust/node-agent/target/debug/node-plane-agent'
-PROFILE_TOOL = ASSETS / 'awg_profile.py'
 
 
 def fixture(root):
@@ -25,14 +23,13 @@ def fixture(root):
     docker_log = root / 'docker.log'
     fake_bin = root / 'bin'
     fake_bin.mkdir()
-    profile = subprocess.check_output([sys.executable, str(PROFILE_TOOL), 'init', str(config)], text=True)
+    profile = subprocess.check_output([str(AGENT_BINARY), 'awg-profile', 'init', str(config)], text=True)
     config.write_text('[Interface]\nPrivateKey = serverprivate\nAddress = 10.8.1.1/24\nListenPort = 51820\n' + profile)
     node_env.write_text(
         f'AWG_CONFIG={shlex.quote(str(config))}\n'
         f'AWG_CLIENTS_DIR={shlex.quote(str(root / "clients"))}\n'
         'SERVER_KEY=msk1\n'
-        'AWG_SERVER_IP=203.0.113.10\n'
-        f'AWG_PROFILE_TOOL={shlex.quote(str(PROFILE_TOOL))}\n')
+        'AWG_SERVER_IP=203.0.113.10\n')
     docker = fake_bin / 'docker'
     docker.write_text(
         '#!/bin/sh\n'

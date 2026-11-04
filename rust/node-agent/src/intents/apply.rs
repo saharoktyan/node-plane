@@ -252,7 +252,7 @@ pub(crate) fn run(
     // the result is read back independently.
     progress.step("protocol_verify");
     verify::environment(&settings, &runtime.env)?;
-    verify::config(&settings, &paths.xray, &awg_path, &runtime.tool())?;
+    verify::config(&settings, &paths.xray, &awg_path)?;
     for protocol in settings.protocols() {
         let state = host.check(
             &[
@@ -286,7 +286,7 @@ mod tests {
 
     use super::*;
     use crate::intents::leases::fake::Scripted;
-    use crate::intents::settings::tests::{intent, tool};
+    use crate::intents::settings::tests::intent;
     use crate::intents::verify::tests::xray_config;
     use crate::protocols::test_dir;
 
@@ -297,7 +297,6 @@ mod tests {
 
     fn runtime(root: &Path) -> Runtime {
         script(&root.join("apply-node-settings.sh"), "#!/bin/sh\nexit 0\n");
-        let _ = fs::copy(tool(), root.join("awg_profile.py"));
         Runtime {
             root: root.into(),
             env: root.join("node.env"),
@@ -359,7 +358,7 @@ mod tests {
             ),
         );
         let value = intent(1, "task-1");
-        let settings = Settings::check(&value, &tool()).unwrap();
+        let settings = Settings::check(&value).unwrap();
         let host = host();
         let first = run(&host, &runtime, &settings, 0, &Progress::none()).unwrap();
         let second = run(&host, &runtime, &settings, 0, &Progress::none()).unwrap();
@@ -404,7 +403,7 @@ mod tests {
             run(
                 &host,
                 &runtime,
-                &Settings::check(&value, &tool()).unwrap(),
+                &Settings::check(&value).unwrap(),
                 0,
                 &Progress::none(),
             )
@@ -452,7 +451,7 @@ mod tests {
         let result = run(
             &host,
             &runtime,
-            &Settings::check(&value, &tool()).unwrap(),
+            &Settings::check(&value).unwrap(),
             0,
             &Progress::none(),
         )
@@ -496,7 +495,7 @@ mod tests {
         let err = run(
             &host,
             &runtime,
-            &Settings::check(&value, &tool()).unwrap(),
+            &Settings::check(&value).unwrap(),
             0,
             &Progress::none(),
         )
@@ -531,7 +530,7 @@ mod tests {
         let result = run(
             &host,
             &runtime,
-            &Settings::check(&value, &tool()).unwrap(),
+            &Settings::check(&value).unwrap(),
             0,
             &Progress::none(),
         )

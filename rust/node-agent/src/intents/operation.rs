@@ -81,7 +81,6 @@ fn retired(intent: &Value, action: &str) -> Value {
 pub(crate) fn command(
     journal: &Path,
     env: &Path,
-    tool: &Path,
     instance: &str,
     action: &str,
     command_id: &str,
@@ -112,7 +111,7 @@ pub(crate) fn command(
             return Err("invalid node operation intent".into());
         }
     } else {
-        Settings::check(&settings_intent(intent), tool)?;
+        Settings::check(&settings_intent(intent))?;
     }
     if intent["command_id"] != command_id {
         return Err("command identity mismatch".into());
@@ -298,7 +297,7 @@ pub(crate) fn run(
         _ => {}
     }
     let value = settings_intent(intent);
-    let settings = Settings::check(&value, &runtime.tool())?;
+    let settings = Settings::check(&value)?;
     match action {
         "check_ports" => {
             let owned = managed_ports(host, &runtime.env);
@@ -768,7 +767,6 @@ pub(crate) fn run_command(args: &[String]) -> Option<i32> {
         command(
             &journal,
             &runtime.env,
-            &runtime.tool(),
             &instance,
             action,
             command_id,
@@ -803,7 +801,6 @@ mod tests {
 
     use super::*;
     use crate::intents::leases::fake::Scripted;
-    use crate::intents::settings::tests::tool;
     use crate::intents::test_journal;
     use crate::protocols::test_dir;
 
@@ -848,7 +845,6 @@ mod tests {
         command(
             journal,
             &env("n1"),
-            &tool(),
             instance,
             action,
             "job1",
@@ -865,7 +861,6 @@ mod tests {
         let result = command(
             &journal,
             &env("ger2"),
-            &tool(),
             "agent",
             "bootstrap",
             "job1",
@@ -965,7 +960,6 @@ mod tests {
             command(
                 &journal,
                 &env("n1"),
-                &tool(),
                 "agent",
                 "bootstrap",
                 identity,
@@ -998,7 +992,6 @@ mod tests {
             command(
                 &journal,
                 &env("n1"),
-                &tool(),
                 "agent",
                 "bootstrap",
                 "other",
@@ -1014,7 +1007,6 @@ mod tests {
             command(
                 &journal,
                 &env("n1"),
-                &tool(),
                 "agent",
                 "cleanup_runtime",
                 "job1",

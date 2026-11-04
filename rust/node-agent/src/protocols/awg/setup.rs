@@ -3,22 +3,17 @@
 //! only start `node-plane-agent awg-config init|regenerate` for the profile
 //! intent journal.
 //!
-//! Keys and parameters come from `awg_profile.py`, which the controller
-//! shares.
+//! Keys and parameters come from `profile`.
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
-use super::entropy;
+use super::{entropy, profile};
 use crate::protocols::deploy::prepare_leased;
 use crate::protocols::{Setting, process_setting};
-
-pub(crate) fn profile_tool(setting: Setting<'_>) -> String {
-    setting("AWG_PROFILE_TOOL", "/opt/node-plane-runtime/awg_profile.py")
-}
 
 fn config_path(setting: Setting<'_>) -> PathBuf {
     setting(
@@ -26,23 +21,6 @@ fn config_path(setting: Setting<'_>) -> PathBuf {
         "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
     )
     .into()
-}
-
-/// `python3 awg_profile.py ARGS`: its stdout, or its error.
-pub(crate) fn profile(tool: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("python3")
-        .arg(tool)
-        .args(args)
-        .stderr(Stdio::inherit())
-        .output()
-        .map_err(|err| format!("awg_profile.py failed: {err}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "awg_profile.py {} failed",
-            args.first().copied().unwrap_or("")
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// The interface address, with the tunnel's IPv6 network unless it has one.
@@ -63,19 +41,10 @@ fn init(setting: Setting<'_>) -> Result<String, String> {
     if fs::metadata(&config).is_ok_and(|meta| meta.len() > 0) {
         return Ok(format!("AWG config already exists: {}", config.display()));
     }
-    let tool = profile_tool(setting);
-    let private = profile(&tool, &["genkey"])?;
-    let parameters = profile(
-        &tool,
-        &[
-            "init",
-            &config.to_string_lossy(),
-            &setting("AWG_I1_PRESET", "quic"),
-        ],
-    )?;
+    let parameters = profile::init_lines(&setting("AWG_I1_PRESET", "quic"))?;
     let text = format!(
         "[Interface]\nPrivateKey = {}\nAddress = {}\nListenPort = {}\n{parameters}",
-        private.trim_end_matches('\n'),
+        profile::new_private_key(),
         server_address(&setting("AWG_SERVER_ADDRESS", "10.8.1.0/24")),
         setting("AWG_SERVER_PORT", "51820"),
     );
@@ -86,7 +55,7 @@ fn init(setting: Setting<'_>) -> Result<String, String> {
             .map_err(|err| err.to_string())?;
         file.write_all(text.as_bytes())
             .map_err(|err| err.to_string())?;
-        profile(&tool, &["validate", &staged.to_string_lossy()])?;
+        profile::validate_file(&staged)?;
         fs::rename(&staged, &config).map_err(|err| err.to_string())
     })();
     if result.is_err() {
@@ -119,14 +88,9 @@ fn regenerate(setting: Setting<'_>) -> Result<String, String> {
     let backup = config.with_file_name(format!(".awg-regenerate-backup-{}", std::process::id()));
     fs::copy(&config, &backup).map_err(|err| err.to_string())?;
     let attempt = || -> Result<String, String> {
-        let report = profile(
-            &profile_tool(setting),
-            &[
-                "regenerate",
-                &config.to_string_lossy(),
-                &setting("AWG_I1_PRESET", "quic"),
-            ],
-        )?;
+        let report = profile::regenerate_file(&config, &setting("AWG_I1_PRESET", "quic"))?
+            .map(|text| format!("{text}\n"))
+            .unwrap_or_default();
         prepare_leased("awg")?;
         docker(&["restart", &container])?;
         std::thread::sleep(Duration::from_secs(2));

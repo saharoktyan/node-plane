@@ -6,7 +6,6 @@ fixtures publish only the Xray API port (and test SOCKS ports), on host loopback
 """
 import base64
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -25,20 +24,26 @@ from backend.removal_verifier import RemovalVerifier
 from backend.installation_maintenance import InstallationMaintenance, UNITS
 
 ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
-sys.path.insert(0, str(ASSETS))
 XRAY_IMAGE = 'ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0'
 AGENT_BINARY = Path(__file__).resolve().parents[1] / 'rust/node-agent/target/debug/node-plane-agent'
 AWG_IMAGE = 'amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72'
 
 
-def load(name, file):
-    spec = importlib.util.spec_from_file_location(name, ASSETS / file)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+class AWG:
+    """AWG keys and profiles from the built agent, checked as the controller does."""
+    @staticmethod
+    def new_private_key():
+        return subprocess.check_output([str(AGENT_BINARY), 'awg-profile', 'genkey'], text=True).strip()
 
+    @staticmethod
+    def new_profile(preset):
+        lines = subprocess.check_output([str(AGENT_BINARY), 'awg-profile', 'init', '-', preset], text=True)
+        return dict(line.split(' = ', 1) for line in lines.splitlines())
 
-AWG = load('runtime_test_awg', 'awg_profile.py')
+    @staticmethod
+    def validate(values):
+        import awg_profile
+        awg_profile.validate(values)
 
 
 def xray_users(tag):

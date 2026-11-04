@@ -26,7 +26,6 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
         self.awg = self.root / 'wg0.conf'
         self.env.write_text(f'SERVER_KEY=n1\nXRAY_CONFIG={self.xray}\nAWG_CONFIG={self.awg}\n'
                             'XRAY_CONTAINER_NAME=xray\nAWG_CONTAINER_NAME=awg\n')
-        (self.root / 'awg_profile.py').write_text((ASSETS / 'awg_profile.py').read_text())
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
         # Entry points start this agent; it deploys no containers.
@@ -66,7 +65,7 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
                  **({'xhttpSettings': {'path': '/old'}} if tag == 'reality-xhttp' else {})}}
             for tag, port in [('reality-tcp', 443), ('reality-xhttp', 8443)]]}
         self.xray.write_text(json.dumps(data))
-        profile = subprocess.check_output(['python3', str(ASSETS / 'awg_profile.py'), 'init', str(self.awg), 'quic'],
+        profile = subprocess.check_output([str(AGENT_BINARY), 'awg-profile', 'init', str(self.awg), 'quic'],
                                           text=True)
         peers = '\n# existing-device\n[Peer]\nPublicKey = existing-peer\nPresharedKey = existing-psk\nAllowedIPs = 10.8.1.2/32\n'
         self.awg.write_text('[Interface]\nPrivateKey = existing-server\nListenPort = 51820\n' + profile + peers)
@@ -105,7 +104,7 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
 
         # Explicit parameters may use CPS patterns unrelated to the preset.
         manual = dict(line.split(' = ', 1) for line in subprocess.check_output(
-            ['python3', str(ASSETS / 'awg_profile.py'), 'init', '/dev/null', 'quic'], text=True).splitlines())
+            [str(AGENT_BINARY), 'awg-profile', 'init', '/dev/null', 'quic'], text=True).splitlines())
         manual['I1'] = '<r 80>'
         self.apply({**settings, 'ipv6_outbound': 'on', 'awg_parameters': manual})
         self.assertIn(peers, new_awg.read_text())

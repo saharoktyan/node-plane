@@ -170,17 +170,14 @@ fn awg(setting: Setting<'_>) -> Result<(), String> {
         let raw = fs::read_to_string(&parameters).map_err(|err| err.to_string())?;
         truthy(&serde_json::from_str(&raw).map_err(|err| err.to_string())?)
     };
-    let tool = runtime()
-        .join("awg_profile.py")
-        .to_string_lossy()
-        .into_owned();
-    let config_arg = config.to_string_lossy().into_owned();
     if manual {
-        if !quiet("python3", &[&tool, "apply", &config_arg, &parameters]) {
+        if crate::protocols::awg::profile::apply_file(&config, Path::new(&parameters)).is_err() {
             backup.restore();
             return Err("Manual AWG parameters failed validation; previous config restored".into());
         }
-    } else if current != preset && !quiet("python3", &[&tool, "regenerate", &config_arg, &preset]) {
+    } else if current != preset
+        && crate::protocols::awg::profile::regenerate_file(&config, &preset).is_err()
+    {
         backup.restore();
         return Err("AWG entropy update failed; previous config restored".into());
     }

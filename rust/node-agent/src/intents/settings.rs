@@ -6,7 +6,6 @@ use std::io::Write;
 use std::os::fd::RawFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -86,7 +85,7 @@ pub(crate) struct Settings<'a>(&'a Value);
 impl<'a> Settings<'a> {
     /// Checks `intent`; manual AWG parameters through `awg_profile.py
     /// validate` of `tool`.
-    pub(crate) fn check(intent: &'a Value, tool: &Path) -> Result<Self, String> {
+    pub(crate) fn check(intent: &'a Value) -> Result<Self, String> {
         let map = intent.as_object().ok_or("invalid node settings intent")?;
         let keys = FIELDS.len() + usize::from(map.contains_key("protocol_plan"));
         if map.len() != keys || FIELDS.iter().any(|key| !map.contains_key(*key)) {
@@ -139,7 +138,7 @@ impl<'a> Settings<'a> {
             return Err("node settings are incomplete".into());
         }
         for (field, value) in settings {
-            check_setting(field, value, tool)?;
+            check_setting(field, value)?;
         }
         if protocols.contains(&"xray")
             && (settings["xray_tcp_port"] == settings["xray_xhttp_port"]
@@ -211,7 +210,7 @@ impl<'a> Settings<'a> {
     }
 }
 
-fn check_setting(field: &str, value: &Value, tool: &Path) -> Result<(), String> {
+fn check_setting(field: &str, value: &Value) -> Result<(), String> {
     if field == "awg_parameters" {
         let parameters = value.as_object().ok_or("unknown AWG parameters")?;
         if parameters.is_empty() {
@@ -230,7 +229,7 @@ fn check_setting(field: &str, value: &Value, tool: &Path) -> Result<(), String> 
         }) {
             return Err("invalid AWG parameter value".into());
         }
-        return validate_parameters(tool, parameters);
+        return validate_parameters(parameters);
     }
     if field.ends_with("_port") {
         if !value
@@ -278,36 +277,15 @@ fn check_setting(field: &str, value: &Value, tool: &Path) -> Result<(), String> 
     Ok(())
 }
 
-/// `awg_profile.py validate` of an interface holding `parameters`.
-fn validate_parameters(tool: &Path, parameters: &Map<String, Value>) -> Result<(), String> {
-    let dir = std::env::temp_dir().join(format!(
-        "node-plane-awg-parameters-{}",
-        crate::protocols::deploy::random_hex(8)?
-    ));
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|err| format!("{}: {err}", dir.display()))?;
-    let file = dir.join("wg0.conf");
+/// The profile check of an interface holding `parameters`.
+fn validate_parameters(parameters: &Map<String, Value>) -> Result<(), String> {
+    use crate::protocols::awg::profile;
     let mut text = String::from("[Interface]\n");
     for (key, value) in parameters {
         text.push_str(&format!("{key} = {}\n", value.as_str().unwrap_or_default()));
     }
-    let result = fs::write(&file, text)
-        .map_err(|err| format!("{}: {err}", file.display()))
-        .and_then(|()| {
-            Command::new("python3")
-                .arg(tool)
-                .arg("validate")
-                .arg(&file)
-                .output()
-                .map_err(|err| format!("awg_profile.py failed: {err}"))
-        });
-    let _ = fs::remove_dir_all(&dir);
-    if !result?.status.success() {
-        return Err("invalid AWG parameters".into());
-    }
-    Ok(())
+    profile::validate(&profile::interface_values(&text), true)
+        .map_err(|_| "invalid AWG parameters".to_string())
 }
 
 /// The digest a verified result reports: the protocols and settings.
@@ -391,10 +369,9 @@ pub(crate) fn apply(
     intent: &Value,
     journal: &Path,
     instance: &str,
-    tool: &Path,
     runner: &mut Runner<'_>,
 ) -> Result<Response, String> {
-    let settings = Settings::check(intent, tool)?;
+    let settings = Settings::check(intent)?;
     if settings.empty() {
         // Refused before the journal: no command of unknown outcome remains.
         return Err("no VPN settings or authorized protocol removal requested".into());
@@ -501,8 +478,8 @@ fn verify_result(settings: &Settings<'_>, response: &Response) -> Result<(), Str
 }
 
 /// The stored result of a confirmed command, without running anything.
-pub(crate) fn lookup(intent: &Value, journal: &Path, tool: &Path) -> Result<Response, String> {
-    let settings = Settings::check(intent, tool)?;
+pub(crate) fn lookup(intent: &Value, journal: &Path) -> Result<Response, String> {
+    let settings = Settings::check(intent)?;
     let unconfirmed = || "node settings success is not confirmed".to_string();
     let connection = open_readonly(journal).map_err(|_| unconfirmed())?;
     let row: Option<(String, String, Option<String>)> = connection
@@ -531,10 +508,9 @@ pub(crate) fn resolve(
     intent: &Value,
     journal: &Path,
     instance: &str,
-    tool: &Path,
     inspector: &mut dyn FnMut(&Settings<'_>) -> Result<Value, String>,
 ) -> Result<Value, String> {
-    let settings = Settings::check(intent, tool)?;
+    let settings = Settings::check(intent)?;
     let empty = settings.empty();
     if !empty && !journal.is_file() {
         return Err("command journal is missing; outcome is unconfirmed".into());
@@ -624,10 +600,6 @@ pub(crate) mod tests {
     use crate::intents::profile::{self, Intent};
     use crate::intents::test_journal;
 
-    pub(crate) fn tool() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime_assets/awg_profile.py")
-    }
-
     pub(crate) fn intent(revision: i64, command: &str) -> Value {
         json!({"kind": "node_settings", "node_key": "n1", "command_id": command,
             "revision": revision, "protocols": ["awg", "xray"],
@@ -662,63 +634,21 @@ pub(crate) mod tests {
     fn a_repeated_command_returns_its_result_and_revisions_advance() {
         let journal = test_journal("settings-idempotent");
         let calls = RefCell::new(Vec::new());
-        let first = apply(
-            &intent(1, "task-1"),
-            &journal,
-            "agent",
-            &tool(),
-            &mut runner(&calls),
-        )
-        .unwrap();
+        let first = apply(&intent(1, "task-1"), &journal, "agent", &mut runner(&calls)).unwrap();
         assert_eq!(
-            apply(
-                &intent(1, "task-1"),
-                &journal,
-                "agent",
-                &tool(),
-                &mut runner(&calls)
-            )
-            .unwrap(),
+            apply(&intent(1, "task-1"), &journal, "agent", &mut runner(&calls)).unwrap(),
             first
         );
-        assert_eq!(
-            lookup(&intent(1, "task-1"), &journal, &tool()).unwrap(),
-            first
-        );
+        assert_eq!(lookup(&intent(1, "task-1"), &journal).unwrap(), first);
         assert_eq!(calls.borrow().len(), 1);
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
             fs::metadata(&journal).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        assert!(
-            apply(
-                &intent(1, "other"),
-                &journal,
-                "agent",
-                &tool(),
-                &mut runner(&calls)
-            )
-            .is_err()
-        );
-        assert!(
-            apply(
-                &intent(2, "task-1"),
-                &journal,
-                "agent",
-                &tool(),
-                &mut runner(&calls)
-            )
-            .is_err()
-        );
-        let second = apply(
-            &intent(2, "task-2"),
-            &journal,
-            "agent",
-            &tool(),
-            &mut runner(&calls),
-        )
-        .unwrap();
+        assert!(apply(&intent(1, "other"), &journal, "agent", &mut runner(&calls)).is_err());
+        assert!(apply(&intent(2, "task-1"), &journal, "agent", &mut runner(&calls)).is_err());
+        let second = apply(&intent(2, "task-2"), &journal, "agent", &mut runner(&calls)).unwrap();
         assert_eq!(
             (calls.borrow().len(), second.summary.as_str()),
             (2, "applied")
@@ -734,28 +664,10 @@ pub(crate) mod tests {
                 payload_json: "{}".into(),
             })
         };
-        assert!(
-            apply(
-                &intent(1, "task-1"),
-                &journal,
-                "agent",
-                &tool(),
-                &mut claimed
-            )
-            .is_err()
-        );
-        assert!(lookup(&intent(1, "task-1"), &journal, &tool()).is_err());
+        assert!(apply(&intent(1, "task-1"), &journal, "agent", &mut claimed).is_err());
+        assert!(lookup(&intent(1, "task-1"), &journal).is_err());
         let calls = RefCell::new(Vec::new());
-        assert!(
-            apply(
-                &intent(2, "new"),
-                &journal,
-                "agent",
-                &tool(),
-                &mut runner(&calls)
-            )
-            .is_err()
-        );
+        assert!(apply(&intent(2, "new"), &journal, "agent", &mut runner(&calls)).is_err());
         let profile = Intent {
             command_id: "profile-task".into(),
             protocol: "awg".into(),
@@ -791,10 +703,10 @@ pub(crate) mod tests {
                 payload_json: payload.to_string(),
             })
         };
-        let first = apply(&value, &journal, "agent", &tool(), &mut selected).unwrap();
-        assert_eq!(lookup(&value, &journal, &tool()).unwrap(), first);
+        let first = apply(&value, &journal, "agent", &mut selected).unwrap();
+        assert_eq!(lookup(&value, &journal).unwrap(), first);
         assert_eq!(
-            apply(&value, &journal, "agent", &tool(), &mut selected).unwrap(),
+            apply(&value, &journal, "agent", &mut selected).unwrap(),
             first
         );
         assert_eq!(*calls.borrow(), 1);
@@ -811,7 +723,7 @@ pub(crate) mod tests {
             })
         };
         assert_eq!(
-            apply(&value, &journal, "agent", &tool(), &mut foreign).unwrap_err(),
+            apply(&value, &journal, "agent", &mut foreign).unwrap_err(),
             "invalid selected AWG port"
         );
     }
@@ -836,7 +748,7 @@ pub(crate) mod tests {
             );
             inner(settings, fd, progress)
         };
-        apply(&value, &journal, "agent", &tool(), &mut observed).unwrap();
+        apply(&value, &journal, "agent", &mut observed).unwrap();
         Progress::new(&journal, "node-task-1").step("ignored");
         assert_eq!(
             fs::read_dir(journal.with_file_name("operation-progress"))
@@ -853,7 +765,7 @@ pub(crate) mod tests {
         let reject = |change: &dyn Fn(&mut Value)| {
             let mut bad = intent(1, "task-1");
             change(&mut bad);
-            assert!(Settings::check(&bad, &tool()).is_err(), "{bad}");
+            assert!(Settings::check(&bad).is_err(), "{bad}");
         };
         reject(&|v| {
             v["settings"].as_object_mut().unwrap().remove("xray_sni");
@@ -877,11 +789,11 @@ pub(crate) mod tests {
         reject(&|v| v["settings"]["awg_parameters"] = json!({"Jc": "4"}));
         let mut bad = intent(1, "task-1");
         bad["settings"]["xray_sni"] = json!("bad host");
-        assert!(apply(&bad, &journal, "agent", &tool(), &mut runner(&calls)).is_err());
+        assert!(apply(&bad, &journal, "agent", &mut runner(&calls)).is_err());
         let empty = json!({"kind": "node_settings", "node_key": "n1", "command_id": "task-1",
             "revision": 1, "protocols": [], "settings": {}});
         assert!(
-            apply(&empty, &journal, "agent", &tool(), &mut runner(&calls))
+            apply(&empty, &journal, "agent", &mut runner(&calls))
                 .unwrap_err()
                 .contains("no VPN settings")
         );
@@ -897,10 +809,10 @@ pub(crate) mod tests {
         value["settings"] = json!({});
         value["protocol_plan"] = json!({"remove_protocols": ["awg", "xray"]});
         let calls = RefCell::new(Vec::new());
-        let first = apply(&value, &journal, "agent", &tool(), &mut runner(&calls)).unwrap();
-        assert_eq!(lookup(&value, &journal, &tool()).unwrap(), first);
+        let first = apply(&value, &journal, "agent", &mut runner(&calls)).unwrap();
+        assert_eq!(lookup(&value, &journal).unwrap(), first);
         assert_eq!(
-            apply(&value, &journal, "agent", &tool(), &mut runner(&calls)).unwrap(),
+            apply(&value, &journal, "agent", &mut runner(&calls)).unwrap(),
             first
         );
         assert_eq!(calls.borrow().len(), 1);
@@ -915,20 +827,19 @@ pub(crate) mod tests {
     fn an_absent_empty_command_is_fenced_without_inspection() {
         let journal = test_journal("settings-empty-tombstone");
         let mut inspector = |_: &Settings<'_>| -> Result<Value, String> { panic!("no inspection") };
-        let missing = Path::new("/nonexistent/awg_profile.py");
-        let result = resolve(&empty_intent(), &journal, "agent", missing, &mut inspector).unwrap();
+        let result = resolve(&empty_intent(), &journal, "agent", &mut inspector).unwrap();
         assert_eq!(
             result["observation"],
             json!({"config_matches": false, "containers_running": false})
         );
         assert_eq!(
-            resolve(&empty_intent(), &journal, "agent", missing, &mut inspector).unwrap(),
+            resolve(&empty_intent(), &journal, "agent", &mut inspector).unwrap(),
             result
         );
         let mut changed = empty_intent();
         changed["settings"] = json!({"ipv6_outbound": "off"});
         assert_eq!(
-            resolve(&changed, &journal, "agent", missing, &mut inspector).unwrap_err(),
+            resolve(&changed, &journal, "agent", &mut inspector).unwrap_err(),
             "command identity mismatch"
         );
         assert_eq!(
@@ -943,14 +854,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(revision, 1);
         let calls = RefCell::new(Vec::new());
-        apply(
-            &intent(2, "fresh"),
-            &journal,
-            "agent",
-            &tool(),
-            &mut runner(&calls),
-        )
-        .unwrap();
+        apply(&intent(2, "fresh"), &journal, "agent", &mut runner(&calls)).unwrap();
         assert_eq!(calls.borrow().len(), 1);
     }
 
@@ -962,10 +866,8 @@ pub(crate) mod tests {
         removal["settings"] = json!({});
         removal["protocol_plan"] = json!({"remove_protocols": ["awg"]});
         for value in [intent(1, "task-1"), removal] {
-            let err = resolve(&value, &journal, "agent", &tool(), &mut |_| {
-                panic!("no inspection")
-            })
-            .unwrap_err();
+            let err =
+                resolve(&value, &journal, "agent", &mut |_| panic!("no inspection")).unwrap_err();
             assert!(err.contains("journal is missing"));
             assert!(!journal.exists());
         }
@@ -975,15 +877,8 @@ pub(crate) mod tests {
     fn an_empty_tombstone_keeps_a_newer_fence() {
         let journal = test_journal("settings-newer");
         let calls = RefCell::new(Vec::new());
-        apply(
-            &intent(5, "newer"),
-            &journal,
-            "agent",
-            &tool(),
-            &mut runner(&calls),
-        )
-        .unwrap();
-        resolve(&empty_intent(), &journal, "agent", &tool(), &mut |_| {
+        apply(&intent(5, "newer"), &journal, "agent", &mut runner(&calls)).unwrap();
+        resolve(&empty_intent(), &journal, "agent", &mut |_| {
             panic!("no inspection")
         })
         .unwrap();
@@ -1008,11 +903,11 @@ pub(crate) mod tests {
         let value = intent(1, "task-1");
         let mut interrupted =
             |_: &Settings<'_>, _: RawFd, _: &Progress| Err("interrupted".to_string());
-        assert!(apply(&value, &journal, "old-agent", &tool(), &mut interrupted).is_err());
+        assert!(apply(&value, &journal, "old-agent", &mut interrupted).is_err());
         let mut observe =
             |_: &Settings<'_>| Ok(json!({"config_matches": false, "containers_running": true}));
         assert!(
-            resolve(&value, &journal, "old-agent", &tool(), &mut observe)
+            resolve(&value, &journal, "old-agent", &mut observe)
                 .unwrap_err()
                 .contains("restart")
         );
@@ -1021,54 +916,50 @@ pub(crate) mod tests {
             *observations.borrow_mut() += 1;
             Ok(json!({"config_matches": false, "containers_running": true}))
         };
-        let result = resolve(&value, &journal, "new-agent", &tool(), &mut counted).unwrap();
+        let result = resolve(&value, &journal, "new-agent", &mut counted).unwrap();
         assert_eq!(
             result["observation"],
             json!({"config_matches": false, "containers_running": true})
         );
         assert_eq!(
-            resolve(&value, &journal, "new-agent", &tool(), &mut counted).unwrap(),
+            resolve(&value, &journal, "new-agent", &mut counted).unwrap(),
             result
         );
         assert_eq!(*observations.borrow(), 1);
-        assert!(lookup(&value, &journal, &tool()).is_err());
+        assert!(lookup(&value, &journal).is_err());
         let calls = RefCell::new(Vec::new());
         apply(
             &intent(2, "fresh"),
             &journal,
             "new-agent",
-            &tool(),
             &mut runner(&calls),
         )
         .unwrap();
         // An observation of another shape is refused.
         let journal = test_journal("settings-interrupted-shape");
-        assert!(apply(&value, &journal, "old", &tool(), &mut interrupted).is_err());
+        assert!(apply(&value, &journal, "old", &mut interrupted).is_err());
         let mut partial = |_: &Settings<'_>| Ok(json!({"config_matches": false}));
         assert_eq!(
-            resolve(&value, &journal, "new", &tool(), &mut partial).unwrap_err(),
+            resolve(&value, &journal, "new", &mut partial).unwrap_err(),
             "live inspection unavailable"
         );
     }
 
     #[test]
-    fn manual_awg_parameters_are_validated_by_the_profile_tool() {
-        let output = Command::new("python3")
-            .arg(tool())
-            .args(["init", "/dev/null", "quic"])
-            .output()
-            .unwrap();
+    fn manual_awg_parameters_are_validated_by_the_profile() {
         let mut parameters = Map::new();
-        for line in String::from_utf8(output.stdout).unwrap().lines() {
-            let (key, value) = line.split_once(" = ").unwrap();
+        for (key, value) in crate::protocols::awg::profile::new_profile("quic")
+            .unwrap()
+            .iter()
+        {
             parameters.insert(key.into(), json!(value));
         }
         let mut value = intent(1, "task-1");
         value["settings"]["awg_parameters"] = Value::Object(parameters.clone());
-        Settings::check(&value, &tool()).unwrap();
+        Settings::check(&value).unwrap();
         parameters.insert("Jmin".into(), json!("1000"));
         parameters.insert("Jmax".into(), json!("10"));
         value["settings"]["awg_parameters"] = Value::Object(parameters);
-        assert!(Settings::check(&value, &tool()).is_err());
+        assert!(Settings::check(&value).is_err());
     }
 }

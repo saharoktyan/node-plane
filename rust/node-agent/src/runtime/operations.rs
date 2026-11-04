@@ -160,7 +160,6 @@ impl AgentState {
         operation::command(
             &journal,
             &runtime.env,
-            &runtime.tool(),
             &self.instance_id,
             &req.action,
             &req.command_id,

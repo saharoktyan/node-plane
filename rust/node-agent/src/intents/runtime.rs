@@ -32,10 +32,6 @@ impl Runtime {
             instance: instance.into(),
         }
     }
-
-    pub(crate) fn tool(&self) -> PathBuf {
-        self.root.join("awg_profile.py")
-    }
 }
 
 /// `source ENV; printf` of node.env variables, as the entry points see them.

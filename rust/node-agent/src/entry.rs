@@ -63,9 +63,13 @@ const ENTRIES: [(&str, Prelude, &str); 13] = [
     ),
 ];
 
-/// Files earlier releases delivered next to these: a wrapper, and the AWG
-/// image the node built.
-const FORMER: [&str; 2] = ["apply-profile-intent.py", "amnezia-awg/Dockerfile"];
+/// Files earlier releases delivered next to these: a wrapper, the AWG image
+/// the node built and the AWG profile tool (`protocols/awg/profile`).
+const FORMER: [&str; 3] = [
+    "apply-profile-intent.py",
+    "amnezia-awg/Dockerfile",
+    "awg_profile.py",
+];
 
 #[derive(Clone, Copy)]
 enum Prelude {
@@ -214,13 +218,15 @@ mod tests {
             "deploy-xray.sh",
             "apply-profile-intent.py",
             "awg_profile.py",
+            "VERSION",
         ] {
             fs::write(dir.join(name), "x").unwrap();
         }
         remove_delivered(&dir);
         assert!(!dir.join("deploy-xray.sh").exists());
         assert!(!dir.join("apply-profile-intent.py").exists());
-        assert!(dir.join("awg_profile.py").exists());
+        assert!(!dir.join("awg_profile.py").exists());
+        assert!(dir.join("VERSION").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

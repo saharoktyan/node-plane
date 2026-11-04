@@ -74,10 +74,7 @@ impl AgentState {
             |err: String| Status::failed_precondition(format!("AWG refresh failed: {err}"));
         let setting = |key: &str, default: &str| self.node_env_value(key, default);
         let node = Node::read(&setting);
-        let runtime = NodeRuntime {
-            node: &node,
-            profile_tool: setting("AWG_PROFILE_TOOL", "/opt/node-plane-runtime/awg_profile.py"),
-        };
+        let runtime = NodeRuntime { node: &node };
         let server = fs::read_to_string(&node.config).map_err(|err| failed(err.to_string()))?;
         runtime.validate(&node.config).map_err(failed)?;
         // Interfaces hold private keys: check them in the private clients dir.

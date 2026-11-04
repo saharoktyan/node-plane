@@ -35,12 +35,6 @@ if ! command -v apt-get >/dev/null 2>&1; then
   exit 1
 fi
 
-# Runtime initialization and profile helpers run Python on the node host.
-if ! command -v python3 >/dev/null 2>&1; then
-  apt_run update
-  apt_run install -y python3
-fi
-
 # Speed limits shape with tc and nft and enter the AWG container with
 # nsenter. Without them a node only reports that it cannot limit speed.
 shaping=""

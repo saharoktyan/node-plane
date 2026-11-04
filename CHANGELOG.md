@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Generate and check AWG profiles in the node agent
+  (`node-plane-agent awg-profile`) instead of `awg_profile.py`, which is no
+  longer delivered: the controller now sends nodes no file the agent
+  executes, and nodes no longer need Python. The controller keeps checking
+  manual AWG parameters with `app/awg_profile.py`; both run the shared cases
+  in `tests/fixtures/awg_profile_cases.json`.
 - Name the VPN containers of new nodes `node-plane-xray` and
   `node-plane-awg`, so they do not collide with a separately installed Xray
   or AmneziaWG. Existing nodes keep the names their node.env holds; nothing

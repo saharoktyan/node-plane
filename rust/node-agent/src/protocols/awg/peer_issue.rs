@@ -29,14 +29,13 @@ pub(crate) trait Runtime {
     fn generate(&self) -> Result<[String; 3], String>;
     fn set_peer(&self, key: &str, preshared: &str, allowed: &str) -> Result<(), String>;
     fn remove_peer(&self, key: &str) -> Result<(), String>;
-    /// `awg_profile.py validate` of a config file.
+    /// The profile check of a config file.
     fn validate(&self, config: &Path) -> Result<(), String>;
 }
 
-/// The node's AWG runtime with its profile tool.
+/// The node's AWG runtime.
 pub(crate) struct NodeRuntime<'a> {
     pub(crate) node: &'a Node,
-    pub(crate) profile_tool: String,
 }
 
 fn exec(
@@ -107,18 +106,7 @@ impl Runtime for NodeRuntime<'_> {
     }
 
     fn validate(&self, config: &Path) -> Result<(), String> {
-        let output = Command::new("python3")
-            .arg(&self.profile_tool)
-            .arg("validate")
-            .arg(config)
-            .output()
-            .map_err(|err| format!("awg_profile.py failed: {err}"))?;
-        output.status.success().then_some(()).ok_or_else(|| {
-            format!(
-                "invalid AWG profile: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )
-        })
+        super::profile::validate_file(config).map_err(|err| format!("invalid AWG profile: {err}"))
     }
 }
 

@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 
 use super::addresses::migrate;
 use super::peer_sync::atomic_write;
-use super::setup::{profile, profile_tool};
+use super::profile;
 use crate::protocols::Setting;
 use crate::protocols::deploy::guard::Guard;
 use crate::protocols::deploy::{Docker, fetch, leased, leased_deploy, prepare_leased, settle};
@@ -132,14 +132,12 @@ struct Deployment<'a> {
 impl Deployment<'_> {
     fn run(&self, progress: &mut Progress, previous: Option<&str>) -> Result<(), String> {
         let config = self.config.to_string_lossy();
-        let report = profile(
-            &profile_tool(self.setting),
-            &["migrate", &config, &(self.setting)("AWG_I1_PRESET", "quic")],
-        )?;
-        if !report.trim().is_empty() {
-            println!("{}", report.trim_end());
+        if let Some(report) =
+            profile::migrate_file(&self.config, &(self.setting)("AWG_I1_PRESET", "quic"))?
+        {
+            println!("{report}");
         }
-        profile(&profile_tool(self.setting), &["validate", &config])?;
+        profile::validate_file(&self.config)?;
         let text = fs::read_to_string(&self.config).map_err(|err| format!("{config}: {err}"))?;
         let addressed = migrate(&text)?;
         if addressed != text {

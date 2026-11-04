@@ -1,21 +1,10 @@
-"""Controller validation of explicit AWG profiles using the shipped runtime rules."""
-import importlib.util
+"""Controller validation of explicit AWG profiles with the node agent's rules."""
 import json
-from functools import lru_cache
-from pathlib import Path
 
-
-@lru_cache(maxsize=1)
-def profile_module():
-    path = Path(__file__).resolve().parents[1] / 'runtime_assets' / 'awg_profile.py'
-    spec = importlib.util.spec_from_file_location('node_plane_awg_profile', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+import awg_profile as profile
 
 
 def validate_parameters(values):
-    profile = profile_module()
     if not isinstance(values, dict) or set(values) - set(profile.ALL_FIELDS):
         raise ValueError('unknown AWG parameters')
     if not values:

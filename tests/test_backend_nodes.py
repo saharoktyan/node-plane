@@ -175,10 +175,10 @@ class BackendNodeTests(unittest.TestCase):
                 self.assertEqual(node['desired_revision'], 1)
 
     def test_manual_awg_profile_is_persisted_validated_and_can_return_to_auto(self):
-        from awg_parameters import profile_module
+        from tests.test_awg_profile_cases import valid_profile
         from backend.node_settings import _snapshot
         self.create()
-        values = profile_module().new_profile('dns')
+        values = valid_profile()
         edited = self.edit(1, {'settings': {'awg_parameters': values}})
         self.assertEqual(edited.status_code, 200, edited.text)
         self.assertEqual(edited.json()['settings']['awg_parameters'], values)

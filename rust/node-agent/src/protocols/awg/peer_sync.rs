@@ -143,10 +143,7 @@ fn execute(setting: Setting<'_>, args: &[String]) -> Result<String, String> {
         if !running(&node.container)? {
             return Err(format!("Container {} not running", node.container));
         }
-        let runtime = NodeRuntime {
-            node: &node,
-            profile_tool: setting("AWG_PROFILE_TOOL", "/opt/node-plane-runtime/awg_profile.py"),
-        };
+        let runtime = NodeRuntime { node: &node };
         let _lock = lock_config(&node.config)?;
         return add(&issue, &runtime);
     }

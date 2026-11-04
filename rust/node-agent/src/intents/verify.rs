@@ -3,7 +3,6 @@
 //! acknowledged and when a repair inspects an interrupted one.
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Map, Value, json};
 
@@ -159,7 +158,7 @@ fn preset(config: &str) -> Option<&'static str> {
     })
 }
 
-fn awg(settings: &Settings<'_>, path: &Path, tool: &Path) -> Result<(), String> {
+fn awg(settings: &Settings<'_>, path: &Path) -> Result<(), String> {
     let config = fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
     if super::runtime::listen_port(&config).map(i64::from) != Some(settings.port("awg_port", 0)) {
         return Err(invalid("AWG port"));
@@ -175,12 +174,7 @@ fn awg(settings: &Settings<'_>, path: &Path, tool: &Path) -> Result<(), String> 
         .and_then(Value::as_object)
         .filter(|parameters| !parameters.is_empty());
     if let Some(parameters) = parameters {
-        let valid = Command::new("python3")
-            .arg(tool)
-            .arg("validate")
-            .arg(path)
-            .output()
-            .is_ok_and(|output| output.status.success());
+        let valid = crate::protocols::awg::profile::validate_file(path).is_ok();
         let actual = interface_values(&config);
         let text = |map: &Map<String, Value>, key: &str| {
             map.get(key)
@@ -204,7 +198,6 @@ pub(crate) fn config(
     settings: &Settings<'_>,
     xray_path: &Path,
     awg_path: &Path,
-    tool: &Path,
 ) -> Result<(), String> {
     for (protocol, path) in [("xray", xray_path), ("awg", awg_path)] {
         if settings.removed().contains(&protocol) && !path.as_os_str().is_empty() && path.exists() {
@@ -215,7 +208,7 @@ pub(crate) fn config(
         xray(settings, xray_path)?;
     }
     if settings.enabled("awg") {
-        awg(settings, awg_path, tool)?;
+        awg(settings, awg_path)?;
     }
     Ok(())
 }
@@ -302,7 +295,7 @@ pub(crate) fn observe(
     let mut removed_absent = true;
     let matches = (|| {
         environment(settings, &runtime.env)?;
-        config(settings, &paths.xray, &paths.awg, &runtime.tool())?;
+        config(settings, &paths.xray, &paths.awg)?;
         let removed = settings.removed();
         if !removed.is_empty() && host.installed("docker") {
             removed_absent = owned_containers(host, &paths, &removed)?.is_empty();
@@ -334,7 +327,7 @@ pub(crate) fn observe(
 pub(crate) mod tests {
     use super::*;
     use crate::intents::leases::fake::Scripted;
-    use crate::intents::settings::tests::{intent, tool};
+    use crate::intents::settings::tests::intent;
     use crate::protocols::test_dir;
 
     /// A config after apply-node-settings added the routing policy.
@@ -364,13 +357,13 @@ pub(crate) mod tests {
     fn the_effective_configs_are_checked() {
         let dir = test_dir("verify-config");
         let value = intent(1, "task-1");
-        let settings = Settings::check(&value, &tool()).unwrap();
+        let settings = Settings::check(&value).unwrap();
         let (xray_path, awg_path) = (dir.join("xray.json"), dir.join("wg0.conf"));
         let data = xray_config(443, 8443);
         let write = |data: &Value| fs::write(&xray_path, data.to_string()).unwrap();
         write(&data);
         fs::write(&awg_path, "[Interface]\nListenPort = 51820\n").unwrap();
-        config(&settings, &xray_path, &awg_path, &tool()).unwrap();
+        config(&settings, &xray_path, &awg_path).unwrap();
         let mut broken = data.clone();
         broken["routing"]["rules"] = json!([]);
         let mut reversed = data.clone();
@@ -384,22 +377,14 @@ pub(crate) mod tests {
         moved["inbounds"][0]["port"] = json!(444);
         for broken in [broken, reversed, unblocked, moved] {
             write(&broken);
-            assert!(config(&settings, &xray_path, &awg_path, &tool()).is_err());
+            assert!(config(&settings, &xray_path, &awg_path).is_err());
         }
         write(&data);
         let mut blocked = value.clone();
         blocked["settings"]["xray_bittorrent"] = json!("block");
-        assert!(
-            config(
-                &Settings::check(&blocked, &tool()).unwrap(),
-                &xray_path,
-                &awg_path,
-                &tool()
-            )
-            .is_err()
-        );
+        assert!(config(&Settings::check(&blocked).unwrap(), &xray_path, &awg_path,).is_err());
         fs::write(&awg_path, "[Interface]\nListenPort = 51821\n").unwrap();
-        assert!(config(&settings, &xray_path, &awg_path, &tool()).is_err());
+        assert!(config(&settings, &xray_path, &awg_path).is_err());
     }
 
     #[test]
@@ -437,13 +422,7 @@ pub(crate) mod tests {
             value["settings"]["xray_bittorrent"] = json!(if block { "block" } else { "allow" });
             let path = dir.join("config.json");
             fs::write(&path, data.to_string()).unwrap();
-            config(
-                &Settings::check(&value, &tool()).unwrap(),
-                &path,
-                Path::new(""),
-                &tool(),
-            )
-            .unwrap();
+            config(&Settings::check(&value).unwrap(), &path, Path::new("")).unwrap();
         }
     }
 
@@ -454,23 +433,23 @@ pub(crate) mod tests {
         value["protocols"] = json!(["awg"]);
         value["settings"]["awg_i1_preset"] = json!("dns");
         value["settings"]["awg_interface"] = json!("vpn0");
-        let settings = Settings::check(&value, &tool()).unwrap();
+        let settings = Settings::check(&value).unwrap();
         let path = dir.join("vpn0.conf");
         fs::write(
             &path,
             "[Interface]\nListenPort = 51820\nI1 = <b 0xc000000001><rc 8><r 900>\n",
         )
         .unwrap();
-        assert!(config(&settings, Path::new(""), &path, &tool()).is_err());
+        assert!(config(&settings, Path::new(""), &path).is_err());
         fs::write(
             &path,
             "[Interface]\nListenPort = 51820\nI1 = <rc 2><b 0x01000001000000000000><r 32>\n",
         )
         .unwrap();
-        config(&settings, Path::new(""), &path, &tool()).unwrap();
+        config(&settings, Path::new(""), &path).unwrap();
         let old = dir.join("wg0.conf");
         fs::copy(&path, &old).unwrap();
-        assert!(config(&settings, Path::new(""), &old, &tool()).is_err());
+        assert!(config(&settings, Path::new(""), &old).is_err());
     }
 
     #[test]
@@ -485,7 +464,7 @@ pub(crate) mod tests {
         ] {
             value["settings"][key] = json!(setting);
         }
-        let settings = Settings::check(&value, &tool()).unwrap();
+        let settings = Settings::check(&value).unwrap();
         let env = dir.join("node.env");
         let values = [
             ("SERVER_KEY", "n1"),
@@ -534,8 +513,7 @@ pub(crate) mod tests {
             _ => (1, String::new()),
         });
         let value = intent(1, "task-1");
-        let observed =
-            observe(&host, &runtime, &Settings::check(&value, &tool()).unwrap()).unwrap();
+        let observed = observe(&host, &runtime, &Settings::check(&value).unwrap()).unwrap();
         assert_eq!(
             observed,
             json!({"config_matches": false, "containers_running": true})
@@ -564,7 +542,7 @@ pub(crate) mod tests {
         value["protocols"] = json!([]);
         value["settings"] = json!({});
         value["protocol_plan"] = json!({"remove_protocols": ["awg", "xray"]});
-        let settings = Settings::check(&value, &tool()).unwrap();
+        let settings = Settings::check(&value).unwrap();
         for leftover in [false, true] {
             let source = dir.join("xray").display().to_string();
             let host = Scripted::new(move |args| match args {

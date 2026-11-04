@@ -59,7 +59,6 @@ impl AgentState {
             &intent,
             &self.journal(),
             &self.instance_id,
-            &runtime.tool(),
             &mut |settings, lock, progress| apply::run(&System, &runtime, settings, lock, progress),
         )
         .map_err(|err| {
@@ -82,7 +81,7 @@ impl AgentState {
             ));
         }
         let intent = backend_settings_intent(&req)?;
-        let response = settings::lookup(&intent, &self.journal(), &self.node_runtime().tool())
+        let response = settings::lookup(&intent, &self.journal())
             .map_err(|_| Status::failed_precondition("node settings success is not confirmed"))?;
         Ok(RuntimeCommandResponse {
             summary: "node settings confirmed".to_string(),
@@ -106,7 +105,6 @@ impl AgentState {
             &intent,
             &self.journal(),
             &self.instance_id,
-            &runtime.tool(),
             &mut |settings| verify::observe(&System, &runtime, settings),
         )
         .map_err(|_| {

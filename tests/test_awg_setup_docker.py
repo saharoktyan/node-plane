@@ -1,22 +1,18 @@
 """The agent's init-awg.sh and regenerate-awg-entropy.sh entry points, with
-awg_profile.py and a fake Docker. In the Docker suite, where CI builds the
-agent."""
+a fake Docker and no Python on PATH, checked with the controller's
+awg_profile.py. In the Docker suite, where CI builds the agent."""
 import base64
-import importlib.util
 import os
 import pathlib
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 
-ASSETS = pathlib.Path(__file__).resolve().parents[1] / 'runtime_assets'
-AGENT_BINARY = ASSETS.parent / 'rust/node-agent/target/debug/node-plane-agent'
-spec = importlib.util.spec_from_file_location('setup_awg_profile', ASSETS / 'awg_profile.py')
-awg_profile = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(awg_profile)
+import awg_profile
+
+AGENT_BINARY = pathlib.Path(__file__).resolve().parents[1] / 'rust/node-agent/target/debug/node-plane-agent'
 
 
 @unittest.skipUnless(os.environ.get('NODE_PLANE_TEST_DOCKER') == '1', 'requires the Docker suite')
@@ -30,12 +26,10 @@ class AwgSetupTests(unittest.TestCase):
         # No host wg command: only what the entry points use.
         for name in ('bash', 'cp'):
             (self.tools / name).symlink_to(shutil.which(name))
-        (self.tools / 'python3').symlink_to(sys.executable)
         self.config = self.root / 'wg0.conf'
         self.node_env = self.root / 'node.env'
         self.node_env.write_text(
             f'AWG_CONFIG={shlex.quote(str(self.config))}\n'
-            f'AWG_PROFILE_TOOL={shlex.quote(str(ASSETS / "awg_profile.py"))}\n'
             'AWG_SERVER_ADDRESS=10.8.1.1/24\nAWG_I1_PRESET=dns\nAWG_CONTAINER_NAME=awg-test\n')
 
     def run_script(self, name, check=True):

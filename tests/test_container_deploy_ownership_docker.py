@@ -561,7 +561,6 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
         f"NODE_PLANE_RUNTIME_ROOT={shlex.quote(str(root))}\n"
         "NODE_PLANE_DEPLOY_SETTLE_SECONDS=0\n"
         "AWG_TUN_DEVICE=/dev/null\n"
-        f"AWG_PROFILE_TOOL={shlex.quote(str(ASSETS / 'awg_profile.py'))}\n"
     )
 
     if protocol == "xray":
@@ -588,9 +587,9 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
         data_dir = docker_dir / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         config_file = data_dir / "wg0.conf"
-        # Initialize valid AWG config using awg_profile.py
+        # A valid AWG profile from the built agent.
         profile_out = subprocess.check_output(
-            ["python3", str(ASSETS / "awg_profile.py"), "init", str(config_file)], text=True, timeout=10
+            [str(AGENT_BINARY), "awg-profile", "init", str(config_file)], text=True, timeout=10
         )
         original_config = "[Interface]\nPrivateKey = oldserver\nAddress = 10.8.1.1/24\nListenPort = 51820\n" + profile_out + "\n"
         config_file.write_text(original_config, encoding="utf-8")
