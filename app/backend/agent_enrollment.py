@@ -29,6 +29,7 @@ RETRY = timedelta(seconds=10)
 REPOSITORY = 'saharoktyan/node-plane'
 AGENT_ASSET = 'node-plane-agent-linux-amd64.tar.gz'
 INSTALLER_ASSET = 'node-plane-agent-installer.sh'
+SIGNED_ASSETS = ('node-plane-agent-linux-amd64.release', 'node-plane-agent-linux-amd64.release.sig')
 HOST = re.compile(r'(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\Z')
 
 
@@ -90,7 +91,9 @@ def release_assets(app_root=None, fetch=None):
         if any(len(found.get(name, ())) != 1 for name in (AGENT_ASSET, INSTALLER_ASSET)):
             raise AccessDenied('agent_release_unavailable', 503)
         _release_cache[tag] = {'tag': tag, 'base': base, 'agent_sha256': found[AGENT_ASSET][0],
-                               'installer_sha256': found[INSTALLER_ASSET][0]}
+                               'installer_sha256': found[INSTALLER_ASSET][0],
+                               # Agents update themselves only to a signed release.
+                               'signed': all(len(found.get(name, ())) == 1 for name in SIGNED_ASSETS)}
     release = _release_cache[tag]
     if hashlib.sha256(installer).hexdigest() != release['installer_sha256']:
         raise AccessDenied('agent_installer_mismatch', 503)

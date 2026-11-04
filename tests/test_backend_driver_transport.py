@@ -158,7 +158,7 @@ class BackendDriverTransportTests(unittest.TestCase):
         self.assertEqual(received[2][1]['x-node-plane-command-id'], 'node-settings-task')
         self.assertEqual(node, {'node_key': 'node', 'health_state': 'running',
                                 'runtime_version': 'test', 'runtime_commit': 'abc',
-                                'agent_version': '0.4.3-alpha.20', 'agent_commit': 'binary-sha',
+                                'agent_version': '0.4.3-alpha.20', 'agent_commit': 'binary-sha', 'agent_update_rolled_back': '',
                                 'xray_config_present': True, 'awg_config_present': False})
         self.assertEqual(diagnostics, {'node_key': 'node', 'docker': 'ok',
             'runtime_root': 'ok', 'xray_config': 'ok', 'awg_config': 'missing',

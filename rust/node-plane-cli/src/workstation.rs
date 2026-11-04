@@ -699,6 +699,25 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
             "The agent answered, but runtime inspection failed. Check its service logs and runtime."
         }
         "release_binary_unavailable" => "Release binary is missing or inaccessible.",
+        "agent_update_rejected" => {
+            "The agent refused the release: its signature or checksum does not match. Nothing was changed."
+        }
+        "agent_update_download_failed" => {
+            "The agent could not download the release from GitHub. Check the server's internet access."
+        }
+        "agent_update_self_check_failed" => {
+            "The new agent does not run on this server. The current agent keeps working."
+        }
+        "agent_update_downgrade" => {
+            "The agent is newer than this controller. Update the controller first."
+        }
+        "agent_update_rolled_back" => {
+            "The new agent did not start and the server put the previous one back. Check journalctl -u node-plane-agent."
+        }
+        "agent_update_unconfirmed" => {
+            "The agent did not come back after updating. The previous one returns by itself if the new one failed."
+        }
+        "agent_update_failed" => "The agent could not update itself. Check its service logs.",
         "rust_required" => "On-server build is obsolete. Use published release binaries.",
         "build_resources" => "Local build is obsolete. Use published release binaries.",
         "child_operation_blocked" => "An installation step is blocked.",

@@ -572,3 +572,166 @@ class BackendAgentRolloutTests(TestCase):
                     result = self.client.post(base + '/verify-and-retire', headers=headers)
                 self.assertEqual(result.status_code, 200, result.text)
                 self.assertEqual(result.json()['mode'], 'verified')
+
+
+class FakeUpdateDriver:
+    """Agent self-update through the driver; `versions` are later inspections."""
+    def __init__(self, answer=None, error=None, versions=(), rolled_back=''):
+        self.answer, self.error = answer, error
+        self.versions, self.rolled_back = list(versions), rolled_back
+        self.calls = []
+
+    def update_agent(self, node_key, release_url, version):
+        self.calls.append((node_key, release_url, version))
+        if self.error:
+            raise self.error
+        return {'status': self.answer, 'version': '0.9.0', 'rolled_back': ''}
+
+    def inspect_node(self, node_key):
+        version = self.versions.pop(0) if self.versions else '0.9.0'
+        return {'node_key': node_key, 'agent_version': version,
+                'agent_update_rolled_back': self.rolled_back}
+
+
+class AgentRpcError(Exception):
+    def __init__(self, details):
+        super().__init__(details)
+        self._details = details
+
+    def details(self):
+        return self._details
+
+
+SIGNED = {'tag': 'v1.0.0', 'base': 'https://github.com/o/r/releases/download/v1.0.0', 'signed': True}
+
+
+class AgentSelfUpdateTests(TestCase):
+    setUp = fixture_http.BackendHTTPTests.setUp
+    node = BackendAgentRolloutTests.node
+
+    def queue(self, self_update=True):
+        self.node()
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
+                   'Idempotency-Key': str(uuid4())}
+        queued = self.client.post('/api/v1/nodes/lv1/agent-rollouts', headers=headers,
+                                  json={'transport': 'local'}).json()
+        if self_update:
+            with self.db.transaction() as conn:
+                row = conn.execute('SELECT intent_json FROM backend_agent_rollouts WHERE id=?',
+                                   (queued['id'],)).fetchone()
+                intent = {**json.loads(row['intent_json']), 'self_update': True}
+                conn.execute('UPDATE backend_agent_rollouts SET intent_json=? WHERE id=?',
+                             (json.dumps(intent), queued['id']))
+        return queued['id'], headers
+
+    def execute(self, driver, release=SIGNED, installer=None):
+        installs = []
+        def runner(args):
+            installs.append(args)
+            return True if installer is None else installer
+        now = [0.0]
+        def sleep(seconds):
+            now[0] += seconds
+        service = AgentRolloutService(self.db, runner=runner, driver=driver,
+                                      release=lambda: release, sleep=sleep, clock=lambda: now[0])
+        with patch.dict(os.environ, NODE_PLANE_APP_DIR='/opt/node-plane/current'):
+            self.assertTrue(service.run_one())
+        return installs
+
+    def result(self, task_id, headers):
+        return self.client.get(f'/api/v1/agent-rollouts/{task_id}', headers=headers).json()
+
+    def test_update_waits_for_the_agent_to_restart_into_the_release(self):
+        task, headers = self.queue()
+        driver = FakeUpdateDriver('updating', versions=['0.9.0', '1.0.0'])
+        self.assertEqual(self.execute(driver), [])
+        self.assertEqual(driver.calls, [('lv1', SIGNED['base'], '1.0.0')])
+        self.assertEqual(self.result(task, headers)['status'], 'succeeded')
+
+    def test_current_agent_needs_nothing(self):
+        task, headers = self.queue()
+        self.assertEqual(self.execute(FakeUpdateDriver('current')), [])
+        self.assertEqual(self.result(task, headers)['status'], 'succeeded')
+
+    def test_installer_runs_when_agent_or_release_cannot_self_update(self):
+        from backend.driver_transport import AgentNotConfigured, AgentUpdateUnsupported
+        for driver, release in [(FakeUpdateDriver(error=AgentUpdateUnsupported('')), SIGNED),
+                                (FakeUpdateDriver(error=AgentNotConfigured('')), SIGNED),
+                                (FakeUpdateDriver('current'), {**SIGNED, 'signed': False})]:
+            with self.subTest(driver=driver.error, release=release['signed']):
+                task, headers = self.queue()
+                self.assertEqual(len(self.execute(driver, release)), 1)
+                self.assertEqual(self.result(task, headers)['status'], 'succeeded')
+                with self.db.transaction() as conn:
+                    conn.execute('DELETE FROM backend_agent_rollouts')
+                    conn.execute('DELETE FROM backend_nodes')
+
+    def test_setup_and_repair_never_self_update(self):
+        task, headers = self.queue(self_update=False)
+        driver = FakeUpdateDriver('current')
+        self.assertEqual(len(self.execute(driver)), 1)
+        self.assertEqual(driver.calls, [])
+
+    def test_refused_release_blocks_with_a_retryable_cause(self):
+        task, headers = self.queue()
+        self.assertEqual(self.execute(FakeUpdateDriver(error=AgentRpcError('agent_update_signature_invalid'))), [])
+        result = self.result(task, headers)
+        self.assertEqual((result['status'], result['failure_code']), ('blocked', 'agent_update_rejected'))
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (task,)).fetchone()
+        self.assertTrue(AgentRolloutService(self.db).preflight_failed(row))
+
+    def test_rollback_and_silence_are_reported(self):
+        task, headers = self.queue()
+        self.execute(FakeUpdateDriver('updating', rolled_back='1.0.0'))
+        self.assertEqual(self.result(task, headers)['failure_code'], 'agent_update_rolled_back')
+        with self.db.transaction() as conn:
+            conn.execute('DELETE FROM backend_agent_rollouts')
+            conn.execute('DELETE FROM backend_nodes')
+        task, headers = self.queue()
+        self.execute(FakeUpdateDriver('updating'))
+        result = self.result(task, headers)
+        self.assertEqual((result['status'], result['failure_code']), ('blocked', 'agent_update_unconfirmed'))
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT * FROM backend_agent_rollouts WHERE id=?', (task,)).fetchone()
+        self.assertFalse(AgentRolloutService(self.db).preflight_failed(row))
+
+
+class DriverUpdateTransportTests(TestCase):
+    def transport(self, error=None):
+        import grpc
+        from backend.driver_transport import GrpcIntentDriver
+
+        class Failure(grpc.RpcError):
+            def __init__(self, code, details):
+                self._code, self._details = code, details
+            def code(self):
+                return self._code
+            def details(self):
+                return self._details
+
+        class Nodes:
+            def UpdateAgent(self, request, timeout):
+                self.request = request
+                if error:
+                    raise Failure(*error)
+                return SimpleNamespace(status='updating', version='0.9.0', rolled_back='')
+
+        driver = GrpcIntentDriver.__new__(GrpcIntentDriver)
+        driver.nodes = Nodes()
+        return driver
+
+    def test_update_agent_maps_agents_that_cannot_update_themselves(self):
+        import grpc
+        from backend.driver_transport import AgentNotConfigured, AgentUpdateUnsupported
+        driver = self.transport()
+        self.assertEqual(driver.update_agent('lv1', 'https://x', '1.0.0'),
+                         {'status': 'updating', 'version': '0.9.0', 'rolled_back': ''})
+        self.assertEqual((driver.nodes.request.node_key, driver.nodes.request.release_url,
+                          driver.nodes.request.version), ('lv1', 'https://x', '1.0.0'))
+        for error, expected in [((grpc.StatusCode.UNIMPLEMENTED, 'Method not found'), AgentUpdateUnsupported),
+                                ((grpc.StatusCode.FAILED_PRECONDITION, 'agent_update_key_missing'), AgentUpdateUnsupported),
+                                ((grpc.StatusCode.FAILED_PRECONDITION, 'no node-agent target configured'), AgentNotConfigured),
+                                ((grpc.StatusCode.FAILED_PRECONDITION, 'agent_update_downgrade'), grpc.RpcError)]:
+            with self.subTest(error=error), self.assertRaises(expected):
+                self.transport(error).update_agent('lv1', 'https://x', '1.0.0')

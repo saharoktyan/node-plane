@@ -63,18 +63,35 @@ The controller calls the agent's API: protocol deployment, profile access, setti
 
 The controller sends nothing the agent executes: the runtime entry points, the AWG profile generator and the AmneziaWG container's start script are built into the agent, and the controller delivers only data such as `node.env`. On a node installed with the command, a compromised controller can therefore do only what the agent's API allows. A node set up over SSH also gives the controller its SSH access. Python is not needed on the server.
 
-Planned next: signed agent self-update instead of updates over SSH, and a systemd sandbox for the agent. Until signed self-update, agent updates of nodes installed with the command are not delivered from the controller.
+Planned next: a systemd sandbox for the agent.
+
+## Agent updates
+
+**Updates** updates agents together with the controller. The controller names its release; the agent downloads it from GitHub itself and checks it:
+
+- the release workflow signs a statement with the version and the SHA-256 of the agent archive. The agent accepts only a statement signed with the release key built into it, so neither the controller nor a changed download can give it another binary;
+- the version must be newer than the running one; older releases are refused;
+- the new binary must start on this server and report the signed version.
+
+The agent keeps the current binary as `node-plane-agent.previous`, replaces itself and restarts. Before the restart it arms a systemd timer: unless the new agent is serving within three minutes, the previous binary is put back and the service restarted. Updates then shows that the update was rolled back, and the agent does not retry that version on its own. After fixing the cause, run on the server:
+
+```sh
+sudo node-plane-agent self-update https://github.com/saharoktyan/node-plane/releases/download/vX.Y.Z X.Y.Z
+```
+
+Agents from before self-update, and agents built without a release key, are updated by the SSH installer as before. A node installed with the command has no SSH access for the controller; reinstall its agent with a new install command once.
 
 ## Files on the server
 
 | Path | Contents |
 |---|---|
 | `/usr/local/bin/node-plane-agent` | Agent binary |
+| `/usr/local/bin/node-plane-agent.previous` | Previous binary after a self-update |
 | `/etc/systemd/system/node-plane-agent.service` | Service |
 | `/etc/node-plane/agent.toml` | Node key, listen address, TLS paths |
 | `/etc/node-plane/tls/` | Agent key and certificate, controller CA; the token until enrollment |
 | `/etc/node-plane/node.env` | Node settings |
-| `/var/lib/node-plane-agent/` | Command journals and the controller installation ID |
+| `/var/lib/node-plane-agent/` | Command journals, the controller installation ID, self-update state in `update/` |
 | `/opt/node-plane-runtime/` | Protocol runtime files and client configurations |
 
 Full node removal deletes the agent and its resources and verifies the host. See [Nodes](nodes.md#remove-a-node).

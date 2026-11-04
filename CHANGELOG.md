@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Update node agents without SSH: **Updates** asks each agent to install the
+  controller's release itself. The agent downloads it from GitHub, accepts it
+  only when the release key signed its checksum, refuses older versions,
+  checks that the new binary runs and keeps the previous one; a systemd timer
+  puts the previous binary back unless the new agent starts serving within
+  three minutes. Agents from before this release are updated over SSH once
+  more. Releases now publish `node-plane-agent-linux-amd64.release` and its
+  `.sig`; publishing requires the `NODE_PLANE_RELEASE_SIGNING_KEY` secret.
 - Generate and check AWG profiles in the node agent
   (`node-plane-agent awg-profile`) instead of `awg_profile.py`, which is no
   longer delivered: the controller now sends nodes no file the agent

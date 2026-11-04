@@ -675,7 +675,8 @@ class UpdateService:
                     try:
                         if job['kind'] == 'agents' or job['kind'] == 'stack' and intent.get('phase') == 'agent':
                             child = AgentRolloutService(self.db).request(actor, item['node_key'], child_key,
-                                transport=intent['transport'], ssh_target=intent['ssh_target'], skip_driver=job['kind'] == 'stack')
+                                transport=intent['transport'], ssh_target=intent['ssh_target'], skip_driver=job['kind'] == 'stack',
+                                self_update=True)
                         else:
                             child = NodeOperations(self.db).queue(actor, item['node_key'], 'sync_runtime',
                                 revision=intent['desired_revision'], command_key=child_key)

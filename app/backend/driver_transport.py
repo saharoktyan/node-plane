@@ -6,6 +6,10 @@ class AgentNotConfigured(RuntimeError):
     """The driver has no live agent target for this node."""
 
 
+class AgentUpdateUnsupported(RuntimeError):
+    """The agent cannot update itself; its installer has to replace it."""
+
+
 class LocalDriverTokenMissing(RuntimeError):
     """The local Driver endpoint requires a shared authentication token."""
 
@@ -119,6 +123,7 @@ class GrpcIntentDriver:
         return {'node_key': response.node_key, 'health_state': response.health_state,
                 'runtime_version': response.runtime_version, 'runtime_commit': response.runtime_commit,
                 'agent_version': response.agent_version, 'agent_commit': response.agent_commit,
+                'agent_update_rolled_back': response.agent_update_rolled_back,
                 'xray_config_present': response.xray_config_present,
                 'awg_config_present': response.awg_config_present}
 
@@ -131,6 +136,24 @@ class GrpcIntentDriver:
             retired_node_keys=list(retired_node_keys),
             restrict_to_controller=restrict_to_controller), timeout=self.timeout)
         return {'firewall': response.firewall, 'journal_archive': response.journal_archive}
+
+    def update_agent(self, node_key, release_url, version):
+        """Ask the agent to install a signed release and restart into it."""
+        from driver.v1 import node_service_pb2
+        try:
+            response = self.nodes.UpdateAgent(node_service_pb2.UpdateAgentRequest(
+                node_key=node_key, release_url=release_url, version=version), timeout=660)
+        except grpc.RpcError as error:
+            details = error.details() or ''
+            # Agents before self-update, or built without the release key.
+            if (error.code() == grpc.StatusCode.UNIMPLEMENTED
+                    or details in {'agent_update_key_missing', 'agent_update_version_unknown'}):
+                raise AgentUpdateUnsupported(details) from None
+            if details == 'no node-agent target configured':
+                raise AgentNotConfigured(details) from None
+            raise
+        return {'status': response.status, 'version': response.version,
+                'rolled_back': response.rolled_back}
 
     def diagnose_node(self, node_key):
         """Read agent diagnostics without accepting the driver's legacy DB fallback."""

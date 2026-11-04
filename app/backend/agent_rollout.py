@@ -6,17 +6,36 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from uuid import UUID, uuid4
 
 from .authorization import AccessDenied, require_permission
+
+
+# Longer than the agent's rollback guard, so a failed start is seen as rolled back.
+SELF_UPDATE_WAIT = 300
+SELF_UPDATE_POLL = 5
+# What the agent reports, as the failure codes operators see.
+SELF_UPDATE_FAILURES = {
+    'agent_update_signature_invalid': 'agent_update_rejected',
+    'agent_update_statement_invalid': 'agent_update_rejected',
+    'agent_update_checksum_mismatch': 'agent_update_rejected',
+    'agent_update_version_mismatch': 'agent_update_rejected',
+    'agent_update_download_failed': 'agent_update_download_failed',
+    'agent_update_downloader_missing': 'agent_update_download_failed',
+    'agent_update_self_check_failed': 'agent_update_self_check_failed',
+    'agent_update_downgrade': 'agent_update_downgrade',
+    'agent_update_rolled_back': 'agent_update_rolled_back',
+}
 
 
 SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
 
 
 class AgentRolloutService:
-    def __init__(self, db, runner=None):
-        self.db, self.runner = db, runner
+    def __init__(self, db, runner=None, driver=None, release=None, sleep=time.sleep, clock=time.monotonic):
+        self.db, self.runner, self.driver = db, runner, driver
+        self.release, self.sleep, self.clock = release, sleep, clock
 
     def initialize_schema(self):
         with self.db.transaction() as conn:
@@ -36,9 +55,9 @@ class AgentRolloutService:
     def public(row):
         return {key: row[key] for key in ('id', 'node_key', 'status')}
 
-    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False, skip_driver=False, bootstrap_id=None):
+    def request(self, actor, node_key, command_key, *, transport, ssh_target=None, ssh_port=22, install_rust=False, skip_driver=False, bootstrap_id=None, self_update=False):
         require_permission(actor, 'nodes.manage')
-        if type(install_rust) is not bool or type(skip_driver) is not bool:
+        if type(install_rust) is not bool or type(skip_driver) is not bool or type(self_update) is not bool:
             raise AccessDenied('invalid_input', 422)
         if install_rust:
             raise AccessDenied('install_rust_unsupported', 422)
@@ -56,6 +75,10 @@ class AgentRolloutService:
         intent = {'transport': transport, 'ssh_target': ssh_target, 'ssh_port': ssh_port}
         if skip_driver:
             intent['skip_driver'] = True
+        # Only updates try the agent's own signed update; setup and repair
+        # always run the installer.
+        if self_update:
+            intent['self_update'] = True
         encoded = json.dumps(intent, sort_keys=True, separators=(',', ':'))
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
@@ -132,7 +155,9 @@ class AgentRolloutService:
             node = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
             abandoned = conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE child_id=? AND status='superseded'", (row['id'],)).fetchone()
         return bool(row['status'] == 'blocked' and node and not abandoned and failure
-                    and (failure['code'] in {'release_binary_unavailable', 'rust_required'}
+                    and (failure['code'] in {'release_binary_unavailable', 'rust_required',
+                                             'agent_update_rejected', 'agent_update_download_failed',
+                                             'agent_update_self_check_failed'}
                          or progress and progress['stage'] == 'check_ssh'
                          and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites',
                                                  'runtime_owner_conflict'}
@@ -223,7 +248,52 @@ class AgentRolloutService:
                 (row['id'], 'agent_previous_node_retired'))
         return {'previous_node': old_key, 'previous_node_retired': True, 'agent_setup_retryable': True}
 
+    def _self_update(self, row):
+        """Update a running agent to this controller's signed release.
+
+        Returns None when the agent or the release cannot do that, so the
+        installer runs instead; otherwise whether the update succeeded.
+        """
+        if self.driver is None or not json.loads(row['intent_json']).get('self_update'):
+            return None
+        from .agent_enrollment import release_assets
+        from .driver_transport import AgentNotConfigured, AgentUpdateUnsupported
+        try:
+            release = (self.release or release_assets)()
+        except AccessDenied:
+            return None
+        if not release.get('signed'):
+            return None
+        version = release['tag'][1:]
+        try:
+            answer = self.driver.update_agent(row['node_key'], release['base'], version)
+        except (AgentNotConfigured, AgentUpdateUnsupported):
+            return None
+        except Exception as exc:
+            details = exc.details() if callable(getattr(exc, 'details', None)) else ''
+            self._failure_code = SELF_UPDATE_FAILURES.get(details, 'agent_update_failed')
+            return False
+        if answer['status'] == 'current':
+            return True
+        deadline = self.clock() + SELF_UPDATE_WAIT
+        while self.clock() < deadline:
+            self.sleep(SELF_UPDATE_POLL)
+            try:
+                facts = self.driver.inspect_node(row['node_key'])
+            except Exception:
+                continue
+            if facts.get('agent_version') == version:
+                return True
+            if facts.get('agent_update_rolled_back') == version:
+                self._failure_code = 'agent_update_rolled_back'
+                return False
+        self._failure_code = 'agent_update_unconfirmed'
+        return False
+
     def _execute(self, row):
+        updated = self._self_update(row)
+        if updated is not None:
+            return updated
         root, args = self._installer_args(row)
         if self.runner is not None:
             return self.runner(args)

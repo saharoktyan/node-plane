@@ -57,6 +57,20 @@ python3 scripts/generate_third_party_licenses.py --check
 
 Commit the generated root file with the dependency changes. `--offline` skips Cargo downloads when dependencies are cached. Generation preserves bundled notices and verified upstream supplements in `licenses/upstream/`; a missing license requires a reviewed supplement rather than a placeholder. Third-party source files copied into the repository (such as `proto/vendor/xray`) are declared in `licenses/vendored/manifest.json`; the document lists each of their files and their license text, so adding a file there requires regeneration. Standard-library notices in `licenses/` must follow the pinned Rust version. Release CI checks freshness before publication.
 
+### Agent release signing
+
+Agents update themselves only to a release signed with the release key (see [Agent updates](../agent.md#agent-updates)). The server job writes `node-plane-agent-linux-amd64.release`, a statement with the version and the SHA-256 of the agent archive, and signs it into `node-plane-agent-linux-amd64.release.sig` with the Ed25519 key from the `NODE_PLANE_RELEASE_SIGNING_KEY` repository secret. The public half is `rust/node-agent/release-key.hex`, built into the agent. CI refuses to publish without the secret or when the secret does not match that file. A local build without the secret leaves the statement unsigned; agents do not update to it.
+
+Set up or rotate the key once:
+
+```sh
+openssl genpkey -algorithm ed25519 -out release-signing.pem
+gh secret set NODE_PLANE_RELEASE_SIGNING_KEY < release-signing.pem
+openssl pkey -in release-signing.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n' > rust/node-agent/release-key.hex
+```
+
+Commit `release-key.hex`, keep `release-signing.pem` offline or delete it. Agents trust only the key they were built with: after a rotation, agents built with the old key need one update by reinstalling. A fork uses its own key the same way, or builds with `NODE_PLANE_RELEASE_KEY=<hex>`.
+
 For the first stable release, use the [1.0.0 acceptance checklist](release-1.0.0-acceptance.md). Automated results and manual acceptance are recorded separately.
 
 ## Prepare a release

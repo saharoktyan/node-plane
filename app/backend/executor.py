@@ -280,7 +280,7 @@ class Worker:
         self.config_executor = ConfigIssuanceService(self.executor.db, self.executor.driver)
         from .temporary_configs import TemporaryConfigService
         self.temporary_executor = TemporaryConfigService(self.executor.db, self.executor.driver)
-        self.rollout_executor = AgentRolloutService(self.executor.db)
+        self.rollout_executor = AgentRolloutService(self.executor.db, driver=self.executor.driver)
         from .node_bootstrap import NodeBootstrapService
         self.bootstrap_executor = NodeBootstrapService(self.executor.db, self.executor.driver)
         from .agent_enrollment import AgentEnrollmentService
