@@ -1280,47 +1280,6 @@ def prepare_decommission(path, command_id, runner=None):
         return record
 
 
-def resolve_interrupted(intent, path, inspector):
-    """After an agent restart, observe live state and retire an orphaned command.
-
-    The operator must first restart the agent service to quiesce its old process
-    group. We never infer resolution from disk config alone, nor re-run the old
-    mutation. The next backend revision performs the actual repair.
-    """
-    validate(intent)
-    path = Path(path)
-    fingerprint = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    with open(str(path) + '.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if Path(str(path) + '.disabled').exists():
-            raise ValueError('agent removal is in progress')
-        connection = sqlite3.connect(path)
-        try:
-            row = connection.execute('SELECT fingerprint, status, response, instance_id FROM commands WHERE id = ?', (intent['command_id'],)).fetchone()
-            if not row or row[0] != fingerprint:
-                raise ValueError('command identity mismatch')
-            if row[1] == 'superseded':
-                return json.loads(row[2])
-            if row[1] != 'running':
-                raise ValueError('command is not interrupted')
-            current_instance = os.environ.get('NODE_PLANE_AGENT_INSTANCE_ID', 'standalone')
-            if not current_instance or row[3] == current_instance:
-                raise ValueError('agent service restart is required before repair')
-            observation = inspector(intent)
-            required = {'disk_present', 'live_present', 'identity_matches', 'config_available'}
-            if set(observation) != required or any(type(value) is not bool for value in observation.values()):
-                raise ValueError('live inspection unavailable')
-            record = {'observation': observation, 'resolved_at': datetime.now(timezone.utc).isoformat()}
-            with connection:
-                changed = connection.execute("UPDATE commands SET status = 'superseded', response = ? WHERE id = ? AND status = 'running'",
-                                             (json.dumps(record, sort_keys=True), intent['command_id']))
-                if changed.rowcount != 1:
-                    raise ValueError('command changed during repair')
-            return record
-        finally:
-            connection.close()
-
-
 def inspect_for_repair(intent, allow_unused=False):
     arguments = [intent['protocol'], intent['runtime_name']]
     if intent['protocol'] == 'xray':
@@ -1332,65 +1291,6 @@ def inspect_for_repair(intent, allow_unused=False):
     result = subprocess.run([str(Path(__file__).with_name('inspect-profile.sh')), *arguments],
                             check=True, capture_output=True, text=True, timeout=30)
     return json.loads(result.stdout)
-
-
-def guard_legacy(path, protocol=None, profile=None):
-    """Refuse old mutation paths once the explicit backend owns the target.
-
-    No journal means a legacy-only node. A present but unreadable journal is
-    fail-closed, since it may contain a fence we cannot safely inspect.
-    """
-    path = Path(path)
-    if Path(str(path) + '.disabled').exists():
-        raise ValueError('agent removal is in progress')
-    if not path.exists():
-        return
-    connection = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=2)
-    try:
-        if protocol is None:
-            owned = connection.execute('SELECT 1 FROM fences LIMIT 1').fetchone()
-            if (not owned and connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'node_settings_fence'").fetchone()):
-                owned = connection.execute('SELECT 1 FROM node_settings_fence LIMIT 1').fetchone()
-        else:
-            if (protocol not in {'awg', 'xray'} or not isinstance(profile, str)
-                    or not profile or len(profile) > 128 or '\0' in profile):
-                raise ValueError('invalid legacy target')
-            owned = connection.execute('SELECT 1 FROM fences WHERE protocol = ? AND profile = ?', (protocol, profile)).fetchone()
-        if owned:
-            raise ValueError('target is managed by the explicit backend')
-    finally:
-        connection.close()
-
-
-def run_legacy(path, scope, profile, script, args):
-    """Serialize an old mutation with explicit commands before checking fences."""
-    profile_scripts = {
-        'xray-add-user-existing.sh': 'xray', 'xray-del-user.sh': 'xray',
-        'awg-add-user.sh': 'awg', 'awg-del-user.sh': 'awg',
-    }
-    maintenance_scripts = {
-        'init-xray.sh', 'deploy-xray.sh', 'init-awg.sh', 'deploy-awg.sh',
-        'apply-node-settings.sh', 'regenerate-awg-entropy.sh', 'sync-xray.sh',
-    }
-    if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-        raise ValueError('invalid runtime arguments')
-    if scope == 'all':
-        if script not in maintenance_scripts or profile:
-            raise ValueError('invalid maintenance command')
-    elif (profile_scripts.get(script) != scope or not isinstance(profile, str)
-          or not profile or len(profile) > 128 or '\0' in profile):
-        raise ValueError('invalid profile command')
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(str(path) + '.lock', 'a') as lock:
-        os.chmod(lock.name, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        guard_legacy(path, None if scope == 'all' else scope,
-                     None if scope == 'all' else profile)
-        result = subprocess.run([str(Path(__file__).parent / script), *args],
-                                check=True, capture_output=True, text=True,
-                                pass_fds=(lock.fileno(),), env=dict(os.environ, NODE_PLANE_PROFILE_LOCK_FD=str(lock.fileno())))
-        return result.stdout.strip()
 
 
 if __name__ == '__main__':
@@ -1425,10 +1325,6 @@ if __name__ == '__main__':
             result = resolve_node_settings(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', inspect_node_settings_for_repair)
             print(json.dumps(result))
             sys.exit(0)
-        if len(sys.argv) == 3 and sys.argv[1] == 'resolve':
-            result = resolve_interrupted(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3', inspect_for_repair)
-            print(json.dumps(result))
-            sys.exit(0)
         if len(sys.argv) == 3 and sys.argv[1] in {'prepare-decommission', 'prepare-decommission-readonly'}:
             result = prepare_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2],
                                          run if sys.argv[1] == 'prepare-decommission' else None)
@@ -1438,23 +1334,6 @@ if __name__ == '__main__':
             result = verify_decommission('/etc/node-plane/profile-intents.sqlite3', sys.argv[2])
             print(json.dumps(result))
             sys.exit(0)
-        if len(sys.argv) >= 5 and sys.argv[1] == 'run-legacy':
-            result = run_legacy('/etc/node-plane/profile-intents.sqlite3',
-                                sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
-            print(result)
-            sys.exit(0)
-        if len(sys.argv) == 2 and sys.argv[1] == 'guard-maintenance':
-            guard_legacy('/etc/node-plane/profile-intents.sqlite3')
-            result = {'status': 'allowed'}
-        elif len(sys.argv) == 4 and sys.argv[1] == 'guard-legacy':
-            guard_legacy('/etc/node-plane/profile-intents.sqlite3', sys.argv[2], sys.argv[3])
-            result = {'status': 'allowed'}
-        elif len(sys.argv) == 3 and sys.argv[1] == 'lookup':
-            result = lookup(json.loads(sys.argv[2]), '/etc/node-plane/profile-intents.sqlite3')
-        elif len(sys.argv) == 2:
-            result = apply(json.loads(sys.argv[1]), '/etc/node-plane/profile-intents.sqlite3', run)
-        else:
-            raise ValueError('invalid arguments')
-        print(json.dumps(result))
+        raise ValueError('invalid arguments')
     except Exception:
         raise SystemExit('profile intent could not be applied; reconciliation required')

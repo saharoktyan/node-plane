@@ -220,8 +220,6 @@ class AgentNodeSettingsIntentTests(unittest.TestCase):
         second = MODULE.apply_node_settings(self.intent(revision=2, command_id='node-task-2'), self.journal, self.runner)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(second['summary'], 'applied')
-        with self.assertRaises(ValueError):
-            MODULE.guard_legacy(self.journal)
 
     def test_failed_or_unverified_mutation_blocks_later_commands(self):
         def bad_result(intent, lock_fd):

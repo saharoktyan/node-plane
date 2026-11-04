@@ -7,6 +7,7 @@ mod config;
 mod enforcement;
 mod fencing;
 mod host;
+mod intents;
 mod journal;
 mod lifecycle;
 mod profiles;

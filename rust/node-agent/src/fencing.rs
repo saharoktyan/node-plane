@@ -1,11 +1,10 @@
 //! Command fences shared by mutating operations.
-use std::fs;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::process::Command;
 
 use tonic::Status;
 
+use crate::intents::Lock;
+use crate::intents::legacy::{self, Target};
 use crate::state::AgentState;
 
 impl AgentState {
@@ -20,35 +19,17 @@ impl AgentState {
         Ok(())
     }
 
-    pub(crate) fn guard_fenced_maintenance(&self) -> Result<Option<fs::File>, Status> {
-        let helper = self.resolve_runtime_path("/opt/node-plane-runtime/apply-profile-intent.py");
-        let journal = Path::new("/etc/node-plane/profile-intents.sqlite3");
-        if !Path::new(&helper).exists() && !journal.exists() {
-            return Ok(None);
-        }
-        if !Path::new(&helper).exists() {
-            return Err(Status::failed_precondition(
-                "profile fence helper missing; maintenance refused",
-            ));
-        }
-        let lock = fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .mode(0o600)
-            .open("/etc/node-plane/profile-intents.sqlite3.lock")
+    /// Holds the journal lock for a maintenance change, once no backend
+    /// fence owns the runtime.
+    pub(crate) fn guard_fenced_maintenance(&self) -> Result<Option<Lock>, Status> {
+        let journal = self.journal();
+        let lock = Lock::exclusive(&journal)
             .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
-        lock.lock()
-            .map_err(|_| Status::failed_precondition("profile fence lock unavailable"))?;
-        let output = Command::new(&helper)
-            .arg("guard-maintenance")
-            .output()
-            .map_err(|_| Status::failed_precondition("profile fence check unavailable"))?;
-        if !output.status.success() {
-            return Err(Status::failed_precondition(
+        legacy::guard(&journal, Target::Node).map_err(|_| {
+            Status::failed_precondition(
                 "runtime is managed by the explicit backend; maintenance refused",
-            ));
-        }
+            )
+        })?;
         Ok(Some(lock))
     }
 }

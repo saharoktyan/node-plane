@@ -49,6 +49,8 @@ class LocalTLSBridge:
         self.listener.settimeout(.2)
         self.port = self.listener.getsockname()[1]
         self.stopped = threading.Event()
+        # Set: replies of the agent are lost on the way to the client.
+        self.drop_replies = threading.Event()
         self.connections = []
         self.worker = threading.Thread(target=self.accept,daemon=True)
         self.worker.start()
@@ -73,6 +75,7 @@ class LocalTLSBridge:
                 for source in ready:
                     value = source.recv(65536)
                     if not value: return
+                    if source is remote and self.drop_replies.is_set(): continue
                     (remote if source is client else client).sendall(value)
         except (OSError,ssl.SSLError,ValueError):
             pass
@@ -140,13 +143,9 @@ class AgentContainerFaultTests(unittest.TestCase):
                     '-extfile', str(extension), '-out', identity+'.crt')
         shutil.copy(REPO/'runtime_assets/apply-profile-intent.py', cls.root/'production.py')
         (cls.root/'apply-profile-intent.py').write_text('''#!/usr/bin/python3
-import json, pathlib, subprocess, sys, time
-root = pathlib.Path('/test')
+import subprocess, sys
 result = subprocess.run(['/usr/bin/python3', '/test/production.py', *sys.argv[1:]],
                         capture_output=True)
-if result.returncode == 0 and (root/'mode').read_text() == 'after_commit' and sys.argv[1].startswith('{'):
-    (root/'ready').touch()
-    while not (root/'release').exists(): time.sleep(.02)
 sys.stdout.buffer.write(result.stdout)
 sys.stderr.buffer.write(result.stderr)
 sys.exit(result.returncode)
@@ -307,16 +306,24 @@ tls_client_ca_path = "/test/ca.crt"
         self.assertEqual(self.count(), '0')
         self.assertEqual(docker('exec', self.name, 'cat', '/test/config.json').stdout, 'foreign')
 
-    def test_agent_sigkill_before_mutation_orphan_completes_once_and_recovers(self):
+    def test_agent_sigkill_before_mutation_leaves_the_orphan_unconfirmed(self):
+        # The agent keeps the journal: once it dies, nothing confirms what an
+        # orphaned mutation did, so the command stays open for repair.
         self.mode('before_mutation')
         call = self.stub.ApplyProfileIntent.future(self.request, timeout=15)
         self.wait_ready()
         self.assertEqual(self.count(),'0')
         docker('exec',self.name,'sh','-c','kill -9 "$(cat /test/agent.pid)"; touch /test/release')
         with self.assertRaises(grpc.RpcError): call.result(timeout=5)
+        deadline = time.monotonic()+5
+        while self.count() != '1':
+            if time.monotonic() >= deadline: self.fail('orphaned mutation did not finish')
+            time.sleep(.05)
         self.start_agent()
-        self.stub.RecoverProfileIntent(self.request,timeout=5)
-        self.assertEqual(self.journal_status(),'succeeded')
+        for method in (self.stub.RecoverProfileIntent,self.stub.ApplyProfileIntent):
+            with self.assertRaises(grpc.RpcError) as error: method(self.request,timeout=5)
+            self.assertEqual(error.exception.code(),grpc.StatusCode.FAILED_PRECONDITION)
+        self.assertEqual(self.journal_status(),'running')
         self.assertEqual(self.count(),'1')
 
     def test_container_sigkill_during_mutation_blocks_replay_after_restart(self):
@@ -336,12 +343,16 @@ tls_client_ca_path = "/test/ca.crt"
         self.assertEqual(self.count(),'1')
 
     def test_lost_reply_after_commit_recovers_without_another_mutation(self):
-        self.mode('after_commit')
+        self.bridge.drop_replies.set()
         call = self.stub.ApplyProfileIntent.future(self.request,timeout=15)
-        self.wait_ready()
-        self.assertEqual(self.journal_status(),'succeeded')
+        deadline = time.monotonic()+10
+        while docker('exec',self.name,'test','-e','/etc/node-plane/profile-intents.sqlite3',check=False).returncode \
+                or self.journal_status() != 'succeeded':
+            if time.monotonic() >= deadline: self.fail('command was not committed')
+            time.sleep(.05)
         docker('kill',self.name)
         with self.assertRaises(grpc.RpcError): call.result(timeout=5)
+        self.bridge.drop_replies.clear()
         docker('start',self.name)
         self.mode('none')
         self.start_agent()
