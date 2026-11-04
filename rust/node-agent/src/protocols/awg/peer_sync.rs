@@ -14,6 +14,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::Node;
+use super::peer_issue::{NodeRuntime, add, issue_for};
 use super::peers::{Archive, fields, fingerprint, split_peer};
 use crate::protocols::{Setting, lock_config, process_setting, valid_name};
 
@@ -117,12 +118,13 @@ fn running(container: &str) -> Result<bool, String> {
         .any(|line| line == container))
 }
 
-fn execute(setting: Setting<'_>, args: &[String]) -> Result<(), String> {
+fn execute(setting: Setting<'_>, args: &[String]) -> Result<String, String> {
+    let usage = || "usage: awg-peer add|revoke NAME".to_string();
     let [command, name] = args else {
-        return Err("usage: awg-peer revoke NAME".into());
+        return Err(usage());
     };
-    if command != "revoke" {
-        return Err("usage: awg-peer revoke NAME".into());
+    if command != "add" && command != "revoke" {
+        return Err(usage());
     }
     let node = Node::read(setting);
     let peer = node.peer_name(name);
@@ -133,11 +135,26 @@ fn execute(setting: Setting<'_>, args: &[String]) -> Result<(), String> {
     {
         return Err("Invalid AWG profile name".into());
     }
+    if command == "add" {
+        if !node.config.is_file() {
+            return Err(format!("AWG config not found: {}", node.config.display()));
+        }
+        let issue = issue_for(&node, name, setting)?;
+        if !running(&node.container)? {
+            return Err(format!("Container {} not running", node.container));
+        }
+        let runtime = NodeRuntime {
+            node: &node,
+            profile_tool: setting("AWG_PROFILE_TOOL", "/opt/node-plane-runtime/awg_profile.py"),
+        };
+        let _lock = lock_config(&node.config)?;
+        return add(&issue, &runtime);
+    }
     if !running(&node.container)? {
         return Err(format!("Container {} not found", node.container));
     }
     let _lock = lock_config(&node.config)?;
-    revoke(&node.config, &node.clients, &peer, &node)
+    revoke(&node.config, &node.clients, &peer, &node).map(|()| "OK".to_string())
 }
 
 /// Runs the subcommand when the agent was started as `awg-peer …`.
@@ -147,8 +164,11 @@ pub(crate) fn run(args: &[String]) -> Option<i32> {
         return None;
     }
     Some(match execute(&process_setting, rest) {
-        Ok(()) => {
-            println!("OK");
+        Ok(text) => {
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
             0
         }
         Err(err) => {

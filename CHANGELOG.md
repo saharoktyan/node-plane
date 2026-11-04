@@ -15,6 +15,11 @@
 - Create the AWG config and regenerate its parameters in the node agent;
   `init-awg.sh` and `regenerate-awg-entropy.sh` only start it. Parameter
   generation stays in `awg_profile.py`.
+- Issue AWG peers and refresh stored AWG client configs in the node agent;
+  `awg-add-user.sh` only starts it. `refresh-awg-config.py`, `conf2vpn.py`,
+  `amnezia-config-decoder.py` and `awg-template.json` are removed; the
+  AmneziaVPN template is built into the agent. Adds the `miniz_oxide` crate
+  for `vpn://` keys.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

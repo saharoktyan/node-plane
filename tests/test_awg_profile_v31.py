@@ -1,25 +1,14 @@
-import contextlib
 import base64
-import importlib.util
-import io
-import json
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
-import zlib
 
 
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / "runtime_assets"
 sys.path.insert(0, str(ASSETS))
 import awg_profile  # noqa: E402
-import conf2vpn  # noqa: E402
-
-
-REFRESH_SPEC = importlib.util.spec_from_file_location("refresh_awg_config", ASSETS / "refresh-awg-config.py")
-refresh_awg_config = importlib.util.module_from_spec(REFRESH_SPEC)
-REFRESH_SPEC.loader.exec_module(refresh_awg_config)
 
 
 class AwgProfile31Tests(unittest.TestCase):
@@ -59,7 +48,7 @@ class AwgProfile31Tests(unittest.TestCase):
         self.assertEqual(key[31] & 0x80, 0)
         self.assertEqual(key[31] & 0x40, 0x40)
 
-    def test_legacy_migration_keeps_peer_and_i_sequence_and_refreshes_both_exports(self):
+    def test_legacy_migration_keeps_peer_and_i_sequence(self):
         old_server = """[Interface]
 PrivateKey = serverprivate
 Address = 10.8.1.1/24
@@ -95,69 +84,6 @@ AllowedIPs = 10.8.1.2/32
         self.assertEqual(values["I5"], "<r 1000>")
         self.assertIn("PublicKey = clientpublic", migrated)
         self.assertEqual(awg_profile.migrate(migrated, "quic"), migrated)
-
-        old_client = """[Interface]
-PrivateKey = clientprivate
-PublicKey = clientpublic
-Address = 10.8.1.2/32
-DNS = 1.1.1.1
-MTU = 1280
-
-[Peer]
-PublicKey = oldserverpublic
-PresharedKey = clientpsk
-Endpoint = old.example:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-"""
-        fresh = refresh_awg_config.refresh(old_client, migrated, "new.example", "51820", "newserverpublic")
-        self.assertEqual(awg_profile.interface_values(fresh)["HeaderProtectionKey"], values["HeaderProtectionKey"])
-        self.assertEqual(awg_profile.interface_values(fresh)["I5"], "<r 1000>")
-        self.assertIn("Endpoint = new.example:51820", fresh)
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            conf = root / "client.conf"
-            output = root / "client.json"
-            conf.write_text(fresh, encoding="utf-8")
-            with contextlib.redirect_stdout(io.StringIO()) as printed:
-                conf2vpn.main(conf, ASSETS / "awg-template.json", output, ASSETS / "amnezia-config-decoder.py",
-                              description="Latvia #1 AmneziaWG · alice")
-            self.assertTrue(printed.getvalue().startswith("vpn://"))
-            payload = json.loads(output.read_text(encoding="utf-8"))["containers"][0]["awg"]
-            exported = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(exported["description"], "Latvia #1 AmneziaWG · alice")
-            uri = printed.getvalue().strip().removeprefix("vpn://")
-            encoded = base64.urlsafe_b64decode(uri + "=" * (-len(uri) % 4))
-            imported = json.loads(zlib.decompress(encoded[4:]))
-            self.assertEqual(imported["description"], "Latvia #1 AmneziaWG · alice")
-            self.assertEqual(exported["defaultContainer"], "amnezia-awg2")
-            self.assertEqual(exported["containers"][0]["container"], "amnezia-awg2")
-            self.assertEqual(payload["protocol_version"], "3.1")
-            self.assertEqual(payload["HeaderProtectionKey"], values["HeaderProtectionKey"])
-            self.assertEqual(payload["I5"], "<r 1000>")
-            self.assertEqual(json.loads(payload["last_config"])["RandomTrailers"], "on")
-            last_config = json.loads(payload['last_config'])
-            exported_interface = awg_profile.interface_values(last_config['config'])
-            imported_awg = imported['containers'][0]['awg']
-            for field in awg_profile.ALL_FIELDS:
-                self.assertEqual(payload[field], values[field])
-                self.assertEqual(last_config[field], values[field])
-                self.assertEqual(exported_interface[field], values[field])
-                self.assertEqual(imported_awg[field], values[field])
-
-    def test_compact_uri_preserves_json_and_legacy_decoding(self):
-        spec = importlib.util.spec_from_file_location('awg_codec', ASSETS / 'amnezia-config-decoder.py')
-        codec = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(codec)
-        config = json.loads((ASSETS / 'awg-template.json').read_text())
-        config['description'] = 'Латвия #1 AmneziaWG · alice'
-        config['containers'][0]['awg'].update(awg_profile.new_profile('quic'))
-        old_json = json.dumps(config, indent=4).encode()
-        old_uri = 'vpn://' + base64.urlsafe_b64encode(len(old_json).to_bytes(4, 'big') + zlib.compress(old_json)).decode().rstrip('=')
-        compact_uri = codec.encode_config(config)
-        self.assertEqual(codec.decode_config(compact_uri), config)
-        self.assertEqual(codec.decode_config(old_uri), config)
-        self.assertLess(len(compact_uri), len(old_uri))
 
     def test_rejects_invalid_header_and_cps(self):
         profile = awg_profile.new_profile("quic")

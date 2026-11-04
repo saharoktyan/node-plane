@@ -1,9 +1,13 @@
 //! AmneziaWG on this node.
+pub(crate) mod addresses;
+pub(crate) mod client;
 pub(crate) mod entropy;
 pub(crate) mod inspection;
+pub(crate) mod peer_issue;
 pub(crate) mod peer_sync;
 pub(crate) mod peers;
 pub(crate) mod rate;
+pub(crate) mod refresh;
 pub(crate) mod runtime;
 pub(crate) mod settings;
 pub(crate) mod setup;
