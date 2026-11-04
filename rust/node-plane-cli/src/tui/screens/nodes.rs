@@ -848,6 +848,20 @@ pub(in crate::tui) fn node_card_actions(
                 "succeeded" | "failed" | "cancelled" | "rejected"
             )
     });
+    // Server setup waits for its token installation: the command can be
+    // shown (and replaced) again.
+    if operation.is_some_and(|o| {
+        o.node_key == node.key
+            && o.kind == "node-bootstraps"
+            && matches!(
+                o.status.as_str(),
+                "awaiting_executor" | "running" | "blocked"
+            )
+    }) && node.agent != crate::nodes::AgentState::Ready
+        && !node.protocols.is_empty()
+    {
+        actions.push(("Install command", Control::NodesBootstrap));
+    }
     if !busy {
         if node.protocols.is_empty() {
             if !node.installed_agent()

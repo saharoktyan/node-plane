@@ -897,6 +897,24 @@ impl App {
                     _ => None,
                 }
             }
+            Prompt::Command { command, .. } => match key.code {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.trust = !self.trust;
+                    None
+                }
+                KeyCode::Char('c' | 'C') => {
+                    let command = command.clone();
+                    self.copy_text(command, "Command copied.");
+                    None
+                }
+                KeyCode::Enter if self.trust => {
+                    let command = command.clone();
+                    self.copy_text(command, "Command copied.");
+                    None
+                }
+                KeyCode::Enter | KeyCode::Esc => Some(Answer::Confirm(true)),
+                _ => None,
+            },
             Prompt::HostKey { .. } | Prompt::ConfirmAction { .. } => match key.code {
                 KeyCode::Char('y' | 'Y') => Some(Answer::Confirm(true)),
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Answer::Confirm(false)),
@@ -945,6 +963,7 @@ impl App {
         };
         if let Some(answer) = answer {
             self.error.clear();
+            self.prompt_notice.clear();
             let (_, reply) = self.prompt.take().unwrap();
             let _ = reply.send(answer);
         }

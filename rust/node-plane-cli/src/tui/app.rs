@@ -10,6 +10,7 @@ impl App {
             navigation_context: None,
             return_focus: None,
             clipboard: None,
+            prompt_notice: String::new(),
             temporary: crate::temporary::Browser::default(),
             temporary_sidebar: false,
             temporary_busy: false,

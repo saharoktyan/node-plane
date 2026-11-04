@@ -8,6 +8,7 @@ mod enrollment;
 mod events;
 mod installer;
 mod node_editor;
+mod node_install;
 mod node_maintenance;
 mod node_wizard;
 mod nodes;
@@ -380,6 +381,14 @@ fn console_prompt(prompt: Prompt) -> Result<Answer> {
             let index: usize = value.parse().context("Invalid choice")?;
             ensure!(index > 0 && index <= choices.len(), "Invalid choice");
             Ok(Answer::Selection(index - 1))
+        }
+        Prompt::Command {
+            title,
+            description,
+            command,
+        } => {
+            println!("{title}\n{description}\n\n{command}\n");
+            Ok(Answer::Confirm(true))
         }
         Prompt::SelectAdministrator { choices } => {
             println!("Choose administrator");

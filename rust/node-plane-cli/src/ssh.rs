@@ -46,6 +46,11 @@ pub trait Interaction: Send + Sync {
 
     fn confirm_host_key(&self, host: &str, fingerprint: &str) -> Result<bool>;
     fn password(&self, user: &str, host: &str) -> Result<Zeroizing<String>>;
+
+    /// The password for a login that enrolls no key (`connect_once`).
+    fn single_login_password(&self, user: &str, host: &str) -> Result<Zeroizing<String>> {
+        self.password(user, host)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +138,61 @@ pub async fn connect(
         return Ok(connected);
     }
 
+    authenticate_existing(&mut session, options, interaction.clone()).await?;
+
+    let public_key = key.public_key().to_openssh()?;
+    let mut initial = SshSession {
+        session,
+        server_key,
+        ssh_user: options.user.clone(),
+        workstation_fingerprint: workstation_fingerprint.clone(),
+        endpoint: self::endpoint(options),
+        peers: BTreeMap::new(),
+        persistent: false,
+        authorization: std::sync::Mutex::new(None),
+    };
+    initial.verify_privileges().await?;
+    let command = initial.audited_enrollment_command(
+        &public_key,
+        "workstation-key-enrollment",
+        uuid::Uuid::new_v4(),
+    )?;
+    let code = initial.run(&command, None, |_, _| {}).await.context(
+        "Could not add the workstation public key. Check the SSH home directory and permissions",
+    )?;
+    ensure!(
+        code == 0,
+        "Could not add the workstation public key (exit {code}). Check the SSH home directory and permissions"
+    );
+
+    // Test a completely new SSH authentication; successful file creation alone
+    // does not prove sshd reads this authorized_keys file or permits public keys.
+    let (mut verified, server_key) = open_connection(options, interaction).await?;
+    let key_accepted = authenticate_key(&mut verified, &options.user, key).await?;
+    let _ = initial.close().await;
+    ensure!(
+        key_accepted,
+        "Public key was added, but a fresh SSH login rejected it. Check sshd AuthorizedKeysFile and public-key policy; the password was not saved"
+    );
+    Ok(SshSession {
+        session: verified,
+        server_key,
+        ssh_user: options.user.clone(),
+        workstation_fingerprint,
+        endpoint: self::endpoint(options),
+        peers: BTreeMap::new(),
+        persistent: false,
+        authorization: std::sync::Mutex::new(None),
+    })
+}
+
+/// Authenticates with a credential the user already has: an existing
+/// private key or the password (or keyboard-interactive challenges).
+async fn authenticate_existing(
+    session: &mut client::Handle<HostVerifier>,
+    options: &SshOptions,
+    interaction: Arc<dyn Interaction>,
+) -> Result<()> {
     let prompt = interaction.clone();
     let user = options.user.clone();
     let host = endpoint(options);
@@ -167,7 +227,7 @@ pub async fn connect(
                     .context("Could not unlock the SSH private key; check its passphrase")?;
             }
             ensure!(
-                authenticate_key(&mut session, &options.user, Arc::new(existing)).await?,
+                authenticate_key(session, &options.user, Arc::new(existing)).await?,
                 "The server rejected the selected SSH key. Check the SSH user and authorized_keys."
             );
         }
@@ -211,51 +271,59 @@ pub async fn connect(
                     methods.contains(&russh::MethodKind::KeyboardInteractive),
                     "SSH authentication was not accepted. The server requires a different credential or additional authentication."
                 );
-                authenticate_interactive(&mut session, &options.user, interaction.clone()).await?;
+                authenticate_interactive(session, &options.user, interaction.clone()).await?;
             }
         }
     }
 
-    let public_key = key.public_key().to_openssh()?;
-    let mut initial = SshSession {
+    Ok(())
+}
+
+/// Prompts for a login that leaves nothing behind: the password is asked
+/// for this login only, with no key enrollment.
+struct Once(Arc<dyn Interaction>);
+
+impl Interaction for Once {
+    fn authentication(&self, user: &str, host: &str) -> Result<Authentication> {
+        self.0.authentication(user, host)
+    }
+    fn input(&self, title: &str, description: &str, secret: bool) -> Result<Zeroizing<String>> {
+        self.0.input(title, description, secret)
+    }
+    fn confirm_host_key(&self, host: &str, fingerprint: &str) -> Result<bool> {
+        self.0.confirm_host_key(host, fingerprint)
+    }
+    fn password(&self, user: &str, host: &str) -> Result<Zeroizing<String>> {
+        self.0.single_login_password(user, host)
+    }
+}
+
+/// One SSH login for a single operation, such as installing a node agent:
+/// the workstation key is used when the server already accepts it, and
+/// nothing is added to the server or saved here. No sudo is assumed.
+pub async fn connect_once(
+    options: &SshOptions,
+    interaction: Arc<dyn Interaction>,
+) -> Result<SshSession> {
+    validate_options(options)?;
+    let state_dir = options.state_dir.clone();
+    let key = Arc::new(
+        tokio::task::spawn_blocking(move || load_or_create_key(&state_dir))
+            .await
+            .context("Local key task failed")??,
+    );
+    let workstation_fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
+    let interaction: Arc<dyn Interaction> = Arc::new(Once(interaction));
+    let (mut session, server_key) = open_connection(options, interaction.clone()).await?;
+    if !authenticate_key(&mut session, &options.user, key).await? {
+        authenticate_existing(&mut session, options, interaction).await?;
+    }
+    Ok(SshSession {
         session,
         server_key,
         ssh_user: options.user.clone(),
-        workstation_fingerprint: workstation_fingerprint.clone(),
-        endpoint: self::endpoint(options),
-        peers: BTreeMap::new(),
-        persistent: false,
-        authorization: std::sync::Mutex::new(None),
-    };
-    initial.verify_privileges().await?;
-    let command = initial.audited_enrollment_command(
-        &public_key,
-        "workstation-key-enrollment",
-        uuid::Uuid::new_v4(),
-    )?;
-    let code = initial.run(&command, None, |_, _| {}).await.context(
-        "Could not add the workstation public key. Check the SSH home directory and permissions",
-    )?;
-    ensure!(
-        code == 0,
-        "Could not add the workstation public key (exit {code}). Check the SSH home directory and permissions"
-    );
-
-    // Test a completely new SSH authentication; successful file creation alone
-    // does not prove sshd reads this authorized_keys file or permits public keys.
-    let (mut verified, server_key) = open_connection(options, interaction).await?;
-    let key_accepted = authenticate_key(&mut verified, &options.user, key).await?;
-    let _ = initial.close().await;
-    ensure!(
-        key_accepted,
-        "Public key was added, but a fresh SSH login rejected it. Check sshd AuthorizedKeysFile and public-key policy; the password was not saved"
-    );
-    Ok(SshSession {
-        session: verified,
-        server_key,
-        ssh_user: options.user.clone(),
         workstation_fingerprint,
-        endpoint: self::endpoint(options),
+        endpoint: endpoint(options),
         peers: BTreeMap::new(),
         persistent: false,
         authorization: std::sync::Mutex::new(None),
@@ -2463,6 +2531,31 @@ mod tests {
             assert_eq!(stderr, b"separate-error");
             assert_eq!(installed, fs::read(ssh.join("authorized_keys")).unwrap());
             second.close().await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_single_login_adds_no_key_to_the_server() {
+            let server = MockServer::start().await;
+            let state = tempfile::tempdir().unwrap();
+            let ssh = server.home.join(".ssh");
+            fs::create_dir(&ssh).unwrap();
+            fs::set_permissions(&ssh, fs::Permissions::from_mode(0o700)).unwrap();
+            let existing = b"# existing administrator key must remain\n";
+            fs::write(ssh.join("authorized_keys"), existing).unwrap();
+            let prompts = Arc::new(Prompts::default());
+            let mut session = connect_once(&server.options(state.path()), prompts.clone())
+                .await
+                .unwrap();
+            let mut stdout = Vec::new();
+            let code = session
+                .run("cat", Some(b"once"), |_, data| {
+                    stdout.extend_from_slice(data)
+                })
+                .await
+                .unwrap();
+            assert_eq!((code, stdout.as_slice()), (0, &b"once"[..]));
+            session.close().await.unwrap();
+            assert_eq!(fs::read(ssh.join("authorized_keys")).unwrap(), existing);
         }
 
         #[tokio::test]

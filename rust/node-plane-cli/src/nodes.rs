@@ -1627,6 +1627,71 @@ async fn execute_inner(
                         let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
+                Command::Bootstrap(item) if item.agent != AgentState::Ready => {
+                    // Token installation: the controller gets no SSH key or sudo.
+                    ensure!(item.needs_setup(), "Refresh the node card before server setup");
+                    let mode = events::select(tx, "Server setup", format!(
+                        "{} · {}\nThe node agent installs from a one-time command that runs as root on the server.",
+                        item.region, item.title), vec![
+                        ("manual".into(), "Manual — show the command to run on the server".into()),
+                        ("auto".into(), "Auto — Workstation runs it over SSH once (key or password, nothing saved)".into()),
+                    ])?.context("Server setup cancelled")?;
+                    let access = events::select(tx, "Agent port", "Who may connect to the agent port? Mutual TLS protects it either way.".into(), vec![
+                        ("open".into(), "Any address (recommended; works when the controller's IP changes)".into()),
+                        ("restrict".into(), "Only this controller's address (only for a static controller IP)".into()),
+                    ])?.context("Server setup cancelled")?;
+                    let command_id = Uuid::new_v4();
+                    let pending = Operation { kind: "node-bootstraps".into(), id: command_id, node_key: item.key.clone(),
+                        action: "bootstrap".into(), status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
+                    SavedOperation::save(&request, &credential.account_id, &pending)?;
+                    let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
+                    let path = format!("/api/v1/nodes/{}/agent-enrollment", item.key);
+                    let body = json!({"revision": item.desired_revision, "restrict_to_controller": access == 1});
+                    let enrollment = match backend::request(session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
+                        Ok(value) => value,
+                        Err(error) if error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
+                            let rejected = Operation { status: "rejected".into(), error: error.code.clone(), ..pending };
+                            SavedOperation::save(&request, &credential.account_id, &rejected)?;
+                            let _ = tx.send(Event::Nodes(Update::Operation(rejected)));
+                            return Err(error.into());
+                        }
+                        Err(error) => return Err(anyhow::Error::new(error).context(format!(
+                            "Server setup was not confirmed. Use Refresh to check its original command; do not resubmit. Command: {command_id}"))),
+                    };
+                    let mut operation = operation(&enrollment["bootstrap"], "node-bootstraps", &item.key)?;
+                    if operation.action.is_empty() { operation.action = pending.action; }
+                    operation.command_id = Some(command_id);
+                    let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
+                    SavedOperation::save(&request, &credential.account_id, &operation)
+                        .context("Server setup was accepted, but its local record could not be saved. Do not resubmit")?;
+                    let command = enrollment["command"].as_str().context("The controller did not return the install command")?;
+                    if mode == 0 {
+                        events::show_command(tx, "Install command", format!(
+                            "Run as root on {} · {} within an hour; the controller then finishes the setup. A new Server setup replaces the command.",
+                            item.region, item.title), command.into())?;
+                        return Ok("Waiting for the agent installation".into());
+                    }
+                    let login = match item.ssh_target.as_deref() {
+                        Some(target) => target.to_string(),
+                        None => UiInteraction(tx.clone()).input_line("SSH login",
+                            "user@host or user@host:port of the server. Used once; nothing is saved.")?,
+                    };
+                    let (user, address) = login.split_once('@').unwrap_or(("root", login.as_str()));
+                    let (host, port) = match address.rsplit_once(':') {
+                        Some((host, port)) if !host.contains(':') || host.ends_with(']') =>
+                            (host.trim_matches(['[', ']']).to_string(), port.parse::<u16>().context("Invalid SSH port")?),
+                        _ => (address.trim_matches(['[', ']']).to_string(), 22),
+                    };
+                    let options = crate::ssh::SshOptions { host, port, user: user.into(), state_dir: request.state_dir.clone() };
+                    let _ = tx.send(Event::Stage(format!("Connecting to {}@{}", options.user, options.host)));
+                    let interaction = UiInteraction::shared(tx.clone());
+                    let mut target = crate::ssh::connect_once(&options, interaction.clone()).await?;
+                    let _ = tx.send(Event::Stage("Installing the node agent".into()));
+                    let installed = crate::node_install::install(&mut target, &enrollment, interaction).await;
+                    let _ = target.close().await;
+                    installed?;
+                    return Ok("Agent installed; the controller finishes the setup".into());
+                }
                 Command::Setup(item) | Command::Bootstrap(item) | Command::ProtocolAction(item, _) => {
                     let title = match protocol_action { Some("reinstall_keep") => "Reinstall protocols and keep configurations?", Some("reinstall_clean") => "Reinstall protocols with new configurations?", Some("check_ports") => "Check protocol ports?", _ if setup => "Install node agent?", _ => "Set up server?" };
                     ensure!(events::confirm(tx, title, format!("{} · {}\n\n{}", item.region, item.title, if protocol_action == Some("reinstall_clean") { "Existing configurations will be replaced. Users will need new configurations." } else { "The operation will run on this server." }))?, "Node action cancelled");

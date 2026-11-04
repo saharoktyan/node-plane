@@ -584,13 +584,18 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             Prompt::SelectAdministrator { .. } => "Choose administrator",
             Prompt::ConfirmAction { title, .. }
             | Prompt::Select { title, .. }
-            | Prompt::Text { title, .. } => title,
+            | Prompt::Text { title, .. }
+            | Prompt::Command { title, .. } => title,
             _ => "Connection confirmation",
         };
         let sections = dialog(frame, popup, &format!(" {title} "));
         let text = match prompt {
             Prompt::SelectAdministrator { .. } => "Select the account to bind to this workstation key.\n↑ / ↓ · Enter to select · Esc to cancel".into(),
             Prompt::ConfirmAction { description, .. } | Prompt::Select { description, .. } | Prompt::Text { description, .. } => description.clone(),
+            Prompt::Command { description, command, .. } => {
+                let notice = if app.prompt_notice.is_empty() { String::new() } else { format!("\n\n{}", app.prompt_notice) };
+                format!("{description}\n\n{command}{notice}")
+            }
             Prompt::HostKey { host, fingerprint } => format!(
                 "First connection to {host}\n\nSSH fingerprint:\n{fingerprint}\n\nCompare it with a trusted provider/source before accepting."
             ),
@@ -677,15 +682,16 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
         }
         if !matches!(prompt, Prompt::Select { .. }) {
-            let label = match prompt {
-                Prompt::HostKey { .. } => "Trust host",
-                Prompt::Password { .. } => "Connect",
-                _ => "Continue",
+            let (label, other) = match prompt {
+                Prompt::HostKey { .. } => ("Trust host", "Cancel"),
+                Prompt::Password { .. } => ("Connect", "Cancel"),
+                Prompt::Command { .. } => ("Copy", "Done"),
+                _ => ("Continue", "Cancel"),
             };
             button_pair(
                 frame,
                 sections[1],
-                (label, "Cancel"),
+                (label, other),
                 app.trust || matches!(prompt, Prompt::SelectAdministrator { .. }),
                 (Control::Prompt(true), Control::Prompt(false)),
                 &mut hits,

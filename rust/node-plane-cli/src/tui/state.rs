@@ -663,6 +663,8 @@ pub(super) struct App {
     pub(super) navigation_context: Option<String>,
     pub(super) return_focus: Option<Control>,
     pub(super) clipboard: Option<arboard::Clipboard>,
+    /// What the open prompt last did, such as copying its command.
+    pub(super) prompt_notice: String,
     pub(super) temporary: crate::temporary::Browser,
     pub(super) temporary_sidebar: bool,
     pub(super) temporary_busy: bool,

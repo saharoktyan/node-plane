@@ -29,6 +29,12 @@ pub enum Prompt {
     SelectAdministrator {
         choices: Vec<(String, String)>,
     },
+    /// A command to run elsewhere, with a button that copies it.
+    Command {
+        title: String,
+        description: String,
+        command: String,
+    },
 }
 pub enum Answer {
     Confirm(bool),
@@ -65,6 +71,37 @@ pub fn confirm(tx: &mpsc::Sender<Event>, title: &str, description: String) -> Re
         _ => Ok(false),
     }
 }
+/// The chosen index, or none when cancelled.
+pub fn select(
+    tx: &mpsc::Sender<Event>,
+    title: &str,
+    description: String,
+    choices: Vec<(String, String)>,
+) -> Result<Option<usize>> {
+    Ok(
+        match UiInteraction(tx.clone()).ask(Prompt::Select {
+            title: title.into(),
+            description,
+            choices,
+        })? {
+            Answer::Selection(index) => Some(index),
+            _ => None,
+        },
+    )
+}
+pub fn show_command(
+    tx: &mpsc::Sender<Event>,
+    title: &str,
+    description: String,
+    command: String,
+) -> Result<()> {
+    UiInteraction(tx.clone()).ask(Prompt::Command {
+        title: title.into(),
+        description,
+        command,
+    })?;
+    Ok(())
+}
 pub fn select_administrator(
     tx: &mpsc::Sender<Event>,
     choices: Vec<(String, String)>,
@@ -72,6 +109,14 @@ pub fn select_administrator(
     match UiInteraction(tx.clone()).ask(Prompt::SelectAdministrator { choices })? {
         Answer::Selection(index) => Ok(index),
         _ => bail!("Workstation registration cancelled"),
+    }
+}
+impl UiInteraction {
+    /// A visible line of text, or an error when cancelled.
+    pub fn input_line(&self, title: &str, description: &str) -> Result<String> {
+        Ok(Interaction::input(self, title, description, false)?
+            .trim()
+            .to_string())
     }
 }
 impl Interaction for UiInteraction {
@@ -113,6 +158,15 @@ impl Interaction for UiInteraction {
             Answer::Confirm(value) => Ok(value),
             _ => bail!("Host verification cancelled."),
         }
+    }
+    fn single_login_password(&self, user: &str, host: &str) -> Result<Zeroizing<String>> {
+        self.input(
+            "SSH password",
+            &format!(
+                "SSH login: {user}@{host}\nUsed for this login only: it is not saved and no key is added to the server."
+            ),
+            true,
+        )
     }
     fn password(&self, user: &str, host: &str) -> Result<Zeroizing<String>> {
         match self.ask(Prompt::Password {

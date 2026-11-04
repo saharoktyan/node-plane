@@ -9386,3 +9386,49 @@ fn profile_card_shows_sync_and_traffic_by_server_in_pages() {
     assert!(app.access.traffic.is_none());
     assert!(app.access.card.is_some());
 }
+
+#[test]
+fn a_pending_token_installation_shows_its_command_again() {
+    let mut node = browser_node("lv1", "Europe");
+    node.applied_revision = 0;
+    node.protocols = vec!["awg".into()];
+    let waiting = crate::nodes::Operation {
+        kind: "node-bootstraps".into(),
+        id: uuid::Uuid::new_v4(),
+        node_key: "lv1".into(),
+        action: "bootstrap".into(),
+        status: "awaiting_executor".into(),
+        error: String::new(),
+        command_id: None,
+    };
+    let actions = node_card_actions(&node, Some(&waiting));
+    assert!(actions.contains(&("Install command", Control::NodesBootstrap)));
+    // Not once the agent answers.
+    node.agent = crate::nodes::AgentState::Ready;
+    let actions = node_card_actions(&node, Some(&waiting));
+    assert!(!actions.iter().any(|(label, _)| *label == "Install command"));
+}
+
+#[test]
+fn the_command_prompt_copies_until_done() {
+    let mut app = App::new(&test_request());
+    let (tx, rx) = mpsc::channel();
+    app.prompt = Some((
+        Prompt::Command {
+            title: "Install command".into(),
+            description: "Run it".into(),
+            command: "curl example".into(),
+        },
+        tx,
+    ));
+    app.trust = true;
+    app.prompt_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    // Copying keeps the prompt open and says what happened.
+    assert!(app.prompt.is_some());
+    assert!(!app.prompt_notice.is_empty());
+    assert!(rx.try_recv().is_err());
+    app.prompt_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    app.prompt_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(rx.recv().unwrap(), Answer::Confirm(true)));
+    assert!(app.prompt.is_none() && app.prompt_notice.is_empty());
+}

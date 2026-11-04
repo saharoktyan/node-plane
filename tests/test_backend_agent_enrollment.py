@@ -79,6 +79,10 @@ class AgentEnrollmentTests(unittest.TestCase):
             f"sudo sh /tmp/node-plane-agent-installer.sh --node-key n1 --token {token} --release v1.2.3 "
             f"--agent-sha256 {'a' * 64} --port 50061")
         self.assertEqual(issued['target'], 'node.example:50061')
+        # The same steps for Workstation to run over SSH.
+        self.assertEqual(issued['installer'], {'url': f"{RELEASE['base']}/node-plane-agent-installer.sh",
+                                               'sha256': 'b' * 64})
+        self.assertEqual(issued['arguments'][:4], ['--node-key', 'n1', '--token', token])
         self.assertEqual(issued['bootstrap']['phase'], 'agent')
         self.assertEqual(self.service.get(self.actor, 'n1')['status'], 'waiting')
         self.assertNotIn('token', self.service.get(self.actor, 'n1'))

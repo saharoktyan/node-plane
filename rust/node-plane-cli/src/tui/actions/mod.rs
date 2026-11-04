@@ -598,3 +598,21 @@ impl App {
         Some(KeyEvent::new(key, KeyModifiers::NONE))
     }
 }
+
+impl App {
+    /// Copies `text` and tells the open prompt.
+    pub(in crate::tui) fn copy_text(&mut self, text: String, done: &str) {
+        let result = (|| -> anyhow::Result<()> {
+            if self.clipboard.is_none() {
+                self.clipboard = Some(arboard::Clipboard::new()?);
+            }
+            self.clipboard.as_mut().unwrap().set_text(text)?;
+            Ok(())
+        })();
+        self.prompt_notice = if result.is_ok() {
+            done.into()
+        } else {
+            "Clipboard unavailable. Select the command and copy it.".into()
+        };
+    }
+}

@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 import secrets
 import shlex
-from uuid import UUID, uuid5
+from uuid import UUID
 
 from .authorization import AccessDenied, require_permission
 
@@ -97,14 +97,21 @@ def release_assets(app_root=None, fetch=None):
     return release
 
 
+def installation(release, node_key, token, port):
+    """What runs on the server: the installer to check and its arguments."""
+    return {'installer': {'url': f"{release['base']}/{INSTALLER_ASSET}",
+                          'sha256': release['installer_sha256']},
+            'arguments': ['--node-key', node_key, '--token', token, '--release', release['tag'],
+                          '--agent-sha256', release['agent_sha256'], '--port', str(port)]}
+
+
 def command(release, node_key, token, port):
     """One line to paste on the server: check the installer, then run it."""
     path = '/tmp/node-plane-agent-installer.sh'
-    args = ['--node-key', node_key, '--token', token, '--release', release['tag'],
-            '--agent-sha256', release['agent_sha256'], '--port', str(port)]
-    return (f"curl -fsSLo {path} {release['base']}/{INSTALLER_ASSET} && "
-            f"echo '{release['installer_sha256']}  {path}' | sha256sum -c - && "
-            f"sudo sh {path} " + ' '.join(shlex.quote(arg) for arg in args))
+    steps = installation(release, node_key, token, port)
+    return (f"curl -fsSLo {path} {steps['installer']['url']} && "
+            f"echo '{steps['installer']['sha256']}  {path}' | sha256sum -c - && "
+            f"sudo sh {path} " + ' '.join(shlex.quote(arg) for arg in steps['arguments']))
 
 
 class AgentEnrollmentService:
@@ -176,12 +183,13 @@ class AgentEnrollmentService:
                 (node_key, token, address, int(restrict_to_controller), actor.account.id,
                  expires.isoformat(), now.isoformat()))
         if pending is None:
-            bootstrap = bootstraps.queue(actor, node_key, revision, str(uuid5(UUID(key), 'bootstrap')))
+            bootstrap = bootstraps.queue(actor, node_key, revision, key)
         elif pending['status'] == 'blocked' and not pending['child_id']:
             bootstrap = bootstraps.resume(actor, pending['id'])
         else:
             bootstrap = bootstraps.public(pending)
-        return {'command': command(release, node_key, token, port), 'expires_at': expires.isoformat(),
+        return {'command': command(release, node_key, token, port),
+                **installation(release, node_key, token, port), 'expires_at': expires.isoformat(),
                 'target': address, 'restrict_to_controller': restrict_to_controller,
                 'bootstrap': bootstrap}
 
