@@ -339,3 +339,33 @@ message ApplyRatePolicyResponse {
   uint64 revision = 1;
   repeated RateProtocolStatus protocols = 2;
 }
+
+// Served without TLS before the node has a certificate. Nothing exchanged
+// is secret: both sides prove the one-time token with HMACs bound to the
+// node key and the agent's public key, and the token never crosses the wire.
+service NodeEnrollmentService {
+  rpc Challenge(EnrollmentChallengeRequest) returns (EnrollmentChallengeResponse);
+  rpc Complete(EnrollmentCompleteRequest) returns (EnrollmentCompleteResponse);
+}
+
+message EnrollmentChallengeRequest {
+  bytes nonce = 1;
+}
+
+message EnrollmentChallengeResponse {
+  string node_key = 1;
+  // DER SubjectPublicKeyInfo of the key the agent generated.
+  bytes public_key = 2;
+  bytes proof = 3;
+}
+
+message EnrollmentCompleteRequest {
+  string ca_pem = 1;
+  string certificate_pem = 2;
+  bytes proof = 3;
+}
+
+message EnrollmentCompleteResponse {
+  // How the agent port was restricted to the controller, for the operator.
+  string firewall = 1;
+}

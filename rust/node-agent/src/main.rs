@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 mod api;
 mod config;
 mod enforcement;
+mod enrollment;
 mod fencing;
 mod host;
 mod intents;
@@ -84,6 +85,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(code);
     }
     let config = AgentConfig::load();
+    if enrollment::pending(&config) {
+        enrollment::serve(&config).await?;
+    }
     // Lease units of earlier releases ran the removed script.
     if let Err(err) = intents::scheduler::migrate(
         &intents::leases::System,
