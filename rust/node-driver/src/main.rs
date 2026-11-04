@@ -721,7 +721,7 @@ impl RuntimeService for RuntimeApi {
         }
         if !matches!(
             req.action.as_str(),
-            "inspect" | "traffic" | "operation_progress" | "host_metrics"
+            "inspect" | "traffic" | "traffic_batch" | "operation_progress" | "host_metrics"
         ) && !req.recover
         {
             let mut files = self.ctx.runtime_file_bundle(&req.node_key)?;

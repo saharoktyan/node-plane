@@ -62,6 +62,37 @@ pub(crate) fn counters(node: &Node, name: &str, identity: &str) -> Result<Counte
     parse(&node.wg_show("transfer")?, identity)
 }
 
+/// Counters of several peers, `(profile, identity)`, from one transfer
+/// listing; a peer whose counters are unknown gets none.
+pub(crate) fn batch(node: &Node, peers: &[(String, String)]) -> Vec<Option<Counters>> {
+    let listing = fs::read_to_string(&node.config).ok().and_then(|text| {
+        valid_interface(&node.interface)
+            .then(|| node.wg_show("transfer").ok())
+            .flatten()
+            .map(|output| (text, output))
+    });
+    let Some((text, output)) = listing else {
+        return vec![None; peers.len()];
+    };
+    split(&text, &output, |name| node.peer_name(name), peers)
+}
+
+/// Each peer's counters from the transfer listing of all peers.
+fn split(
+    text: &str,
+    output: &str,
+    peer_name: impl Fn(&str) -> String,
+    peers: &[(String, String)],
+) -> Vec<Option<Counters>> {
+    peers
+        .iter()
+        .map(|(name, identity)| {
+            check_config(text, &peer_name(name), identity).ok()?;
+            parse(output, identity).ok()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +124,33 @@ mod tests {
         assert!(check_config(&text, "n1-alice", "wrong-key").is_err());
         assert!(check_config(&text, "n1-bob", KEY).is_err());
         assert!(valid_interface("wg0") && !valid_interface("0wg") && !valid_interface("wg0;rm"));
+    }
+
+    #[test]
+    fn a_batch_reads_one_listing_for_every_peer() {
+        let other = "b2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=";
+        let text = format!(
+            "[Interface]\nPrivateKey = secret\n\n# n1-alice\n[Peer]\nPublicKey = {KEY}\n\n# n1-bob\n[Peer]\nPublicKey = {other}\n"
+        );
+        let output = format!("{KEY}\t1\t2\n{other}\t3\t4\n");
+        let peers = [
+            ("alice".to_string(), KEY.to_string()),
+            ("bob".to_string(), other.to_string()),
+            ("carol".to_string(), KEY.to_string()),
+        ];
+        assert_eq!(
+            split(&text, &output, |name| format!("n1-{name}"), &peers),
+            [
+                Some(Counters {
+                    uplink: 1,
+                    downlink: 2
+                }),
+                Some(Counters {
+                    uplink: 3,
+                    downlink: 4
+                }),
+                None
+            ]
+        );
     }
 }

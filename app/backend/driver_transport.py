@@ -45,6 +45,16 @@ class GrpcIntentDriver:
             timeout=self.timeout)
         return json.loads(response.result_json)
 
+    def traffic_batch(self, node_key, items):
+        """Read every identity of one node with one agent statistics query."""
+        from driver.v1 import runtime_service_pb2
+        import json
+        response = self.runtime.BackendNodeAction(runtime_service_pb2.BackendNodeActionRequest(
+            node_key=node_key, action='traffic_batch',
+            intent_json=json.dumps({'node_key': node_key, 'items': items})),
+            timeout=self.timeout)
+        return json.loads(response.result_json)
+
     def binary_info(self):
         from driver.v1 import runtime_service_pb2
         import json

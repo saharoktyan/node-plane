@@ -26,6 +26,32 @@ pub(crate) struct Query {
     identity: String,
 }
 
+/// The counters of several identities of one node, read together.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Batch {
+    node_key: String,
+    items: Vec<Item>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Item {
+    runtime_name: String,
+    protocol: String,
+    identity: String,
+}
+
+/// More would not fit a reply.
+const MAX_BATCH: usize = 10_000;
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct BatchSnapshot {
+    node_key: String,
+    /// Only the identities whose counters are known.
+    items: Vec<Snapshot>,
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct Snapshot {
     node_key: String,
@@ -38,7 +64,7 @@ pub(crate) struct Snapshot {
 }
 
 /// Bytes the client sent and received.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Counters {
     pub(crate) uplink: u64,
     pub(crate) downlink: u64,
@@ -159,6 +185,80 @@ pub(crate) async fn read(setting: Setting<'_>, query: Query) -> Result<Snapshot,
     })
 }
 
+/// Every identity's counters, with one statistics read per protocol. An
+/// identity whose counters are unknown is left out; a protocol restarted
+/// during the read leaves out all of its identities.
+pub(crate) async fn read_batch(
+    setting: Setting<'_>,
+    batch: Batch,
+) -> Result<BatchSnapshot, String> {
+    if batch.items.len() > MAX_BATCH {
+        return Err("too many traffic identities".into());
+    }
+    let queries: Vec<Query> = batch
+        .items
+        .into_iter()
+        .map(|item| Query {
+            node_key: batch.node_key.clone(),
+            runtime_name: item.runtime_name,
+            protocol: item.protocol,
+            identity: item.identity,
+        })
+        .collect();
+    for query in &queries {
+        query.validate()?;
+    }
+    let xray = xray::Node::read(setting);
+    let awg = awg::Node::read(setting);
+    let mut items = Vec::new();
+    for protocol in ["xray", "awg"] {
+        let selected: Vec<&Query> = queries.iter().filter(|q| q.protocol == protocol).collect();
+        if selected.is_empty() {
+            continue;
+        }
+        let container = if protocol == "xray" {
+            &xray.container
+        } else {
+            &awg.container
+        };
+        let Ok(epoch) = checked_epoch(container) else {
+            continue;
+        };
+        let pairs: Vec<(String, String)> = selected
+            .iter()
+            .map(|query| (query.runtime_name.clone(), query.identity.clone()))
+            .collect();
+        let counters = if protocol == "xray" {
+            xray::traffic::batch(&xray, &pairs).await
+        } else {
+            let node = awg.clone();
+            tokio::task::spawn_blocking(move || awg::traffic::batch(&node, &pairs))
+                .await
+                .map_err(|err| err.to_string())?
+        };
+        if checked_epoch(container).ok().as_ref() != Some(&epoch) {
+            continue;
+        }
+        for (query, counters) in selected.into_iter().zip(counters) {
+            if let Some(counters) = counters {
+                items.push(Snapshot {
+                    node_key: query.node_key.clone(),
+                    runtime_name: query.runtime_name.clone(),
+                    protocol: query.protocol.clone(),
+                    identity: query.identity.clone(),
+                    epoch: epoch.clone(),
+                    uplink_bytes: counters.uplink,
+                    downlink_bytes: counters.downlink,
+                });
+            }
+        }
+    }
+    Ok(BatchSnapshot {
+        node_key: batch.node_key,
+        items,
+    })
+}
+
 fn checked_epoch(container: &str) -> Result<String, String> {
     if !valid_container(container) {
         return Err("invalid protocol container".into());
@@ -175,6 +275,23 @@ pub(crate) async fn observe(
     intent_json: &str,
 ) -> Result<Snapshot, String> {
     let query: Query = serde_json::from_str(intent_json).map_err(|_| "invalid traffic query")?;
+    let _lock = shared_read(journal)?;
+    read(setting, query).await
+}
+
+/// `observe` of several identities at once (`traffic_batch`).
+pub(crate) async fn observe_batch(
+    setting: Setting<'_>,
+    journal: &Path,
+    intent_json: &str,
+) -> Result<BatchSnapshot, String> {
+    let batch: Batch = serde_json::from_str(intent_json).map_err(|_| "invalid traffic query")?;
+    let _lock = shared_read(journal)?;
+    read_batch(setting, batch).await
+}
+
+/// The journal's shared lock, when no mutation holds it.
+fn shared_read(journal: &Path) -> Result<fs::File, String> {
     let mut lock = journal.as_os_str().to_owned();
     lock.push(".lock");
     let lock = fs::File::open(&lock).map_err(|err| format!("journal lock unavailable: {err}"))?;
@@ -185,7 +302,7 @@ pub(crate) async fn observe(
     if Path::new(&disabled).exists() {
         return Err("agent removal is in progress".into());
     }
-    read(setting, query).await
+    Ok(lock)
 }
 
 #[cfg(test)]
@@ -263,5 +380,62 @@ mod tests {
         let removing = observe(&setting, &journal, &intent).await.unwrap_err();
         assert!(removing.contains("removal"), "{removing}");
         assert!(!journal.exists());
+    }
+
+    #[test]
+    fn batches_name_identities_of_one_node_only() {
+        let batch = |value: serde_json::Value| {
+            serde_json::from_value::<Batch>(value).map_err(|err| err.to_string())
+        };
+        let item =
+            serde_json::json!({"runtime_name": "alice", "protocol": "xray", "identity": UUID});
+        assert!(batch(serde_json::json!({"node_key": "n1", "items": [item]})).is_ok());
+        let mut extra = item.clone();
+        extra["node_key"] = "n2".into();
+        assert!(batch(serde_json::json!({"node_key": "n1", "items": [extra]})).is_err());
+        assert!(batch(serde_json::json!({"node_key": "n1", "items": [], "other": 1})).is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_or_oversized_batches_are_refused_before_any_read() {
+        let setting = |_: &str, default: &str| default.to_string();
+        let invalid = Batch {
+            node_key: "n1".into(),
+            items: vec![Item {
+                runtime_name: "../alice".into(),
+                protocol: "xray".into(),
+                identity: UUID.into(),
+            }],
+        };
+        assert!(read_batch(&setting, invalid).await.is_err());
+        let oversized = Batch {
+            node_key: "n1".into(),
+            items: (0..=MAX_BATCH)
+                .map(|_| Item {
+                    runtime_name: "alice".into(),
+                    protocol: "xray".into(),
+                    identity: UUID.into(),
+                })
+                .collect(),
+        };
+        let error = read_batch(&setting, oversized).await.unwrap_err();
+        assert!(error.contains("too many"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn batch_reads_wait_for_no_mutation() {
+        let dir = crate::protocols::test_dir("traffic-batch-lock");
+        let journal = dir.join("journal.sqlite3");
+        let setting = |_: &str, default: &str| default.to_string();
+        let intent = serde_json::json!({"node_key": "n1", "items": []}).to_string();
+        let lock = fs::File::create(dir.join("journal.sqlite3.lock")).unwrap();
+        lock.lock().unwrap();
+        let busy = observe_batch(&setting, &journal, &intent)
+            .await
+            .unwrap_err();
+        assert!(busy.contains("busy"), "{busy}");
+        lock.unlock().unwrap();
+        let empty = observe_batch(&setting, &journal, &intent).await.unwrap();
+        assert_eq!(empty.items, []);
     }
 }

@@ -22,7 +22,7 @@ impl AgentState {
             && !req.action.starts_with("resolve_")
             && !matches!(
                 req.action.as_str(),
-                "inspect" | "host_metrics" | "traffic" | "operation_progress"
+                "inspect" | "host_metrics" | "traffic" | "traffic_batch" | "operation_progress"
             )
         {
             self.check_force_dispatch_fence(&req.command_id)?;
@@ -57,7 +57,7 @@ impl AgentState {
                 payload_json: value.to_string(),
             });
         }
-        if req.action == "traffic" {
+        if req.action == "traffic" || req.action == "traffic_batch" {
             if req.recover {
                 return Err(Status::failed_precondition(
                     "node operation needs attention",
@@ -65,12 +65,23 @@ impl AgentState {
             }
             let setting = |key: &str, default: &str| self.node_env_value(key, default);
             let journal = self.journal();
-            let snapshot = traffic::observe(&setting, &journal, &req.intent_json)
-                .await
-                .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
+            let attention = |_| Status::failed_precondition("node operation needs attention");
+            let payload = if req.action == "traffic" {
+                serde_json::to_string(
+                    &traffic::observe(&setting, &journal, &req.intent_json)
+                        .await
+                        .map_err(attention)?,
+                )
+            } else {
+                serde_json::to_string(
+                    &traffic::observe_batch(&setting, &journal, &req.intent_json)
+                        .await
+                        .map_err(attention)?,
+                )
+            };
             return Ok(RuntimeCommandResponse {
                 summary: "backend node operation completed".into(),
-                payload_json: serde_json::to_string(&snapshot)
+                payload_json: payload
                     .map_err(|_| Status::internal("invalid node operation response"))?,
             });
         }

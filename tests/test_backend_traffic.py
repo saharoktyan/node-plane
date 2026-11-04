@@ -426,7 +426,7 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(self.driver.calls[0]["identity"], pub)
         self.assertEqual(self.row()["protocol"], "awg")
 
-    def test_bounded_batches_rotate_without_pausing_unsampled_baselines(self):
+    def add_other_profile(self):
         other = ProfileRepository(self.db).create_profile(
             runtime_name="other", display_name="Other", owner_account_id=self.admin.id
         )
@@ -435,15 +435,60 @@ class TrafficTests(unittest.TestCase):
             DeviceRepository.ensure_default(conn, conn.execute('SELECT * FROM backend_profiles WHERE id=?', (other,)).fetchone())
             OperationRepository.record(conn, self.actor, other, set())
             conn.execute("UPDATE backend_operation_tasks SET status='succeeded'")
-        with patch("backend.traffic.BATCH_SIZE", 1):
-            self.collect()
-            self.collect()
-        self.assertEqual(
-            {call["runtime_name"] for call in self.driver.calls}, {"alice", "other"}
-        )
+
+    def test_a_node_is_read_once_for_all_of_its_identities(self):
+        self.add_other_profile()
+        batches = []
+
+        def traffic_batch(node_key, items):
+            batches.append((node_key, items))
+            known = [item for item in items if item["runtime_name"] == "alice"]
+            # An identity the agent could not read is left out of the reply.
+            return {"node_key": node_key, "items": [
+                {"node_key": node_key, **item, "epoch": "a" * 64,
+                 "uplink_bytes": 10, "downlink_bytes": 20} for item in known]}
+
+        self.driver.traffic_batch = traffic_batch
+        self.collect()
+        self.assertEqual(len(batches), 1)
+        self.assertEqual({item["runtime_name"] for item in batches[0][1]}, {"alice", "other"})
+        self.assertEqual(self.driver.calls, [])
+        statuses = dict(self.db.connection.execute(
+            """SELECT p.runtime_name,u.status FROM backend_traffic_usage u
+            JOIN backend_profiles p ON p.id=u.profile_id""").fetchall())
+        self.assertEqual(statuses, {"alice": "current", "other": "unknown"})
+        self.assertIsNone(self.db.connection.execute(
+            "SELECT 1 FROM backend_system_settings WHERE key='traffic_cursor'").fetchone())
+
+    def test_an_agent_without_batches_is_read_per_identity_and_an_unreachable_one_is_not(self):
+        self.add_other_profile()
+
+        class Status(Exception):
+            def __init__(self, name):
+                self.name = name
+
+            def code(self):
+                return self
+
+        def unsupported(node_key, items):
+            raise Status("FAILED_PRECONDITION")
+
+        self.driver.traffic_batch = unsupported
+        self.collect()
+        self.assertEqual({call["runtime_name"] for call in self.driver.calls}, {"alice", "other"})
         self.assertEqual(
             self.db.connection.execute(
                 "SELECT COUNT(*) FROM backend_traffic_usage WHERE epoch IS NOT NULL"
             ).fetchone()[0],
             2,
         )
+
+        def unreachable(node_key, items):
+            raise Status("UNAVAILABLE")
+
+        self.driver.calls.clear()
+        self.driver.traffic_batch = unreachable
+        self.collect()
+        self.assertEqual(self.driver.calls, [])
+        self.assertEqual({r[0] for r in self.db.connection.execute(
+            "SELECT status FROM backend_traffic_usage").fetchall()}, {"unknown"})

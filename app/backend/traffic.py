@@ -13,8 +13,7 @@ from datetime import datetime, timedelta, timezone
 from .authorization import AccessDenied
 from .config_issuance import ConfigIssuanceService
 
-INTERVAL_MINUTES = 5
-BATCH_SIZE = 32
+INTERVAL_MINUTES = 2
 MAX_COUNTER = 2**63 - 1
 
 
@@ -214,24 +213,59 @@ class TrafficService:
 
     def _observe(self, target):
         try:
-            result = self.driver.traffic_snapshot(target["intent"])
-            if (
-                not isinstance(result, dict)
-                or set(result)
-                != {*target["intent"], "epoch", "uplink_bytes", "downlink_bytes"}
-                or any(result.get(k) != v for k, v in target["intent"].items())
-            ):
-                raise ValueError("invalid traffic identity")
-            if not isinstance(result["epoch"], str) or not re.fullmatch(
-                r"[0-9a-f]{64}", result["epoch"]
-            ):
-                raise ValueError("invalid traffic epoch")
-            for key in ("uplink_bytes", "downlink_bytes"):
-                if type(result[key]) is not int or not 0 <= result[key] <= MAX_COUNTER:
-                    raise ValueError("invalid traffic counter")
-            return result
+            return self._checked(target, self.driver.traffic_snapshot(target["intent"]))
         except Exception:  # noqa: BLE001 -- unknown observations must not reset counters
             return None
+
+    def _observe_node(self, targets):
+        """One agent read for all of a node's targets. An agent without the
+        batch action is read per target; an unreachable one is not retried."""
+        node_key = targets[0]["intent"]["node_key"]
+        items = sorted({tuple(t["intent"][k] for k in ("runtime_name", "protocol", "identity"))
+                        for t in targets})
+        try:
+            result = self.driver.traffic_batch(node_key, [
+                {"runtime_name": name, "protocol": protocol, "identity": identity}
+                for name, protocol, identity in items])
+        except Exception as exc:  # noqa: BLE001 -- unknown observations must not reset counters
+            code = getattr(exc, "code", None)
+            code = getattr(code() if callable(code) else None, "name", None)
+            if code in ("UNAVAILABLE", "DEADLINE_EXCEEDED"):
+                return [None] * len(targets)
+            return [self._observe(target) for target in targets]
+        observed = {}
+        if isinstance(result, dict) and result.get("node_key") == node_key \
+                and isinstance(result.get("items"), list):
+            for item in result["items"]:
+                if isinstance(item, dict):
+                    observed[tuple(item.get(k) for k in ("protocol", "runtime_name", "identity"))] = item
+        results = []
+        for target in targets:
+            intent = target["intent"]
+            item = observed.get((intent["protocol"], intent["runtime_name"], intent["identity"]))
+            try:
+                results.append(self._checked(target, item))
+            except Exception:  # noqa: BLE001
+                results.append(None)
+        return results
+
+    @staticmethod
+    def _checked(target, result):
+        if (
+            not isinstance(result, dict)
+            or set(result)
+            != {*target["intent"], "epoch", "uplink_bytes", "downlink_bytes"}
+            or any(result.get(k) != v for k, v in target["intent"].items())
+        ):
+            raise ValueError("invalid traffic identity")
+        if not isinstance(result["epoch"], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", result["epoch"]
+        ):
+            raise ValueError("invalid traffic epoch")
+        for key in ("uplink_bytes", "downlink_bytes"):
+            if type(result[key]) is not int or not 0 <= result[key] <= MAX_COUNTER:
+                raise ValueError("invalid traffic counter")
+        return result
 
     @staticmethod
     def _record(conn, target, observation, timestamp):
@@ -368,14 +402,14 @@ class TrafficService:
             self._adopt_baselines(conn)
             targets = self._targets(conn)
             self._prune(conn, targets)
-            cursor = setting(conn, "traffic_cursor", [])
-            rotated = [t for t in targets if list(t["key"]) > cursor] + [
-                t for t in targets if list(t["key"]) <= cursor
-            ]
-            batch = rotated[:BATCH_SIZE]
             generation = setting(conn, "traffic_generation")
+        nodes = {}
+        for target in targets:
+            nodes.setdefault(target["intent"]["node_key"], []).append(target)
+        batch = [target for group in nodes.values() for target in group]
         with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(self._observe, batch))
+            results = [result for group in pool.map(self._observe_node, nodes.values())
+                       for result in group]
         with self.db.transaction() as conn:
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
@@ -419,14 +453,12 @@ class TrafficService:
                 "unknown": failures,
                 "eligible_pairs": len(current),
             }
-            for key, value in (
-                ("traffic_last_scan", scan),
-                ("traffic_cursor", list(batch[-1]["key"]) if batch else []),
-            ):
-                conn.execute(
-                    "INSERT INTO backend_system_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (key, json.dumps(value)),
-                )
+            conn.execute(
+                "INSERT INTO backend_system_settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ("traffic_last_scan", json.dumps(scan)),
+            )
+            # Every target is read each scan; the rotation cursor is gone.
+            conn.execute("DELETE FROM backend_system_settings WHERE key='traffic_cursor'")
         return True
 
     def node_summary(self, node_key):

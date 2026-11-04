@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Collect traffic once per node: the agent reads every identity of a node
+  with one Xray statistics query and one AWG transfer listing
+  (`traffic_batch`), and the controller reads all profiles every 2 minutes
+  instead of 32 pairs every 5. Agents without the batch read are still
+  read per profile.
 - Inspect profiles and read traffic counters in the node agent instead of
   `inspect-profile.py`, `traffic-snapshot.py` and `xray-user-api.py`, which
   are removed; `inspect-profile.sh` only starts the agent.

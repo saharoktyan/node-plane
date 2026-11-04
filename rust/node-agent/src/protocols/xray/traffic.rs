@@ -92,6 +92,47 @@ pub(crate) async fn counters(node: &Node, name: &str, identity: &str) -> Result<
     parse(name, &stats)
 }
 
+/// Counters of several users, `(name, identity)`, from one statistics
+/// query; a user whose counters are unknown gets none.
+pub(crate) async fn batch(node: &Node, users: &[(String, String)]) -> Vec<Option<Counters>> {
+    let config = fs::read_to_string(&node.config)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+    let Some(config) = config else {
+        return vec![None; users.len()];
+    };
+    let stats = match XrayApi::connect(&node.api).await {
+        Ok(api) => api.query_stats("user>>>", false).await.ok(),
+        Err(_) => None,
+    };
+    let Some(stats) = stats else {
+        return vec![None; users.len()];
+    };
+    split(&config, &node.tags, &stats, users)
+}
+
+/// Each user's own counters from the statistics of all users.
+fn split(
+    config: &Value,
+    tags: &[String; 2],
+    stats: &BTreeMap<String, i64>,
+    users: &[(String, String)],
+) -> Vec<Option<Counters>> {
+    users
+        .iter()
+        .map(|(name, identity)| {
+            check_config(config, tags, name, identity).ok()?;
+            let prefix = format!("user>>>{name}>>>");
+            let own: BTreeMap<String, i64> = stats
+                .iter()
+                .filter(|(stat, _)| stat.starts_with(&prefix))
+                .map(|(stat, value)| (stat.clone(), *value))
+                .collect();
+            parse(name, &own).ok()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -153,5 +194,35 @@ mod tests {
         assert!(parse("alice", &stats(&[("user>>>alice>>>traffic>>>uplinkx", 1)])).is_err());
         assert!(parse("alice", &stats(&[("user>>>alice-2>>>traffic>>>uplink", 1)])).is_err());
         assert!(parse("alice", &stats(&[("user>>>alice>>>traffic>>>uplink", -1)])).is_err());
+    }
+
+    #[test]
+    fn a_batch_gives_each_user_only_their_own_counters() {
+        let stats: BTreeMap<String, i64> = [
+            ("user>>>alice>>>traffic>>>uplink", 3),
+            ("user>>>alice>>>traffic>>>downlink", 7),
+            ("user>>>bob>>>traffic>>>uplink", 5),
+            ("user>>>bob>>>traffic>>>downlink", 9),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+        let users = [
+            ("alice".to_string(), UUID.to_string()),
+            // Not in the config: unknown, the others still count.
+            ("bob".to_string(), UUID.to_string()),
+            ("alice".to_string(), "wrong".to_string()),
+        ];
+        assert_eq!(
+            split(&config(), &tags(), &stats, &users),
+            [
+                Some(Counters {
+                    uplink: 3,
+                    downlink: 7
+                }),
+                None,
+                None
+            ]
+        );
     }
 }
