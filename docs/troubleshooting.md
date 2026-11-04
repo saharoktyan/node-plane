@@ -36,6 +36,26 @@ sudo journalctl -u node-plane-agent --since '10 minutes ago' -n 150 --no-pager
 
 Check the agent address, controller reachability and mutual-TLS configuration. A service marked running may still be starting. Inspect the current setup phase and use the offered recovery action after resolving the connection problem.
 
+## Install command does not finish
+
+The installer prints the reason when it stops, for example a failed download or checksum, a missing tool, or a server that is not Linux x86_64 with systemd. Fix it and run the command again while it is valid; otherwise get a new one.
+
+When the command finished but setup still waits for the agent:
+
+```sh
+sudo systemctl status node-plane-agent --no-pager
+sudo journalctl -u node-plane-agent --since '10 minutes ago' -n 50 --no-pager
+```
+
+Check that the controller reaches the node's client address on the agent port (TCP 50061 by default), including the provider's firewall. Setup progress also reports:
+
+- **rejected the command**: the agent was installed with another command. Run the latest command again.
+- **belongs to another active node**: this server is the agent of another node of this controller. Remove that node or use another server.
+- **expired**: get a new command from the same setup screen.
+- **installer differs from this controller version**: the release asset does not match the controller; update the controller.
+
+If the agent port accepts only the controller's address and that address changed, allow the port again on the server: `sudo ufw allow 50061/tcp comment 'Node Plane agent'`.
+
 ## Runtime installed but not connecting
 
 Check node health, public DNS/IP and the intended TCP/UDP ports. Confirm that the client has a current configuration and supports its protocol. For AWG, use different device configurations for simultaneous clients.

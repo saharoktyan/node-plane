@@ -4,8 +4,8 @@
 # The controller shows the command with a one-time token; run it as root.
 # No SSH key or sudo access is given to the controller: the agent generates
 # its own key and waits until the controller dials in, proves the token and
-# issues its certificate. The agent then allows only the controller's
-# address to its port.
+# issues its certificate. The agent port then stays open under mutual TLS,
+# or allows only the controller's address when the controller asks.
 set -eu
 
 REPO="saharoktyan/node-plane"
@@ -112,8 +112,8 @@ chmod 0644 /etc/node-plane/agent.toml
 printf '%s\n' "$TOKEN" > /etc/node-plane/tls/enrollment.token
 
 if command -v ufw >/dev/null 2>&1 && LC_ALL=C ufw status 2>/dev/null | head -n 1 | grep -q '^Status: active'; then
-  # Until enrollment: the token protects the port, then only the controller
-  # keeps it.
+  # Until enrollment the token protects the port; enrollment then applies
+  # the access the administrator chose.
   ufw allow "${PORT}/tcp" comment 'Node Plane agent enrollment' >/dev/null \
     || fail "could not open the agent port in ufw"
 fi

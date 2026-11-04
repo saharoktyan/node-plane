@@ -8,6 +8,7 @@ Start with the [project README](../README.md). The guides below describe everyda
 - [Workstation](workstation.md)
 - [Telegram bot](telegram.md)
 - [Nodes](nodes.md)
+- [Node agent on the server](agent.md)
 - [Profiles and access](access.md)
 - [Protocol options](protocols.md)
 - [Temporary configurations](temporary-configs.md)

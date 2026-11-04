@@ -8,6 +8,7 @@ Use this guide to install Node Plane directly on a Linux server. For installatio
 
 - Linux with systemd and root/sudo access; Debian/Ubuntu for automatic Docker provisioning.
 - Python 3.11 or 3.12, Git for release metadata, CA certificates and network access to GitHub and Telegram.
+- OpenSSL 3 to issue node agent certificates.
 - A Telegram bot token and the numeric Telegram IDs of the initial administrators.
 - PostgreSQL: an existing database or the installer's local Docker container.
 
@@ -49,7 +50,7 @@ Keep the environment file private. Do not paste its contents into logs or suppor
 | `NODE_PLANE_BASE_DIR` | Installation root; default `/opt/node-plane` |
 | `NODE_PLANE_SHARED_DIR` | Persistent shared state; default `/opt/node-plane/shared` |
 | `NODE_PLANE_UPDATE_BRANCH` | Release branch: `dev`, `beta` or `main`; empty uses the release channel |
-| `SSH_KEY` | Controller's private SSH key for remote nodes |
+| `SSH_KEY` | Controller's private SSH key for nodes set up over SSH |
 
 The full template is [`.env.example`](../.env.example). Installer-generated values live in the shared environment. Changing connection settings does not move an existing database or installation directory.
 

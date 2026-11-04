@@ -14,7 +14,8 @@
   Server setup offers Manual (the command with a copy button; the node card
   follows the progress) or Auto (runs it over one SSH login with a key or
   password, nothing saved). Nodes with controller SSH access can still be
-  set up over SSH.
+  set up over SSH. [Node agent on the server](docs/agent.md) describes
+  the command, enrollment, port access and why the agent runs as root.
 - Collect traffic once per node: the agent reads every identity of a node
   with one Xray statistics query and one AWG transfer listing
   (`traffic_batch`), and the controller reads all profiles every 2 minutes

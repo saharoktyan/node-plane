@@ -35,7 +35,7 @@ Duplicate identities with the same intent reuse recorded work. A changed payload
 
 Telegram uses a private adapter credential and resolves the Telegram principal through the backend. Workstation uses privileged SSH enrollment to bind its actual public-key fingerprint to an approved administrator; subsequent sessions use short-lived backend credentials. Local installation profiles are not backend accounts.
 
-Driver-agent connections require mutual TLS. Keep the CA private key and driver client key on the controller. Agents receive a server certificate/key and the public CA. Restrict remote agent reachability to the controller and verify the certificate's target address.
+Driver-agent connections require mutual TLS. Keep the CA private key and driver client key on the controller. Agents receive a server certificate and the public CA. A token installation never moves a private key: the agent generates its key, both sides prove the one-time token with an HMAC bound to that key, and the driver (`EnrollAgent`) issues the certificate and records the agent target in `enrolled-agents` next to the CA; the worker (`backend/agent_enrollment.py`) retries until the token expires. The agent port stays open under mutual TLS unless the administrator restricts it to the controller's address. See [Node agent on the server](../agent.md).
 
 Root access remains a privileged trust boundary. Audit attributes actions but cannot protect its records from a hostile server owner. Treat credentials, backup payloads and execution results as sensitive.
 

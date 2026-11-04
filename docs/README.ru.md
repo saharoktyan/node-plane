@@ -8,6 +8,7 @@
 - [Workstation](workstation.ru.md)
 - [Telegram-бот](telegram.ru.md)
 - [Ноды](nodes.ru.md)
+- [Агент ноды на сервере](agent.ru.md)
 - [Профили и доступ](access.ru.md)
 - [Параметры протоколов](protocols.ru.md)
 - [Временные конфиги](temporary-configs.ru.md)

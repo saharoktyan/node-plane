@@ -20,7 +20,13 @@ The SSH management address and client address can differ. A DNS client address m
 
 ## Set up the server
 
-On a node with protocols selected, **Server setup** prepares SSH access where needed, installs the agent, installs Docker and deploys the selected protocols. Workstation can enroll the controller's SSH key using your privileged connection. Telegram needs the controller to have SSH access to a remote node.
+On a node with protocols selected, **Server setup** installs the agent, installs Docker and deploys the selected protocols in one operation. When the server has no agent yet, choose how to install it:
+
+- **Command for the server** in Telegram, **Manual** in Workstation: Node Plane shows a one-time command. Copy it and run it on the server as root, for example in your own SSH session. The controller needs no SSH access or sudo. The command works once and expires in an hour; a new command replaces an unused one. Once the agent answers, setup continues by itself: Telegram shows the command in the setup progress, which updates by itself, and Workstation's node card follows the progress. **Install command** on the card shows the command again.
+- **Auto** in Workstation: Workstation runs the same command over one SSH login with an existing key or a password. When the login is not root, it uses sudo and asks for the sudo password if needed. Nothing is saved and no key is added to the server.
+- **Install over SSH** in Telegram, when the controller already has SSH access to the server: the controller installs the agent over SSH. A local node is always set up this way.
+
+Before the command, choose access to the agent port: an open port protected by mutual TLS (recommended; works when the controller's address changes) or the controller's address only (for a static controller address). The controller connects to the node's client address on TCP 50061; allow it in the provider's firewall if there is one. See [Node agent](agent.md) for what the command does and why the agent runs as root.
 
 On an agent-only node, **Setup agent** installs the agent. Add protocols later in the node settings and run their installation action.
 

@@ -130,6 +130,8 @@ Consult the routes below and their Pydantic models for exact request bodies. The
 | `GET` | `/api/v1/nodes/{node_key}/services` | `get_node_services` |
 | `POST` | `/api/v1/nodes/{node_key}/bootstrap` | `bootstrap_node` |
 | `GET` | `/api/v1/node-bootstraps/{identity}` | `get_node_bootstrap` |
+| `POST` | `/api/v1/nodes/{node_key}/agent-enrollment` | `enroll_node_agent` |
+| `GET` | `/api/v1/nodes/{node_key}/agent-enrollment` | `get_node_agent_enrollment` |
 | `POST` | `/api/v1/nodes/{node_key}/actions` | `queue_node_action` |
 | `GET` | `/api/v1/node-jobs/{job_id}` | `get_node_job` |
 | `POST` | `/api/v1/node-jobs/{job_id}/resolve` | `resolve_node_job` |

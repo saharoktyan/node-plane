@@ -11,7 +11,7 @@ cargo test --locked --manifest-path rust/node-agent/Cargo.toml
 
 Configuration defaults to `/etc/node-plane/agent.toml`. Environment overrides include `NODE_AGENT_CONFIG_PATH`, `NODE_AGENT_NODE_KEY`, `NODE_AGENT_LISTEN_ADDR` and `NODE_AGENT_HEARTBEAT_SECONDS`.
 
-Mutual TLS is required. `tls_certificate_path`, `tls_key_path` and `tls_client_ca_path` identify the server certificate, private key and client CA; rollout installs them under `/etc/node-plane/tls/`. Restrict the listener to the controller. Missing TLS material prevents startup.
+Mutual TLS is required. `tls_certificate_path`, `tls_key_path` and `tls_client_ca_path` identify the server certificate, private key and client CA under `/etc/node-plane/tls/`. An SSH rollout installs them; a token installation (`scripts/install_agent.sh`) leaves `enrollment.token` there instead, and the agent serves only `NodeEnrollmentService` until the controller proves the token and issues a certificate for the agent's own key (`src/enrollment/`). Missing TLS material without a token prevents startup. See [Node agent on the server](../../docs/agent.md).
 
 ## Execution
 
