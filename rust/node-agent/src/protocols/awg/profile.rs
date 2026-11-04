@@ -206,7 +206,7 @@ fn cps_tags(expression: &str) -> Option<Vec<(&str, &str)>> {
 /// at the end, and a length of whole groups.
 fn strict_base64(value: &str) -> Option<Vec<u8>> {
     let body = value.trim_end_matches('=');
-    let valid = value.len() % 4 == 0
+    let valid = value.len().is_multiple_of(4)
         && value.len() - body.len() <= 2
         && body
             .bytes()
@@ -255,7 +255,7 @@ pub(crate) fn validate(values: &Values, require_31: bool) -> Result<(), String> 
         let tags = cps_tags(values.get(key)).ok_or(format!("Invalid {key} CPS expression"))?;
         if tags
             .iter()
-            .any(|(tag, hex)| *tag == "b" && hex.len() % 2 == 1)
+            .any(|(tag, hex)| *tag == "b" && !hex.len().is_multiple_of(2))
         {
             return Err(format!("{key} contains odd-length hex data"));
         }
