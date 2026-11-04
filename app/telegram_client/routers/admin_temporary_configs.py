@@ -115,7 +115,8 @@ async def card(query, bot, backend, state, identity, show=False):
             status=tr(locale, 'temporary.status.' + item['status'])))
         show = False
     if item['protocol']=='xray' and item['status'] not in {'queued', 'issuing'}:
-        lines.append('\n' + tr(locale,'temporary.vless_notice'))
+        closed = item.get('revocation_mode') == 'connections_closed'
+        lines.append('\n' + tr(locale,'temporary.vless_notice_closed' if closed else 'temporary.vless_notice'))
     if item.get('unavailable_reason') == 'node_changed':
         lines.append(tr(locale, 'temporary.node_changed_notice'))
     if item['status']=='active' and item.get('artifact_available', True) and not show:

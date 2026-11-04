@@ -169,14 +169,14 @@ pub(in crate::tui) fn draw_temporary(
                     ));
                 }
                 if card["protocol"] == "xray" {
-                    lines.push(Line::from(crate::temporary::NOTICE));
+                    lines.push(Line::from(crate::temporary::notice(card)));
                 }
                 match browser.view {
                     View::Revoke => {
                         lines.clear();
                         lines.push(Line::from("Revoke access to this configuration?"));
                         if card["protocol"] == "xray" {
-                            lines.push(Line::from(crate::temporary::NOTICE));
+                            lines.push(Line::from(crate::temporary::notice(card)));
                         }
                         actions.push(("Revoke", Control::TemporaryConfirm));
                     }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Temporary VLESS configurations report what revocation actually does on
+  their node: cards in Workstation and Telegram say open connections close
+  when the node runs the Node Plane Xray image, and keep the old warning
+  otherwise.
 - Block a network evicted by the simultaneous networks limit for 30 s by
   default instead of 5 min; after the cooldown it counts again only with a
   new connection.

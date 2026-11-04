@@ -201,6 +201,45 @@ class TemporaryConfigTests(unittest.TestCase):
         self.assertTrue(all(r['principal_id']=='workstation' and r['actor_id']==self.admin.id for r in events))
         self.assertNotIn('secret',json.dumps(events))
 
+    def test_cards_show_the_revocation_mode_each_node_reported(self):
+        self.prepare()
+        action = self.driver.node_action
+        reported = {'temporary_ensure': 'connections_closed', 'temporary_revoke': 'connections_closed'}
+        def node(identity, name, intent, recover=False):
+            result = action(identity, name, intent, recover)
+            if name in reported:
+                result = dict(result, revocation_mode=reported[name])
+            return result
+        self.driver.node_action = node
+        config = self.create()
+        self.assertEqual(config['revocation_mode'], 'new_connections_only', 'unknown before issuance')
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, config['id'])['revocation_mode'], 'connections_closed')
+        # The container was redeployed with another image after issuance.
+        reported['temporary_ensure'] = 'new_connections_only'
+        self.assertEqual(self.service.artifact(self.actor, config['id'])['revocation_mode'], 'new_connections_only')
+        self.assertEqual(self.service.get(self.actor, config['id'])['revocation_mode'], 'new_connections_only')
+        reported['temporary_ensure'] = 'peer_removed'
+        with self.assertRaises(AccessDenied) as denied:
+            self.service.artifact(self.actor, config['id'])
+        self.assertEqual(denied.exception.code, 'config_stale')
+        self.service.revoke(self.actor, config['id'])
+        reported['temporary_revoke'] = 'unknown'
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, config['id'])['status'], 'revoke_blocked')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_temporary_configs SET status='revoking' WHERE id=?", (config['id'],))
+        reported['temporary_revoke'] = 'connections_closed'
+        self.service.run_one()
+        revoked = self.service.get(self.actor, config['id'])
+        self.assertEqual((revoked['status'], revoked['revocation_mode']), ('revoked', 'connections_closed'))
+        # A node may close connections only for VLESS.
+        self.db.connection.execute("UPDATE backend_nodes SET protocols_json='[\"awg\"]'")
+        reported['temporary_ensure'] = 'connections_closed'
+        awg = self.create('awg')
+        self.service.run_one()
+        self.assertEqual(self.service.get(self.actor, awg['id'])['status'], 'blocked')
+
     def test_unknown_issue_is_only_read_back_and_local_expiry_settles_it(self):
         self.prepare()
         config = self.create()

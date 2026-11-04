@@ -101,6 +101,19 @@ class TemporaryScreensTests(IsolatedAsyncioTestCase):
                     self.assertFalse(any('Existing connections' in line for line in screen.lines))
                     self.assertNotIn('temporary:show:' + identity, [b.callback_data for r in rows for b in r])
 
+    async def test_card_says_open_connections_close_when_the_node_reported_it(self):
+        identity = str(uuid4())
+        for mode, key in (('connections_closed', 'temporary.vless_notice_closed'),
+                          ('new_connections_only', 'temporary.vless_notice'), (None, 'temporary.vless_notice')):
+            with self.subTest(mode=mode):
+                card = dict(id=identity, node_key='lv1', node_title='Latvia #1', protocol='xray',
+                            transport='tcp', status='active', expires_at='2026-10-12T12:00:00+00:00')
+                if mode:
+                    card['revocation_mode'] = mode
+                backend = SimpleNamespace(request=AsyncMock(return_value=card))
+                draw = await self.click('card:' + identity, backend)
+                self.assertIn('\n' + screens.tr('en', key), draw.call_args.args[2].lines)
+
     async def test_temporary_qr_matches_regular_payload_and_media_layout(self):
         from telegram_client.routers.user import config_qr, qr_payload
         for protocol, transport, uri in (('awg','vpn','vpn://secret'), ('xray','xhttp','vless://secret')):

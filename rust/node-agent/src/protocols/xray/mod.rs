@@ -2,6 +2,7 @@
 pub(crate) mod admission;
 pub(crate) mod api;
 pub(crate) mod rate;
+pub(crate) mod revocation;
 pub(crate) mod runtime;
 pub(crate) mod user_sync;
 pub(crate) mod users;

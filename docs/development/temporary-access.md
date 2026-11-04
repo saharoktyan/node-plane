@@ -22,9 +22,11 @@ Provisioning installs `node-plane-lease-expiry.service` and `.timer` before issu
 
 ## Artifact and revoke semantics
 
-Artifact retrieval verifies current node state against the original receipt. Expired credentials are denied even before reconciliation. AWG receipts include peer/config artifacts; VLESS uses an independent UUID and `revocation_mode=new_connections_only`.
+Artifact retrieval verifies current node state against the original receipt. Expired credentials are denied even before reconciliation. AWG receipts include peer/config artifacts; VLESS uses an independent UUID.
 
-VLESS authorization removal prevents new connections and, on the Node Plane Xray image with a version 2 agent, closes established ones (`RemoveUser` with `close_connections`). Receipts keep `revocation_mode=new_connections_only` because the controller does not yet know which image a node runs (VPN plan, 11m). AWG removal deletes the peer. Neither an unavailable runtime nor a failed delete is confirmed tunnel termination. Keep that distinction in backend states and both interfaces.
+VLESS authorization removal prevents new connections and, on the Node Plane Xray image, closes established ones (`RemoveUser` with `close_connections`). AWG removal deletes the peer (`revocation_mode=peer_removed`).
+
+Each receipt carries `revocation_mode`. For VLESS the agent replaces the runtime script's conservative `new_connections_only` with `connections_closed` when the running Xray implements `CloseUserConnections` on every VLESS inbound (`protocols/xray/revocation.rs`); it probes with an email no profile can have, so nothing closes. An issuance receipt states what a later revocation would do; a fresh revocation receipt states what it did. A recovered revocation keeps the conservative mode, since the image may have changed since. The controller accepts only the modes of the protocol and keeps the latest in `backend_temporary_revocation_modes` (runtime state, not backed up; missing rows read as the conservative mode). Retrieval reports the node's current mode, so a redeployed container changes the card rather than blocking downloads. Agents before this release always report `new_connections_only`. Neither an unavailable runtime nor a failed delete is confirmed tunnel termination. Keep that distinction in backend states and both interfaces.
 
 ## Backups and retirement
 

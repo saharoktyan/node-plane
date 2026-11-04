@@ -7,6 +7,7 @@ use tonic::Status;
 
 use crate::agent::v1::{BackendNodeActionRequest, RuntimeCommandResponse};
 use crate::host::metrics as host_metrics;
+use crate::protocols::xray::revocation;
 use crate::state::AgentState;
 
 impl AgentState {
@@ -55,6 +56,8 @@ impl AgentState {
         }
         let inspect = req.action == "inspect";
         let sync_runtime = req.action == "sync_runtime";
+        let (action, recover, intent_json) =
+            (req.action.clone(), req.recover, req.intent_json.clone());
         let state = self.clone();
         let output = tokio::task::spawn_blocking(move || {
             state.run_runtime_command(
@@ -91,6 +94,7 @@ impl AgentState {
                 .and_then(|images| serde_json::to_value(images).ok())
                 .unwrap_or(Value::Null);
         }
+        revocation::refine(&action, recover, &intent_json, &mut value).await;
         if sync_runtime {
             let state = self.clone();
             value["images"] = tokio::task::spawn_blocking(move || state.refresh_container_images())

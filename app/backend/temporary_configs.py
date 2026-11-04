@@ -9,6 +9,10 @@ from .authorization import AccessDenied, require_permission
 
 DURATIONS = {43200, 86400, 259200}
 TERMINAL = {'expired', 'revoked', 'cancelled'}
+# What revocation does to established connections. Nodes report it in each
+# receipt; leases without a report get the conservative mode.
+REVOCATION_MODES = {'xray': {'new_connections_only', 'connections_closed'}, 'awg': {'peer_removed'}}
+DEFAULT_REVOCATION_MODE = {'xray': 'new_connections_only', 'awg': 'peer_removed'}
 
 
 def now():
@@ -21,9 +25,10 @@ class TemporaryConfigService:
 
     def initialize_schema(self):
         # Isolated repository fixtures; production uses migration revision 3.
-        from db.migration_revisions.r0003_temporary_configs import upgrade
+        from db.migration_revisions import r0003_temporary_configs, r0024_revocation_modes
         with self.db.transaction() as conn:
-            upgrade(conn)
+            r0003_temporary_configs.upgrade(conn)
+            r0024_revocation_modes.upgrade(conn)
 
     @staticmethod
     def authorize(conn, actor):
@@ -40,13 +45,29 @@ class TemporaryConfigService:
              action, status, now().isoformat()))
 
     @staticmethod
+    def reported_mode(row, receipt):
+        mode = receipt.get('revocation_mode')
+        if mode not in REVOCATION_MODES[row['protocol']]:
+            raise ValueError('invalid revocation mode')
+        return mode
+
+    @staticmethod
+    def record_mode(conn, row, mode):
+        conn.execute('''INSERT INTO backend_temporary_revocation_modes(config_id,mode) VALUES (?,?)
+            ON CONFLICT(config_id) DO UPDATE SET mode=excluded.mode''', (row['id'], mode))
+
+    @staticmethod
     def public(row, conn=None):
         result = {k: row[k] for k in ('id','node_key','protocol','transport','duration_seconds',
                                       'status','created_at','expires_at','error_code')}
         if row['status'] == 'active' and datetime.fromisoformat(row['expires_at']) <= now():
             result['status'] = 'expiry_pending'
-        result['revocation_mode'] = 'new_connections_only' if row['protocol'] == 'xray' else 'peer_removed'
+        result['revocation_mode'] = DEFAULT_REVOCATION_MODE[row['protocol']]
         if conn is not None:
+            reported = conn.execute('SELECT mode FROM backend_temporary_revocation_modes WHERE config_id=?',
+                                    (row['id'],)).fetchone()
+            if reported:
+                result['revocation_mode'] = reported['mode']
             node = conn.execute('SELECT title,desired_revision FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
             result['node_title'] = node['title'] if node else row['node_key']
             if row['status'] == 'active' and node and node['desired_revision'] != row['node_revision']:
@@ -170,10 +191,9 @@ class TemporaryConfigService:
         if not isinstance(receipt,dict):
             raise ValueError('invalid lease receipt')
         expiry = datetime.fromisoformat(receipt['expires_at'])
-        expected_mode = 'new_connections_only' if row['protocol']=='xray' else 'peer_removed'
-        if (expiry.tzinfo is None or expiry <= now() or expiry > now()+timedelta(seconds=row['duration_seconds']+5)
-                or receipt.get('revocation_mode') != expected_mode):
+        if expiry.tzinfo is None or expiry <= now() or expiry > now()+timedelta(seconds=row['duration_seconds']+5):
             raise ValueError('invalid lease expiry')
+        mode = self.reported_mode(row, receipt)
         intent = json.loads(row['intent_json'])
         if row['protocol']=='xray' and receipt.get('xray_uuid') != intent['uuid']:
             raise ValueError('invalid temporary identity')
@@ -194,6 +214,7 @@ class TemporaryConfigService:
             status = 'active' if usable else 'revoking'
             conn.execute('UPDATE backend_temporary_configs SET status=?,expires_at=?,revoke_reason=?,error_code=NULL WHERE id=?',
                          (status,expiry.astimezone(timezone.utc).isoformat(),None if usable else 'node_changed',row['id']))
+            self.record_mode(conn,row,mode)
             self.event(conn,row,'issue',status)
 
     def reconcile(self):
@@ -279,13 +300,12 @@ class TemporaryConfigService:
                 intent.update(command_id=command_id,action='delete',revision=2,uuid='',short_id='')
                 intent.pop('lease_seconds')
                 result = self.driver.node_action(command_id,'temporary_revoke',intent)
-                expected_mode = 'new_connections_only' if row['protocol']=='xray' else 'peer_removed'
-                if result.get('revocation_mode') != expected_mode:
-                    raise ValueError('invalid revocation receipt')
+                mode = self.reported_mode(row, result)
                 with self.db.transaction() as conn:
                     status = 'expired' if row['revoke_reason']=='expiry' else 'revoked'
                     changed = conn.execute("UPDATE backend_temporary_configs SET status=?,error_code=NULL WHERE id=? AND status='revoking' RETURNING id",(status,row['id'])).fetchone()
                     if changed:
+                        self.record_mode(conn,row,mode)
                         self.event(conn,row,'revoke',status)
         except Exception:
             with self.db.transaction() as conn:
@@ -333,8 +353,11 @@ class TemporaryConfigService:
                 or datetime.fromisoformat(state['expires_at']) != datetime.fromisoformat(row['expires_at'])):
             raise AccessDenied('config_unavailable',503)
         receipt = driver.node_action(row['id'],'temporary_ensure',intent,recover=True)
-        if receipt.get('revocation_mode') != self.public(row)['revocation_mode']:
-            raise AccessDenied('config_stale',409)
+        try:
+            # Current: the node's runtime image may have changed since issuance.
+            mode = self.reported_mode(row, receipt)
+        except ValueError:
+            raise AccessDenied('config_stale',409) from None
         inspection = {'node_key':row['node_key'],'runtime_name':row['runtime_name'],
                       'protocol':row['protocol'],'action':'ensure','desired_revision':1}
         if row['protocol']=='xray':
@@ -382,6 +405,7 @@ class TemporaryConfigService:
         with self.db.transaction() as conn:
             conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
             self._readable(conn,actor,config_id)
+            self.record_mode(conn,row,mode)
             self.event(conn,row,'download','active',actor)
         return {'content':content,'files':files,'expires_at':row['expires_at'],
-                'revocation_mode':self.public(row)['revocation_mode']}
+                'revocation_mode':mode}

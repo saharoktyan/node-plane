@@ -51,6 +51,7 @@ CLEAR = (
     "backend_account_deletions",
     "backend_account_menu_refresh",
     "backend_node_bootstraps",
+    "backend_temporary_revocation_modes",
     "backend_temporary_configs",
     "backend_system_cleanup_items",
     "backend_system_cleanup_jobs",

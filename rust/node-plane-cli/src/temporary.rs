@@ -4,6 +4,17 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub const NOTICE: &str = "After expiry or revocation, new connections are blocked. Existing connections may continue until they disconnect.";
+pub const NOTICE_CLOSED: &str =
+    "After expiry or revocation, new connections are blocked and open connections are closed.";
+
+/// The VLESS notice for what the node reported revocation does.
+pub fn notice(card: &Value) -> &'static str {
+    if card["revocation_mode"] == "connections_closed" {
+        NOTICE_CLOSED
+    } else {
+        NOTICE
+    }
+}
 #[derive(Clone)]
 pub enum Command {
     List {
@@ -259,6 +270,19 @@ pub fn save_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_notice_follows_the_reported_revocation_mode() {
+        assert_eq!(
+            notice(&json!({"revocation_mode": "connections_closed"})),
+            NOTICE_CLOSED
+        );
+        assert_eq!(
+            notice(&json!({"revocation_mode": "new_connections_only"})),
+            NOTICE
+        );
+        assert_eq!(notice(&json!({})), NOTICE);
+    }
 
     #[test]
     fn save_is_private_repeatable_and_rejects_partial_input() {
