@@ -6,7 +6,6 @@ on its loopback interface.
 """
 import json
 import os
-import re
 import subprocess
 import tempfile
 import time
@@ -14,7 +13,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from tests.test_runtime_docker import XRAY_IMAGE, docker, load
+from tests.test_runtime_docker import AGENT_BINARY, XRAY_IMAGE, docker, load
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_IMAGE = 'postgres:16-alpine'  # BusyBox nc/ip; already required by the Docker suite.
@@ -25,13 +24,10 @@ BITTORRENT_HANDSHAKE = '\\023BitTorrent protocol' + '\\000' * 8 + 'A' * 40
 
 
 def apply_node_settings(path, bittorrent, ipv6='on'):
-    """Run the Xray block of apply-node-settings.sh exactly as shipped."""
-    script = (ROOT / 'runtime_assets' / 'apply-node-settings.sh').read_text()
-    code = re.search(r"python3 - <<'PY'\n(.*?)\nPY", script, re.S).group(1)
-    subprocess.run(['python3', '-c', code], check=True, env={
-        **os.environ, 'XRAY_CONFIG_ENV': str(path), 'XRAY_SNI_ENV': 'www.example.com',
-        'XRAY_TCP_ENV': '443', 'XRAY_XHTTP_ENV': '8443', 'XRAY_PATH_ENV': '/assets',
-        'IPV6_OUTBOUND_ENV': ipv6, 'XRAY_BITTORRENT_ENV': bittorrent})
+    """The Xray config edit of apply-node-settings.sh, through the built agent."""
+    subprocess.run([str(AGENT_BINARY), 'node-settings', 'xray-config', str(path), 'www.example.com',
+                    '443', '8443', '/assets'], check=True, capture_output=True,
+                   env={**os.environ, 'IPV6_OUTBOUND': ipv6, 'XRAY_BITTORRENT': bittorrent})
     path.chmod(0o644)
 
 

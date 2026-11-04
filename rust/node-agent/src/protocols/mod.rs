@@ -1,6 +1,7 @@
 //! VPN protocol adapters. Protocol differences live only here.
 pub(crate) mod awg;
 pub(crate) mod inspection;
+pub(crate) mod settings;
 pub(crate) mod traffic;
 pub(crate) mod xray;
 

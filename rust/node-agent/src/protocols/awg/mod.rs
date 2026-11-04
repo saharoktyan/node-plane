@@ -5,6 +5,7 @@ pub(crate) mod peer_sync;
 pub(crate) mod peers;
 pub(crate) mod rate;
 pub(crate) mod runtime;
+pub(crate) mod settings;
 pub(crate) mod traffic;
 pub(crate) mod users;
 

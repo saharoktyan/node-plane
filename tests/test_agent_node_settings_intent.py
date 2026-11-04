@@ -493,7 +493,8 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         self.assertTrue(result['containers_running'])
         verify.assert_not_called()
 
-    def test_real_settings_script_preserves_identities_and_updates_protocol_parameters(self):
+    def real_settings_script_preserves_identities_and_updates_protocol_parameters(self):
+        """Needs the built agent: run from test_agent_node_settings_docker."""
         root = Path(self.temp.name)
         assets = Path(__file__).resolve().parents[1] / 'runtime_assets'
         env = root / 'node.env'
@@ -511,8 +512,7 @@ printf '[Interface]\\nListenPort = 51820\\n' > '{awg}'
         peers = '\n# existing-device\n[Peer]\nPublicKey = existing-peer\nPresharedKey = existing-psk\nAllowedIPs = 10.8.1.2/32\n'
         awg.write_text('[Interface]\nPrivateKey = existing-server\nListenPort = 51820\n' + profile + peers)
         script = (assets / 'apply-node-settings.sh').read_text().replace(
-            'source /etc/node-plane/node.env', f'source {shlex.quote(str(env))}').replace(
-            '/opt/node-plane-runtime/', str(root) + '/')
+            'source /etc/node-plane/node.env', f'source {shlex.quote(str(env))}')
         (root / 'apply-node-settings.sh').write_text(script)
         (root / 'awg_profile.py').write_text((assets / 'awg_profile.py').read_text())
         for name in ('deploy-xray.sh', 'deploy-awg.sh'):
