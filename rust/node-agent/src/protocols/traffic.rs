@@ -305,6 +305,38 @@ fn shared_read(journal: &Path) -> Result<fs::File, String> {
     Ok(lock)
 }
 
+/// `node-plane-agent traffic-batch INTENT`: what `traffic_batch` returns,
+/// read with node.env and the journal lock as the service reads them.
+pub(crate) async fn run(args: &[String]) -> Option<i32> {
+    let (first, rest) = args.split_first()?;
+    if first != "traffic-batch" {
+        return None;
+    }
+    let [intent] = rest else {
+        eprintln!("usage: node-plane-agent traffic-batch INTENT");
+        return Some(2);
+    };
+    let env = crate::intents::leases::node_env();
+    let raw = fs::read_to_string(&env).unwrap_or_default();
+    let setting = |key: &str, default: &str| {
+        crate::runtime::files::env_value(&raw, key).unwrap_or_else(|| default.to_string())
+    };
+    let journal = env.with_file_name("profile-intents.sqlite3");
+    Some(match observe_batch(&setting, &journal, intent).await {
+        Ok(snapshot) => {
+            println!(
+                "{}",
+                serde_json::to_string(&snapshot).expect("counters serialize")
+            );
+            0
+        }
+        Err(err) => {
+            eprintln!("traffic unavailable: {err}");
+            1
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

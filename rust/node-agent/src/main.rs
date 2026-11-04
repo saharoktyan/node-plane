@@ -53,6 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = protocols::xray::user_sync::run(&args).await {
         std::process::exit(code);
     }
+    if let Some(code) = protocols::traffic::run(&args).await {
+        std::process::exit(code);
+    }
     if let Some(code) = protocols::inspection::run(&args).await {
         std::process::exit(code);
     }
