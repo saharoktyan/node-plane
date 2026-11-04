@@ -45,8 +45,8 @@ impl Kind {
 
     fn container(self) -> (&'static str, &'static str) {
         match self {
-            Kind::Xray => ("XRAY_CONTAINER_NAME", "xray"),
-            Kind::Awg => ("AWG_CONTAINER_NAME", "amnezia-awg"),
+            Kind::Xray => ("XRAY_CONTAINER_NAME", "node-plane-xray"),
+            Kind::Awg => ("AWG_CONTAINER_NAME", "node-plane-awg"),
         }
     }
 

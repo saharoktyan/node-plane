@@ -59,7 +59,7 @@ impl AgentState {
         let config = self.node_env_value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json");
         let image = crate::runtime::images::Kind::Xray
             .resolve(&self.node_env_value("XRAY_DOCKER_IMAGE", ""));
-        let container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
+        let container = self.node_env_value("XRAY_CONTAINER_NAME", "node-plane-xray");
         let mut value = super::setup::public(
             &config,
             "localhost",

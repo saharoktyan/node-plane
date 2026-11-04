@@ -115,7 +115,7 @@ fn regenerate(setting: Setting<'_>) -> Result<String, String> {
     if !config.is_file() {
         return Err(format!("AWG config not found: {}", config.display()));
     }
-    let container = setting("AWG_CONTAINER_NAME", "amnezia-awg");
+    let container = setting("AWG_CONTAINER_NAME", "node-plane-awg");
     let backup = config.with_file_name(format!(".awg-regenerate-backup-{}", std::process::id()));
     fs::copy(&config, &backup).map_err(|err| err.to_string())?;
     let attempt = || -> Result<String, String> {

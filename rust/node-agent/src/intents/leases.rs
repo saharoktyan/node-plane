@@ -113,11 +113,11 @@ impl RuntimeSettings {
                     "AWG_CONFIG",
                     "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
                 ),
-                value("AWG_CONTAINER_NAME", "amnezia-awg"),
+                value("AWG_CONTAINER_NAME", "node-plane-awg"),
             ),
             "xray" => (
                 value("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json"),
-                value("XRAY_CONTAINER_NAME", "xray"),
+                value("XRAY_CONTAINER_NAME", "node-plane-xray"),
             ),
             _ => return Err("invalid leased protocol".into()),
         };

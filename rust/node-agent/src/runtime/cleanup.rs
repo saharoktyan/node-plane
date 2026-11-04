@@ -84,8 +84,8 @@ impl AgentState {
         args.extend(ids);
         let records = serde_json::from_str(&read(&args)?)
             .map_err(|_| Status::failed_precondition("invalid Docker container inventory"))?;
-        let xray = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
-        let awg = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
+        let xray = self.node_env_value("XRAY_CONTAINER_NAME", "node-plane-xray");
+        let awg = self.node_env_value("AWG_CONTAINER_NAME", "node-plane-awg");
         let xray_config = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
         let awg_config = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
         let parent = |path: &str| -> Result<String, Status> {

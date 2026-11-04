@@ -115,7 +115,7 @@ impl AgentState {
             "" => "AmneziaWG",
             name => name,
         };
-        let key = vpn_key(&refreshed, &node.container, description).map_err(failed)?;
+        let key = vpn_key(&refreshed, description).map_err(failed)?;
         Ok(RefreshAwgConfigResponse {
             wg_conf: refreshed,
             vpn_key: key,

@@ -16,7 +16,7 @@ use crate::runtime::images::Kind;
 pub(crate) fn deploy(setting: Setting<'_>) -> Result<String, String> {
     let docker_dir = PathBuf::from(setting("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"));
     let image = Kind::Xray.resolve(&setting("XRAY_DOCKER_IMAGE", ""));
-    let container = setting("XRAY_CONTAINER_NAME", "xray");
+    let container = setting("XRAY_CONTAINER_NAME", "node-plane-xray");
     let config = PathBuf::from(setting(
         "XRAY_CONFIG",
         "/opt/node-plane-runtime/xray/config.json",

@@ -130,7 +130,6 @@ pub(crate) struct Issue {
     pub(crate) name: String,
     /// Shown in AmneziaVPN: `<server key> · <profile>`.
     pub(crate) description: String,
-    pub(crate) container: String,
     pub(crate) endpoint: String,
     pub(crate) dns: String,
     pub(crate) mtu: String,
@@ -425,7 +424,7 @@ pub(crate) fn add(issue: &Issue, runtime: &impl Runtime) -> Result<String, Strin
     let checked = runtime.validate(&staged);
     let _ = fs::remove_file(&staged);
     checked?;
-    let key = vpn_key(&conf, &issue.container, &issue.description)?;
+    let key = vpn_key(&conf, &issue.description)?;
     let result = format!(
         "{conf}\n=========== AMNEZIA TEXT KEY (vpn://) ===========\n{key}\n=================================================\n"
     );
@@ -458,7 +457,6 @@ pub(crate) fn issue_for(
         clients: node.clients.clone(),
         name: node.peer_name(profile),
         description,
-        container: node.container.clone(),
         endpoint: format!("{server}:{}", setting("AWG_SERVER_PORT", "51820")),
         dns: setting("AWG_DNS", "1.1.1.1"),
         mtu: setting("AWG_MTU", "1280"),

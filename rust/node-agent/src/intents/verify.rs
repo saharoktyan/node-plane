@@ -571,7 +571,7 @@ pub(crate) mod tests {
                 ["docker", "ps", ..] => (0, if leftover { "a".into() } else { String::new() }),
                 ["docker", "container", "inspect", ..] => (
                     0,
-                    json!([{"Name": "/xray", "Id": "a".repeat(64),
+                    json!([{"Name": "/node-plane-xray", "Id": "a".repeat(64),
                     "Mounts": [{"Type": "bind", "Source": source, "Destination": "/etc/xray"}]}])
                     .to_string(),
                 ),

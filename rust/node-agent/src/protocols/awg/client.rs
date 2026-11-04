@@ -130,9 +130,9 @@ fn csv(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// The AmneziaVPN connection for a client config. `container` names the
-/// node's container for AWG 2 clients; `description` is the shown name.
-fn connection(text: &str, container: &str, description: &str) -> Result<Value, String> {
+/// The AmneziaVPN connection for a client config; `description` is the
+/// shown name.
+fn connection(text: &str, description: &str) -> Result<Value, String> {
     let text = format!("{}\n", text.trim());
     let conf = parse(&text);
     let (interface, peer) = (&conf.interface, &conf.peer);
@@ -177,12 +177,12 @@ fn connection(text: &str, container: &str, description: &str) -> Result<Value, S
         last[key] = get(key).into();
     }
     let mut out: Value = serde_json::from_str(TEMPLATE).map_err(|err| err.to_string())?;
-    // AmneziaVPN recognizes modern AWG by its protocol container marker,
-    // not by the node's Docker container name.
+    // AmneziaVPN recognizes AWG by its protocol container marker, whatever
+    // the node's Docker container is called.
     let marker = if version == "3.1" {
         "amnezia-awg2"
     } else {
-        container
+        "amnezia-awg"
     };
     out["hostName"] = host.into();
     out["description"] = description.into();
@@ -242,8 +242,8 @@ fn encode(connection: &Value) -> Result<String, String> {
 }
 
 /// The AmneziaVPN key for a client config.
-pub(crate) fn vpn_key(text: &str, container: &str, description: &str) -> Result<String, String> {
-    encode(&connection(text, container, description)?)
+pub(crate) fn vpn_key(text: &str, description: &str) -> Result<String, String> {
+    encode(&connection(text, description)?)
 }
 
 #[cfg(test)]
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn modern_awg_keys_carry_the_protocol_marker_and_all_parameters() {
-        let connection = decode(&vpn_key(CLIENT, "amnezia-awg", "msk1 · alice").unwrap());
+        let connection = decode(&vpn_key(CLIENT, "msk1 · alice").unwrap());
         assert_eq!(connection["description"], "msk1 · alice");
         assert_eq!(connection["hostName"], "203.0.113.10");
         assert_eq!(connection["defaultContainer"], "amnezia-awg2");
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_profiles_name_the_node_container() {
+    fn legacy_profiles_carry_the_amnezia_awg_marker() {
         let legacy: String = CLIENT
             .lines()
             .filter(|line| {
@@ -310,11 +310,11 @@ mod tests {
             })
             .map(|line| format!("{line}\n"))
             .collect();
-        let connection = decode(&vpn_key(&legacy, "amnezia-awg", "AmneziaWG").unwrap());
+        let connection = decode(&vpn_key(&legacy, "AmneziaWG").unwrap());
         assert_eq!(connection["defaultContainer"], "amnezia-awg");
         assert_eq!(connection["containers"][0]["awg"]["protocol_version"], "2");
         let partial = CLIENT.replace("RandomTrailers = on\n", "");
-        assert!(vpn_key(&partial, "amnezia-awg", "x").is_err());
+        assert!(vpn_key(&partial, "x").is_err());
     }
 
     #[test]

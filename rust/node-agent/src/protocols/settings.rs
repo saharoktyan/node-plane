@@ -140,7 +140,10 @@ fn xray(setting: Setting<'_>, config: &Path, args: &[String]) -> Result<(), Stri
     let _ = super::deploy::prepare_leased("xray");
     quiet(
         "docker",
-        &["restart", &setting("XRAY_CONTAINER_NAME", "xray")],
+        &[
+            "restart",
+            &setting("XRAY_CONTAINER_NAME", "node-plane-xray"),
+        ],
     );
     Err("Xray deployment failed; previous config restored".into())
 }

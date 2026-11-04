@@ -34,7 +34,7 @@ impl Node {
     pub(crate) fn read(setting: super::Setting<'_>) -> Self {
         Self {
             config: setting("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json").into(),
-            container: setting("XRAY_CONTAINER_NAME", "xray"),
+            container: setting("XRAY_CONTAINER_NAME", "node-plane-xray"),
             tags: [
                 setting("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
                 setting("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),

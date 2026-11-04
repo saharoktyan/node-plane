@@ -323,7 +323,7 @@ pub(crate) fn deploy(setting: Setting<'_>) -> Result<String, String> {
         "/opt/node-plane-runtime/amnezia-awg",
     ));
     let image = Kind::Awg.resolve(&setting("AWG_DOCKER_IMAGE", ""));
-    let container = setting("AWG_CONTAINER_NAME", "amnezia-awg");
+    let container = setting("AWG_CONTAINER_NAME", "node-plane-awg");
     let config = PathBuf::from(setting(
         "AWG_CONFIG",
         "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",

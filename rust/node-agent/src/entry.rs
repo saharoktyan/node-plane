@@ -44,12 +44,12 @@ const ENTRIES: [(&str, Prelude, &str); 13] = [
     (
         "xray-add-user-existing.sh",
         Prelude::Xray("[[ $# -lt 2 || $# -gt 3 ]]", "<name> <uuid> [short_id]"),
-        " xray-user add \"${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}\" \"${XRAY_CONTAINER_NAME:-xray}\" \"${XRAY_INBOUND_TCP_TAG:-reality-tcp}\" \"${XRAY_INBOUND_XHTTP_TAG:-reality-xhttp}\" \"$1\" \"$2\"",
+        " xray-user add \"${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}\" \"${XRAY_CONTAINER_NAME:-node-plane-xray}\" \"${XRAY_INBOUND_TCP_TAG:-reality-tcp}\" \"${XRAY_INBOUND_XHTTP_TAG:-reality-xhttp}\" \"$1\" \"$2\"",
     ),
     (
         "xray-del-user.sh",
         Prelude::Xray("[[ $# -ne 1 ]]", "<name>"),
-        " xray-user delete \"${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}\" \"${XRAY_CONTAINER_NAME:-xray}\" \"${XRAY_INBOUND_TCP_TAG:-reality-tcp}\" \"${XRAY_INBOUND_XHTTP_TAG:-reality-xhttp}\" \"$1\"",
+        " xray-user delete \"${XRAY_CONFIG:-/opt/node-plane-runtime/xray/config.json}\" \"${XRAY_CONTAINER_NAME:-node-plane-xray}\" \"${XRAY_INBOUND_TCP_TAG:-reality-tcp}\" \"${XRAY_INBOUND_XHTTP_TAG:-reality-xhttp}\" \"$1\"",
     ),
     (
         "awg-add-user.sh",

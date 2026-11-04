@@ -102,7 +102,7 @@ impl Host {
             xray_api: std::env::var("NODE_PLANE_XRAY_API")
                 .unwrap_or_else(|_| crate::protocols::xray::api::DEFAULT_ADDRESS.into()),
             xray_config: state.node_env_value("XRAY_CONFIG", &state.config.xray_config_path),
-            awg_container: state.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg"),
+            awg_container: state.node_env_value("AWG_CONTAINER_NAME", "node-plane-awg"),
             awg_config: state.node_env_value("AWG_CONFIG", &state.config.awg_config_path),
             uplinks: state
                 .node_env_value("SHAPING_UPLINKS", "")

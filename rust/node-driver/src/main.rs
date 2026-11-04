@@ -287,11 +287,11 @@ impl DriverContext {
         let lines = vec![
             self.shell_env_assignment("SERVER_KEY", node_key),
             self.shell_env_assignment("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json"),
-            self.shell_env_assignment("XRAY_CONTAINER_NAME", "xray"),
+            self.shell_env_assignment("XRAY_CONTAINER_NAME", "node-plane-xray"),
             self.shell_env_assignment("XRAY_DOCKER_DIR", "/opt/node-plane-runtime/xray"),
             self.shell_env_assignment("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
             self.shell_env_assignment("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
-            self.shell_env_assignment("AWG_CONTAINER_NAME", "amnezia-awg"),
+            self.shell_env_assignment("AWG_CONTAINER_NAME", "node-plane-awg"),
             self.shell_env_assignment("AWG_DOCKER_DIR", "/opt/node-plane-runtime/amnezia-awg"),
             self.shell_env_assignment("AWG_IFACE", "wg0"),
             self.shell_env_assignment(

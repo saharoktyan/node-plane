@@ -52,7 +52,7 @@ impl Node {
             )
             .into(),
             clients: setting("AWG_CLIENTS_DIR", "/opt/node-plane-runtime/awg-clients").into(),
-            container: setting("AWG_CONTAINER_NAME", "amnezia-awg"),
+            container: setting("AWG_CONTAINER_NAME", "node-plane-awg"),
             interface: setting("AWG_IFACE", "wg0"),
             server_key: setting("SERVER_KEY", ""),
         }

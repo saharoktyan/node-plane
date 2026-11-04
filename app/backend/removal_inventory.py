@@ -25,7 +25,7 @@ def read_inventory(config_path, binary_path):
               'AWG_CLIENTS_DIR': fields['runtime_root'] + '/awg-clients',
               'XRAY_DOCKER_DIR': fields['runtime_root'] + '/xray',
               'AWG_DOCKER_DIR': fields['runtime_root'] + '/amnezia-awg',
-              'XRAY_CONTAINER_NAME': 'xray', 'AWG_CONTAINER_NAME': 'amnezia-awg'}
+              'XRAY_CONTAINER_NAME': 'node-plane-xray', 'AWG_CONTAINER_NAME': 'node-plane-awg'}
     env_path = Path(fields['node_env_path'])
     if env_path.exists():
         for line in env_path.read_text().splitlines():

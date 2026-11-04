@@ -83,8 +83,8 @@ impl Paths {
                     "AWG_CONFIG",
                     "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
                 ),
-                ("XRAY_CONTAINER_NAME", "xray"),
-                ("AWG_CONTAINER_NAME", "amnezia-awg"),
+                ("XRAY_CONTAINER_NAME", "node-plane-xray"),
+                ("AWG_CONTAINER_NAME", "node-plane-awg"),
             ],
         )?
         .try_into()
@@ -470,9 +470,9 @@ mod tests {
         for removed in ["awg", "xray"] {
             let root = layout(&format!("cleanup-{removed}"));
             let host = docker(json!([
-                {"Name": "/xray", "Id": "a".repeat(64), "Mounts": [{"Type": "bind",
+                {"Name": "/node-plane-xray", "Id": "a".repeat(64), "Mounts": [{"Type": "bind",
                     "Source": root.join("xray").to_str().unwrap(), "Destination": "/etc/xray"}]},
-                {"Name": "/amnezia-awg", "Id": "b".repeat(64), "Mounts": [{"Type": "bind",
+                {"Name": "/node-plane-awg", "Id": "b".repeat(64), "Mounts": [{"Type": "bind",
                     "Source": root.join("amnezia-awg/data").to_str().unwrap(), "Destination": "/opt/amnezia/awg"}]},
                 {"Name": "/unrelated", "Id": "c".repeat(64), "Mounts": []},
             ]));
@@ -499,9 +499,9 @@ mod tests {
         let paths = Paths::read(&root.join("node.env")).unwrap();
         let mount = json!([{"Type": "bind", "Source": root.join("xray").to_str().unwrap(), "Destination": "/etc/xray"}]);
         let host = docker(json!([
-            {"Name": "/xray", "Id": "a".repeat(64), "Mounts": mount},
-            {"Name": "/xray-previous-123", "Id": "b".repeat(64), "Mounts": mount},
-            {"Name": "/xray-previous-x", "Id": "d".repeat(64), "Mounts": []},
+            {"Name": "/node-plane-xray", "Id": "a".repeat(64), "Mounts": mount},
+            {"Name": "/node-plane-xray-previous-123", "Id": "b".repeat(64), "Mounts": mount},
+            {"Name": "/node-plane-xray-previous-x", "Id": "d".repeat(64), "Mounts": []},
             {"Name": "/unrelated", "Id": "c".repeat(64), "Mounts": []},
         ]));
         assert_eq!(
@@ -509,8 +509,8 @@ mod tests {
             ["a".repeat(64), "b".repeat(64)]
         );
         let host = docker(json!([
-            {"Name": "/xray", "Id": "a".repeat(64), "Mounts": mount},
-            {"Name": "/amnezia-awg", "Id": "b".repeat(64), "Mounts": []},
+            {"Name": "/node-plane-xray", "Id": "a".repeat(64), "Mounts": mount},
+            {"Name": "/node-plane-awg", "Id": "b".repeat(64), "Mounts": []},
         ]));
         assert!(
             remove_protocols(&host, &runtime(&root), &["xray", "awg"])
@@ -619,8 +619,8 @@ mod tests {
                 }
             };
             json!([
-                {"Name": "/xray", "Id": "a", "State": {"Running": true}, "Mounts": mount(xray.parent().unwrap(), "/etc/xray")},
-                {"Name": "/amnezia-awg", "Id": "b", "State": {"Running": running},
+                {"Name": "/node-plane-xray", "Id": "a", "State": {"Running": true}, "Mounts": mount(xray.parent().unwrap(), "/etc/xray")},
+                {"Name": "/node-plane-awg", "Id": "b", "State": {"Running": running},
                  "Mounts": mount(awg.parent().unwrap(), "/opt/amnezia/awg"),
                  "HostConfig": {"NetworkMode": "host"},
                  "NetworkSettings": {"Ports": {"443/udp": [{"HostPort": "8443"}]}}},

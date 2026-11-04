@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Name the VPN containers of new nodes `node-plane-xray` and
+  `node-plane-awg`, so they do not collide with a separately installed Xray
+  or AmneziaWG. Existing nodes keep the names their node.env holds; nothing
+  adopts or renames running containers. AmneziaVPN keys carry the
+  `amnezia-awg` protocol marker regardless of the container name.
 - Pull the VPN container images by digest instead of building AWG on the
   node: the agent tags them locally as `node-plane-xray:26.10.31-np.2` and
   `node-plane-awg:3.1.20260828`, and runs AmneziaWG's own image with the

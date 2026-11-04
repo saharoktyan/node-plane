@@ -47,7 +47,7 @@ Without an active `ufw`, the agent does not change the firewall; restrict the po
 
 The agent does work that requires root on the server:
 
-- runs the Xray and AmneziaWG containers through Docker; access to the Docker socket is already equivalent to root. Images are pulled by digest and tagged locally as `node-plane-xray:<version>` and `node-plane-awg:<version>`; nothing is built on the server;
+- runs the Xray and AmneziaWG containers through Docker; access to the Docker socket is already equivalent to root. Images are pulled by digest and tagged locally as `node-plane-xray:<version>` and `node-plane-awg:<version>`; nothing is built on the server. The containers are named `node-plane-xray` and `node-plane-awg`, so they do not collide with an Xray or AmneziaWG installed separately;
 - installs Docker and system packages with `apt-get` during server setup;
 - opens VPN ports in `ufw`;
 - limits speed with `tc` and `nft`, and enters the AmneziaWG container's network namespace with `nsenter`;

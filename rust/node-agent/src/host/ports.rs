@@ -16,14 +16,14 @@ impl AgentState {
     pub(crate) fn port_is_managed(&self, kind: &str, port: u32) -> bool {
         match kind {
             "xray" | "xray_tcp" | "xray_xhttp" => {
-                let container = self.node_env_value("XRAY_CONTAINER_NAME", "xray");
+                let container = self.node_env_value("XRAY_CONTAINER_NAME", "node-plane-xray");
                 let config_path = self.node_env_value("XRAY_CONFIG", &self.config.xray_config_path);
                 Self::container_running(&container)
                     && fs::read_to_string(&config_path)
                         .is_ok_and(|raw| xray_config_uses_port(&raw, kind, port))
             }
             "awg" => {
-                let container = self.node_env_value("AWG_CONTAINER_NAME", "amnezia-awg");
+                let container = self.node_env_value("AWG_CONTAINER_NAME", "node-plane-awg");
                 let config_path = self.node_env_value("AWG_CONFIG", &self.config.awg_config_path);
                 Self::container_running(&container)
                     && fs::read_to_string(&config_path)

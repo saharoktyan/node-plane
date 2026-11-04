@@ -38,7 +38,7 @@ def fixture(root):
         '#!/bin/sh\n'
         f'printf \'%s\\n\' "$*" >> {shlex.quote(str(docker_log))}\n'
         'case "$1" in\n'
-        '  ps) echo amnezia-awg ;;\n'
+        '  ps) echo node-plane-awg ;;\n'
         '  exec)\n'
         '    case "$*" in\n'
         "      *show*allowed-ips*) printf 'serverkey\\t10.8.1.1/32\\n' ;;\n"
@@ -107,7 +107,7 @@ class AwgPeerCycleTests(unittest.TestCase):
         replaced = self.run_script('awg-add-user.sh', 'alice')
         self.assertIn('Address = 10.8.1.2/32', replaced.stdout)
         self.assertEqual(self.config.read_text().count('# msk1-alice'), 1)
-        self.assertIn('exec -i amnezia-awg wg set wg0 peer public remove', self.log.read_text())
+        self.assertIn('exec -i node-plane-awg wg set wg0 peer public remove', self.log.read_text())
 
     def test_revoked_peer_is_restored_with_its_identity_and_siblings_stay(self):
         first = self.run_script('awg-add-user.sh', 'alice')
@@ -115,7 +115,7 @@ class AwgPeerCycleTests(unittest.TestCase):
         revoked = self.run_script('awg-del-user.sh', 'alice')
         self.assertEqual(revoked.stdout, 'OK\n')
         self.assertNotIn('# msk1-alice', self.config.read_text())
-        self.assertIn('exec -i amnezia-awg wg set wg0 peer public remove', self.log.read_text())
+        self.assertIn('exec -i node-plane-awg wg set wg0 peer public remove', self.log.read_text())
         self.assertTrue(cached.exists())
         self.assertTrue((self.root / 'clients' / 'msk1-alice.revoked.json').exists())
         restored = self.run_script('awg-add-user.sh', 'alice')
@@ -136,7 +136,7 @@ class AwgPeerCycleTests(unittest.TestCase):
 
     def test_a_stopped_container_refuses_changes(self):
         self.run_script('awg-add-user.sh', 'alice')
-        self.docker.write_text(self.docker.read_text().replace('ps) echo amnezia-awg', 'ps) echo other'))
+        self.docker.write_text(self.docker.read_text().replace('ps) echo node-plane-awg', 'ps) echo other'))
         self.assertNotEqual(self.run_script('awg-del-user.sh', 'alice', check=False).returncode, 0)
         self.assertNotEqual(self.run_script('awg-add-user.sh', 'bob', check=False).returncode, 0)
         self.assertIn('# msk1-alice', self.config.read_text())
