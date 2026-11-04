@@ -81,7 +81,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM backend_node_jobs').fetchone()['n'],1)
         self.assertEqual(self.service.get(self.actor,parent['id'])['status'],'blocked')
 
-    def test_ssh_preflight_failure_can_resume_or_cancel_without_fake_success(self):
+    def test_preflight_failure_can_resume_or_cancel_without_fake_success(self):
         from backend.agent_rollout import AgentRolloutService
         from backend.installation_progress import progress_path, write_progress
         from backend.recovery import act, overview
@@ -91,12 +91,12 @@ class BootstrapTests(unittest.TestCase):
         parent = self.queue()
         # A child exists but failed before any remote installation command.
         with self.db.transaction() as conn:
-            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','ssh','root@n1.example') ON CONFLICT(node_key) DO UPDATE SET transport='ssh',ssh_target='root@n1.example'")
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','local',NULL) ON CONFLICT(node_key) DO UPDATE SET transport='local',ssh_target=NULL")
         child = AgentRolloutService(self.db).request(self.actor, 'n1', str(uuid4()),
-            transport='ssh', ssh_target='root@n1.example', bootstrap_id=parent['id'])
+            transport='local', bootstrap_id=parent['id'])
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (child['id'],))
-            conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?)', (child['id'], 'ssh_authentication'))
+            conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?)', (child['id'], 'release_binary_unavailable'))
             conn.execute("UPDATE backend_node_bootstraps SET status='blocked',child_id=?,child_kind='agent-rollouts',error_code='child_operation_blocked' WHERE id=?", (child['id'], parent['id']))
         with TemporaryDirectory() as shared, patch.dict(os.environ, NODE_PLANE_SHARED_DIR=shared):
             write_progress(progress_path(child['id']), child['id'], 'check SSH prerequisites for n1')
@@ -106,7 +106,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(AgentRolloutService(self.db).get(self.actor,child['id'])['status'], 'awaiting_executor')
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_agent_rollouts SET status='blocked' WHERE id=?", (child['id'],))
-                conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?)', (child['id'], 'ssh_authentication'))
+                conn.execute('INSERT INTO backend_agent_rollout_failures VALUES (?,?) ON CONFLICT(task_id) DO NOTHING', (child['id'], 'release_binary_unavailable'))
                 conn.execute("UPDATE backend_node_bootstraps SET status='blocked' WHERE id=?", (parent['id'],))
             result = act(self.db,self.actor,None,'bootstrap',parent['id'],'cancel')
             self.assertEqual(result['status'], 'superseded')

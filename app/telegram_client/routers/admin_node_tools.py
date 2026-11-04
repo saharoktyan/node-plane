@@ -29,7 +29,15 @@ def error(locale, exc):
            'agent_installer_unavailable': 'node_tools.agent_command.unavailable',
            'agent_release_unavailable': 'node_tools.agent_command.unavailable',
            'agent_installer_mismatch': 'node_tools.agent_command.mismatch',
-           'agent_host_invalid': 'node_tools.incomplete'}.get(exc.code, 'node_tools.error')
+           'agent_host_invalid': 'node_tools.incomplete',
+           'agent_install_command_required': 'node_tools.agent_command.required',
+           'ssh_authentication': 'node_tools.agent_ssh.ssh_authentication',
+           'ssh_host_key': 'node_tools.agent_ssh.ssh_host_key',
+           'ssh_prerequisites': 'node_tools.agent_ssh.ssh_prerequisites',
+           'ssh_unreachable': 'node_tools.agent_ssh.ssh_unreachable',
+           'ssh_unavailable': 'node_tools.agent_ssh.ssh_unreachable',
+           'agent_install_failed': 'node_tools.agent_ssh.agent_install_failed',
+           'agent_install_timeout': 'node_tools.agent_ssh.agent_install_failed'}.get(exc.code, 'node_tools.error')
     if exc.code == 'node_settings_uncertain':
         key = 'node_tools.settings_pending'
     return tr(locale, key)
@@ -58,7 +66,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
         await show_bootstrap(chat_id, user_id, message_id, overview['bootstrap'], bot, backend, state)
         return
     if not node['protocols']:
-        from .admin_nodes import RolloutLocalCallback, RolloutSshCallback, show_rollout_status
+        from .admin_nodes import RolloutLocalCallback, show_rollout_status
         if overview.get('agent_rollout'):
             await show_rollout_status(chat_id, user_id, message_id,
                 overview['agent_rollout']['id'], bot, backend, state)
@@ -70,10 +78,11 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
             lines.append(tr(locale, 'nodes.rollout.agent_ready'))
         except BackendError as exc:
             if exc.code == 'node_agent_unconfigured':
-                target = (f'rollout_saved:{node_key}' if node.get('transport') == 'ssh' and node.get('ssh_target') else
-                          RolloutLocalCallback(node_key=node_key).pack() if node.get('transport') == 'local' else
-                          RolloutSshCallback(node_key=node_key).pack())
-                rows.append([button(locale, 'node_tools.setup_agent', target, style='primary')])
+                if node.get('transport') != 'local':
+                    await show_agent_setup(chat_id, user_id, message_id, node, bot, backend, state)
+                    return
+                rows.append([button(locale, 'node_tools.setup_agent',
+                                    RolloutLocalCallback(node_key=node_key).pack(), style='primary')])
             else:
                 lines.append(error(locale, exc))
                 rows.append([button(locale, 'node_tools.refresh', f'bootstrap_menu:{node_key}')])
@@ -152,7 +161,7 @@ async def show_install(chat_id, user_id, message_id, node_key, bot, backend, sta
 
 async def show_agent_setup(chat_id, user_id, message_id, node, bot, backend, state):
     """Server setup without an agent: a one-time command to run on the server,
-    or the controller's own SSH access when it has one."""
+    or the same command run once over the controller's SSH access."""
     locale = normalize_locale((await state.get_data()).get('locale'))
     node_key = node['key']
     await remember_node(state, node)
@@ -160,11 +169,19 @@ async def show_agent_setup(chat_id, user_id, message_id, node, bot, backend, sta
         'revision': node['desired_revision'], 'command_key': str(uuid4())})
     rows = [[button(locale, 'node_tools.agent_command', 'agent_command', style='primary')]]
     if node.get('ssh_target'):
-        rows.append([button(locale, 'node_tools.agent_ssh', f'node_action:bootstrap:{node_key}')])
+        rows.append([button(locale, 'node_tools.agent_ssh', 'agent_ssh')])
     rows.append([button(locale, 'back', AdminNodeCallback(node_key=node_key).pack())])
     await render(bot, chat_id, Screen(tr(locale, 'node_tools.bootstrap'), (server_label(node),
         tr(locale, 'node_tools.agent_setup_note')), embedded_buttons=True, navigation=True),
         rows, state, message_id)
+
+
+@router.callback_query(F.data == 'agent_ssh')
+async def agent_ssh_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
+    data = await state.get_data()
+    if data.get('agent_enrollment_draft'):
+        await state.update_data(agent_enrollment_draft={**data['agent_enrollment_draft'], 'over_ssh': True})
+    await agent_command_cb(query, bot, backend, state)
 
 
 @router.callback_query(F.data == 'agent_command')
@@ -193,9 +210,10 @@ async def agent_issue_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     locale = normalize_locale(data.get('locale'))
     restrict = query.data == 'agent_issue:restrict'
     back = AdminNodeCallback(node_key=draft['node_key']).pack()
+    over_ssh = bool(draft.get('over_ssh'))
     try:
         issued = await backend.agent_enrollment(query.from_user.id, draft['node_key'],
-            draft['revision'], restrict, draft['command_key'])
+            draft['revision'], restrict, draft['command_key'], over_ssh=over_ssh)
     except BackendError as exc:
         await render(bot, query.message.chat.id, Screen(tr(locale, 'node_tools.error_title'),
             (error(locale, exc),), embedded_buttons=True, navigation=True),
@@ -203,9 +221,60 @@ async def agent_issue_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
         return
     # A repeated tap shows the same command; another one needs a new key.
     await state.update_data(agent_enrollment_draft=None)
+    command = None if over_ssh else {'text': issued['command'],
+        'expires': issued['expires_at'][11:16], 'restrict': restrict}
+    if issued['bootstrap'] is None:
+        await show_agent_enrollment(query.message.chat.id, query.from_user.id, query.message.message_id,
+                                    draft['node_key'], bot, backend, state, command=command)
+        return
     await show_bootstrap(query.message.chat.id, query.from_user.id, query.message.message_id,
-        issued['bootstrap'], bot, backend, state, command={'text': issued['command'],
-            'expires': issued['expires_at'][11:16], 'restrict': restrict})
+        issued['bootstrap'], bot, backend, state, command=command)
+
+
+def enrollment_lines(locale, enrollment, command):
+    """While the agent is awaited: the command, or the controller's SSH run."""
+    lines = ()
+    if command:
+        lines += (tr(locale, 'node_tools.agent_command.run'),
+                  tr(locale, 'node_tools.agent_command.expires', time=command['expires']),
+                  tr(locale, 'node_tools.agent_command.' + ('restricted' if command['restrict'] else 'open')))
+    if enrollment.get('ssh_install') in {'queued', 'running'}:
+        lines += (tr(locale, 'node_tools.agent_ssh.running'),)
+    else:
+        lines += (tr(locale, 'node_tools.agent_command.waiting'),)
+    if enrollment.get('error_code') in {'agent_enrollment_rejected', 'agent_owned_by_another_node'}:
+        lines += (tr(locale, 'node_tools.agent_command.' + enrollment['error_code']),)
+    return lines
+
+
+async def show_agent_enrollment(chat_id, user_id, message_id, node_key, bot, backend, state, command=None):
+    """Agent installation of a server without protocols: nothing follows it."""
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    try:
+        enrollment = await backend.node_agent_enrollment(user_id, node_key)
+    except BackendError as exc:
+        enrollment = {'status': 'none', 'error_code': exc.code}
+    lines, uri = (), None
+    rows = []
+    if enrollment['status'] == 'waiting':
+        uri = command['text'] if command else None
+        lines = (tr(locale, 'operation.running'),) + enrollment_lines(locale, enrollment, command)
+    elif enrollment['status'] == 'enrolled':
+        lines = (tr(locale, 'nodes.rollout.agent_ready'),)
+    else:
+        lines = (error(locale, BackendError(enrollment.get('error_code') or 'agent_enrollment_expired', 409)),)
+    if enrollment['status'] in {'waiting', 'expired'}:
+        rows.append([button(locale, 'node_tools.agent_command.new', 'agent_command_new:' + node_key)])
+    rows.append([button(locale, 'setup.close' if enrollment['status'] == 'enrolled' else 'back',
+                        AdminNodeCallback(node_key=node_key).pack())])
+    await render(bot, chat_id, Screen(tr(locale, 'node_tools.setup_agent'), lines, uri=uri,
+        uri_title=tr(locale, 'node_tools.agent_command.title') if uri else None,
+        embedded_buttons=True, navigation=True), rows, state, message_id)
+    if enrollment['status'] == 'waiting':
+        async def refresh():
+            await show_agent_enrollment(chat_id, user_id, message_id, node_key, bot, backend, state,
+                                        command=command)
+        schedule_refresh(state, refresh)
 
 
 @router.callback_query(F.data.startswith('agent_command_new:'))
@@ -449,14 +518,8 @@ async def show_bootstrap(chat_id, user_id, message_id, job, bot, backend, state,
         except BackendError:
             enrollment = {'status': 'none'}
         if enrollment['status'] == 'waiting':
-            if command:
-                uri = command['text']
-                lines += (tr(locale, 'node_tools.agent_command.run'),
-                          tr(locale, 'node_tools.agent_command.expires', time=command['expires']),
-                          tr(locale, 'node_tools.agent_command.' + ('restricted' if command['restrict'] else 'open')))
-            lines += (tr(locale, 'node_tools.agent_command.waiting'),)
-            if enrollment.get('error_code') in {'agent_enrollment_rejected', 'agent_owned_by_another_node'}:
-                lines += (tr(locale, 'node_tools.agent_command.' + enrollment['error_code']),)
+            uri = command['text'] if command else None
+            lines += enrollment_lines(locale, enrollment, command)
         if enrollment['status'] in {'waiting', 'expired'}:
             rows.append([button(locale, 'node_tools.agent_command.new', 'agent_command_new:' + job['node_key'])])
     if job['status'] == 'blocked' and job.get('child_id'):

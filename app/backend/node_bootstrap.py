@@ -202,19 +202,27 @@ class NodeBootstrapService:
                 return True
         if row['phase'] == 'agent':
             # A token installation: the worker enrolls the agent once the
-            # administrator ran the command; the controller has no SSH.
+            # command ran, pasted by the administrator or over the
+            # controller's SSH access once.
             from .agent_enrollment import AgentEnrollmentService
-            enrollment = AgentEnrollmentService(self.db).pending(row['node_key'])
+            enrollments = AgentEnrollmentService(self.db)
+            enrollment = enrollments.pending(row['node_key'])
             if enrollment == 'waiting':
                 return False
             if enrollment == 'expired':
-                self._change(row, status='blocked', error='agent_enrollment_expired')
+                self._change(row, status='blocked',
+                             error=enrollments.failure(row['node_key']) or 'agent_enrollment_expired')
                 return True
             from .agent_rollout import AgentRolloutService
             with self.db.connect() as conn:
                 connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
             if not connection:
                 raise AccessDenied('node_agent_unconfigured', 409)
+            # Only the controller's own host is installed directly; a remote
+            # server needs the install command.
+            if connection['transport'] != 'local':
+                self._change(row, status='blocked', error='agent_install_command_required')
+                return True
             child = AgentRolloutService(self.db).request(actor, row['node_key'], key,
                 transport=connection['transport'], ssh_target=connection['ssh_target'], bootstrap_id=row['id'])
             kind = 'agent-rollouts'

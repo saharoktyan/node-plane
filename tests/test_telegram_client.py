@@ -1445,9 +1445,11 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         backend = SimpleNamespace(create_node=AsyncMock(return_value={
             'key': 'lv1', 'title': 'Latvia', 'region': 'EU', 'flag': '🇱🇻'}),
             rollout_agent=AsyncMock(return_value={'id': 'rollout-id'}),
-            request=AsyncMock(return_value={'transport': 'ssh',
+            request=AsyncMock(return_value={'key': 'lv1', 'title': 'Latvia', 'transport': 'ssh', 'desired_revision': 1,
                 'ssh_target': 'root@lv1.example.com'}))
+        from telegram_client.routers import admin_node_tools
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock), \
+             patch.object(admin_node_tools, 'render', new_callable=AsyncMock) as setup, \
              patch.object(admin_nodes, 'show_rollout_status', new_callable=AsyncMock):
             await admin_nodes.wizard_proto_cb(self.query, self.bot, backend, self.state)
             self.assertIsNone(backend.create_node.await_args)
@@ -1461,8 +1463,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(args[1]['xray_transports'], ['tcp', 'xhttp'])
         self.assertEqual(args[1]['transport'], 'ssh')
         self.assertEqual(args[1]['ssh_target'], 'root@lv1.example.com')
-        backend.rollout_agent.assert_awaited_once_with(123, 'lv1', 'ssh',
-            ssh_target='root@lv1.example.com', command_key='rollout-key')
+        # A remote server enrolls by command; the controller never rolls out over SSH.
+        backend.rollout_agent.assert_not_awaited()
+        callbacks = [b.callback_data for row in setup.call_args.args[3] for b in row]
+        self.assertEqual(callbacks[:2], ['agent_command', 'agent_ssh'])
 
     async def test_legacy_connection_callback_keeps_saved_transport(self):
         self.query.data = 'node_connection_set:lv1:ssh'

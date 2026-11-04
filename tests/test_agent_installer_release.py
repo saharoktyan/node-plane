@@ -125,12 +125,12 @@ exit 0
         self.assertNotIn('--backend-ssh-target', args)
         self.assertNotIn('--backend-ssh-port', args)
 
-    def test_execute_invokes_new_release_installer_with_ssh_and_skip_driver(self):
+    def test_execute_invokes_new_release_installer_locally_and_skip_driver(self):
         task_id = str(uuid4())
         intent = {
-            'transport': 'ssh',
-            'ssh_target': 'operator@192.168.12.34',
-            'ssh_port': 2222,
+            'transport': 'local',
+            'ssh_target': None,
+            'ssh_port': 22,
             'skip_driver': True,
         }
         row = {
@@ -160,11 +160,16 @@ exit 0
         self.assertIn('--bin-source', args)
         self.assertEqual(args[args.index('--bin-source') + 1], 'auto')
         self.assertIn('--skip-driver', args)
-        self.assertIn('--backend-ssh-target', args)
-        self.assertEqual(args[args.index('--backend-ssh-target') + 1], 'operator@192.168.12.34')
-        self.assertIn('--backend-ssh-port', args)
-        self.assertEqual(args[args.index('--backend-ssh-port') + 1], '2222')
-        self.assertNotIn('--backend-local', args)
+        self.assertIn('--backend-local', args)
+        self.assertNotIn('--backend-ssh-target', args)
+
+    def test_a_remote_agent_is_never_installed_over_ssh(self):
+        service = AgentRolloutService(None)
+        row = {'id': str(uuid4()), 'node_key': 'node-remote-bravo', 'intent_json': json.dumps(
+            {'transport': 'ssh', 'ssh_target': 'operator@192.168.12.34', 'ssh_port': 22, 'self_update': True})}
+        self.assertFalse(service._execute(row))
+        self.assertEqual(service._failure_code, 'agent_update_requires_reinstall')
+        self.assertFalse((self.records_dir / f"run-{row['id']}.json").exists())
 
     def test_execute_cleans_inherited_rust_flag_and_forwards_job_identity(self):
         task_id = str(uuid4())

@@ -1068,7 +1068,7 @@ pub(crate) fn validate_controller_channel(
 }
 
 async fn execute_inner(
-    mut request: Request,
+    request: Request,
     command: Command,
     tx: &mpsc::Sender<Event>,
     session: &mut SshSession,
@@ -1627,9 +1627,11 @@ async fn execute_inner(
                         let _ = tx.send(Event::Nodes(Update::Operation(observed)));
                     }
                 }
-                Command::Bootstrap(item) if item.agent != AgentState::Ready => {
+                Command::Bootstrap(item) | Command::Setup(item)
+                    if item.agent != AgentState::Ready && item.transport.as_deref() != Some("local") => {
                     // Token installation: the controller gets no SSH key or sudo.
-                    ensure!(item.needs_setup(), "Refresh the node card before server setup");
+                    // Without protocols (Install node agent) only the agent installs.
+                    ensure!(setup || item.needs_setup(), "Refresh the node card before server setup");
                     let mode = events::select(tx, "Server setup", format!(
                         "{} · {}\nThe node agent installs from a one-time command that runs as root on the server.",
                         item.region, item.title), vec![
@@ -1643,31 +1645,40 @@ async fn execute_inner(
                     let command_id = Uuid::new_v4();
                     let pending = Operation { kind: "node-bootstraps".into(), id: command_id, node_key: item.key.clone(),
                         action: "bootstrap".into(), status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
-                    SavedOperation::save(&request, &credential.account_id, &pending)?;
-                    let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
+                    if !setup {
+                        SavedOperation::save(&request, &credential.account_id, &pending)?;
+                        let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
+                    }
                     let path = format!("/api/v1/nodes/{}/agent-enrollment", item.key);
                     let body = json!({"revision": item.desired_revision, "restrict_to_controller": access == 1});
                     let enrollment = match backend::request(session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
                         Ok(value) => value,
-                        Err(error) if error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
+                        Err(error) if !setup && error.status.is_some_and(|status| (400..500).contains(&status) && status != 408) => {
                             let rejected = Operation { status: "rejected".into(), error: error.code.clone(), ..pending };
                             SavedOperation::save(&request, &credential.account_id, &rejected)?;
                             let _ = tx.send(Event::Nodes(Update::Operation(rejected)));
                             return Err(error.into());
                         }
+                        Err(error) if setup => return Err(error.into()),
                         Err(error) => return Err(anyhow::Error::new(error).context(format!(
                             "Server setup was not confirmed. Use Refresh to check its original command; do not resubmit. Command: {command_id}"))),
                     };
-                    let mut operation = operation(&enrollment["bootstrap"], "node-bootstraps", &item.key)?;
-                    if operation.action.is_empty() { operation.action = pending.action; }
-                    operation.command_id = Some(command_id);
-                    let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
-                    SavedOperation::save(&request, &credential.account_id, &operation)
-                        .context("Server setup was accepted, but its local record could not be saved. Do not resubmit")?;
+                    // A server without protocols has no setup to follow: the
+                    // card shows the agent once it enrolls.
+                    if !enrollment["bootstrap"].is_null() {
+                        let mut operation = operation(&enrollment["bootstrap"], "node-bootstraps", &item.key)?;
+                        if operation.action.is_empty() { operation.action = pending.action; }
+                        operation.command_id = Some(command_id);
+                        let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
+                        SavedOperation::save(&request, &credential.account_id, &operation)
+                            .context("Server setup was accepted, but its local record could not be saved. Do not resubmit")?;
+                    }
                     let command = enrollment["command"].as_str().context("The controller did not return the install command")?;
                     if mode == 0 {
+                        let next = if setup { "the node card shows the agent" } else {
+                            "the protocols install automatically; the node card shows the progress" };
                         events::show_command(tx, "Install command", format!(
-                            "Run as root on {} · {} within an hour. Once the agent answers, the protocols install automatically; the node card shows the progress. A new Server setup replaces the command.",
+                            "Run as root on {} · {} within an hour. Once the agent answers, {next}. A new Server setup replaces the command.",
                             item.region, item.title), command.into())?;
                         return Ok("Waiting for the agent installation".into());
                     }
@@ -1695,25 +1706,13 @@ async fn execute_inner(
                 Command::Setup(item) | Command::Bootstrap(item) | Command::ProtocolAction(item, _) => {
                     let title = match protocol_action { Some("reinstall_keep") => "Reinstall protocols and keep configurations?", Some("reinstall_clean") => "Reinstall protocols with new configurations?", Some("check_ports") => "Check protocol ports?", _ if setup => "Install node agent?", _ => "Set up server?" };
                     ensure!(events::confirm(tx, title, format!("{} · {}\n\n{}", item.region, item.title, if protocol_action == Some("reinstall_clean") { "Existing configurations will be replaced. Users will need new configurations." } else { "The operation will run on this server." }))?, "Node action cancelled");
-                    if item.transport.as_deref() == Some("ssh")
-                        && item.agent != AgentState::Ready {
-                        let target = item.ssh_target.as_deref().context("Node SSH address is missing")?;
-                        let (user, host) = target.split_once('@').unwrap_or(("root", target));
-                        request.workflow.target_user = user.into();
-                        request.workflow.target_host = host.trim_matches(['[', ']']).into();
-                        request.workflow.target_port = 22;
-                        request.workflow.yes = true;
-                        crate::workstation::prepare_node(&request, session,
-                            UiInteraction::shared(tx.clone()), tx).await?;
-                    }
                     let command_id = Uuid::new_v4();
                     let (path, body, kind) = if let Some(action) = protocol_action {
                         ensure!(matches!(action, "reinstall_keep" | "reinstall_clean" | "check_ports"), "Unsupported protocol action");
                         (format!("/api/v1/nodes/{}/actions", item.key), json!({"action":action,"revision":item.desired_revision}), "node-jobs")
                     } else if setup {
-                        let transport = item.transport.as_deref().context("Node transport is not configured")?;
-                        (format!("/api/v1/nodes/{}/agent-rollouts", item.key), json!({"transport":transport,
-                            "ssh_target":item.ssh_target,"ssh_port":22}), "agent-rollouts")
+                        // Only the controller's own host; other servers enroll by command.
+                        (format!("/api/v1/nodes/{}/agent-rollouts", item.key), json!({"transport":"local"}), "agent-rollouts")
                     } else {
                         ensure!(item.needs_setup(), "Refresh the node card before server setup");
                         (format!("/api/v1/nodes/{}/bootstrap", item.key),

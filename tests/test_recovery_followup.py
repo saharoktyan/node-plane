@@ -67,7 +67,7 @@ class RecoveryFollowupTests(unittest.TestCase):
             child_key = str(uuid5(UUID(job['id']), 'lv1:agents'))
 
             # Simulate crash: AgentRollout was requested with deterministic key, but link in parent items not yet saved
-            child = AgentRolloutService(self.db).request(self.actor, 'lv1', child_key, transport='ssh', ssh_target='root@lv1.example')
+            child = AgentRolloutService(self.db).request(self.actor, 'lv1', child_key, transport='local')
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (job['id'],))
                 conn.execute("UPDATE backend_update_items SET status='blocked', child_id=NULL WHERE job_id=?", (job['id'],))

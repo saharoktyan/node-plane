@@ -133,9 +133,6 @@ class ToggleNodeTransportCallback(CallbackData, prefix="toggle_node_transport"):
 class RolloutLocalCallback(CallbackData, prefix="rollout_local"):
     node_key: str
 
-class RolloutSshCallback(CallbackData, prefix="rollout_ssh"):
-    node_key: str
-
 class RolloutStatusCallback(CallbackData, prefix="rollout_status"):
     task_id: str
 

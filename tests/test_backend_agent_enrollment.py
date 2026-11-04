@@ -199,3 +199,135 @@ class ReleaseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class AgentSshInstallTests(unittest.TestCase):
+    """"Install over SSH": the controller runs the same command once."""
+    setUp = AgentEnrollmentTests.setUp
+    issue = AgentEnrollmentTests.issue
+    row = AgentEnrollmentTests.row
+
+    def connect(self, transport='ssh', target='root@node.example'):
+        with self.db.transaction() as conn:
+            conn.execute('INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES (?,?,?)',
+                         ('n1', transport, target))
+
+    def installer(self, code=None):
+        runs = []
+        def run(ssh_target, steps):
+            runs.append((ssh_target, steps))
+            return code
+        self.service.ssh_installer = run
+        return runs
+
+    def test_the_controller_runs_the_command_once_then_enrolls_as_usual(self):
+        self.connect()
+        issued = self.issue(over_ssh=True)
+        self.assertEqual(self.service.get(self.actor, 'n1')['ssh_install'], 'queued')
+        runs = self.installer()
+        self.assertTrue(self.service.run_one())
+        token = self.row()['token']
+        self.assertEqual(len(runs), 1)
+        ssh_target, steps = runs[0]
+        self.assertEqual(ssh_target, 'root@node.example')
+        self.assertEqual(steps['installer'], issued['installer'])
+        self.assertEqual(steps['arguments'][:4], ['--node-key', 'n1', '--token', token])
+        self.assertEqual(self.service.get(self.actor, 'n1')['ssh_install'], 'done')
+        # Never run again; from here only the token enrollment.
+        self.assertFalse(self.service.run_one())
+        self.assertEqual(len(runs), 1)
+        self.driver.failure = None
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_agent_enrollments SET attempted_at=NULL')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.service.get(self.actor, 'n1')['status'], 'enrolled')
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute('SELECT 1 FROM backend_agent_rollouts').fetchone())
+
+    def test_a_failed_ssh_run_ends_the_enrollment_with_its_cause(self):
+        self.connect()
+        issued = self.issue(over_ssh=True)
+        self.installer('ssh_authentication')
+        self.assertTrue(self.service.run_one())
+        state = self.service.get(self.actor, 'n1')
+        self.assertEqual((state['status'], state['error_code'], state['ssh_install']),
+                         ('expired', 'ssh_authentication', 'failed'))
+        self.assertIsNone(self.row()['token'])
+        self.assertTrue(self.bootstraps.run_one())
+        job = self.bootstraps.get(self.actor, issued['bootstrap']['id'])
+        self.assertEqual((job['status'], job['error_code']), ('blocked', 'ssh_authentication'))
+        # A pasted command replaces the SSH run.
+        self.issue()
+        self.assertIsNone(self.service.get(self.actor, 'n1')['ssh_install'])
+
+    def test_an_interrupted_ssh_run_is_repeated(self):
+        self.connect()
+        self.issue(over_ssh=True)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_ssh_installs SET status='running'")
+        self.service.recover()
+        self.assertEqual(self.service.get(self.actor, 'n1')['ssh_install'], 'queued')
+
+    def test_only_a_node_with_an_ssh_address_installs_over_ssh(self):
+        for transport, ssh_target in (('local', None), (None, None)):
+            with self.subTest(transport=transport):
+                with self.db.transaction() as conn:
+                    conn.execute('DELETE FROM backend_node_connections')
+                if transport:
+                    self.connect(transport, ssh_target)
+                with self.assertRaises(AccessDenied) as ctx:
+                    self.issue(over_ssh=True)
+                self.assertEqual(ctx.exception.code, 'node_connection_mismatch')
+
+    def test_a_server_without_protocols_only_enrolls_its_agent(self):
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET protocols_json='[]' WHERE key='n1'")
+        issued = self.issue()
+        self.assertIsNone(issued['bootstrap'])
+        self.assertEqual(self.service.get(self.actor, 'n1')['status'], 'waiting')
+
+    def test_a_remote_server_without_its_agent_needs_the_command(self):
+        self.connect()
+        job = self.bootstraps.queue(self.actor, 'n1', 1, str(uuid4()))
+        self.assertTrue(self.bootstraps.run_one())
+        job = self.bootstraps.get(self.actor, job['id'])
+        self.assertEqual((job['status'], job['error_code']), ('blocked', 'agent_install_command_required'))
+        with self.db.connect() as conn:
+            self.assertIsNone(conn.execute('SELECT 1 FROM backend_agent_rollouts').fetchone())
+
+
+class AgentSshScriptTests(unittest.TestCase):
+    STEPS = {'installer': {'url': 'https://example/i.sh', 'sha256': 'c' * 64},
+             'arguments': ['--node-key', 'n1', '--token', "1.ab'cd"]}
+
+    def test_the_script_checks_the_installer_and_needs_root_or_passwordless_sudo(self):
+        from backend.agent_ssh_install import script
+        text = script(self.STEPS)
+        self.assertIn("curl -fsSLo /tmp/node-plane-agent-installer.sh https://example/i.sh", text)
+        self.assertIn(f"echo '{'c' * 64}  /tmp/node-plane-agent-installer.sh' | sha256sum -c -", text)
+        self.assertIn('sudo -n true', text)
+        self.assertIn("--token '1.ab'\"'\"'cd'", text)
+        with self.assertRaises(ValueError):
+            script({**self.STEPS, 'installer': {'url': 'http://example/i.sh', 'sha256': 'c' * 64}})
+
+    def test_ssh_runs_with_the_controller_key_and_maps_failures(self):
+        from unittest.mock import patch
+        from backend import agent_ssh_install
+        calls = []
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=calls[-1][1].get('code', 0), stdout='', stderr='')
+        with patch.dict('os.environ', {'SSH_KEY': '/keys/id', 'SSH_KNOWN_HOSTS_PATH': '/keys/known'}):
+            self.assertIsNone(agent_ssh_install.run('root@node.example', self.STEPS, runner=runner))
+        command, kwargs = calls[0]
+        self.assertEqual(command[-3:], ['--', 'root@node.example', 'sh -s'])
+        self.assertIn('BatchMode=yes', command)
+        self.assertIn('UserKnownHostsFile=/keys/known', command)
+        self.assertEqual(command[command.index('-i') + 1], '/keys/id')
+        self.assertEqual(kwargs['input'], agent_ssh_install.script(self.STEPS))
+        for returncode, output, code in ((255, 'Permission denied (publickey).', 'ssh_authentication'),
+                                         (255, 'Host key verification failed.', 'ssh_host_key'),
+                                         (41, 'NODE_PLANE_SSH_SUDO_REQUIRED', 'ssh_prerequisites'),
+                                         (255, 'Connection timed out', 'ssh_unreachable'),
+                                         (1, 'installer failed', 'agent_install_failed')):
+            self.assertEqual(agent_ssh_install.failure(returncode, output), code)

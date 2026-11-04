@@ -47,6 +47,7 @@ TABLES = (
 )
 CLEAR = (
     "backend_renewal_requests",
+    "backend_agent_ssh_installs",
     "backend_agent_enrollments",
     "backend_telegram_menu_refresh",
     "backend_account_deletions",

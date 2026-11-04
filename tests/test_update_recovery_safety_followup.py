@@ -107,7 +107,7 @@ class UpdateRecoverySafetyFollowupTests(unittest.TestCase):
                 conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv2','ssh','root@lv2.example')")
 
             # Create an orphan rollout having the same command_key BUT bound to colliding wrong node 'lv2'
-            wrong_child = AgentRolloutService(self.db).request(self.actor, 'lv2', expected_key, transport='ssh', ssh_target='root@lv2.example')
+            wrong_child = AgentRolloutService(self.db).request(self.actor, 'lv2', expected_key, transport='ssh', ssh_target='root@lv2.example', self_update=True)
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (wrong_child['id'],))
                 conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (job['id'],))
@@ -141,7 +141,7 @@ class UpdateRecoverySafetyFollowupTests(unittest.TestCase):
             expected_replacement_key = str(uuid5(UUID(job['id']), 'agents:' + old_child_id))
 
             # Simulate orphan creation of replacement child before parent saved child_id
-            replacement_child = AgentRolloutService(self.db).request(self.actor, 'lv1', expected_replacement_key, transport='ssh', ssh_target='root@lv1.example')
+            replacement_child = AgentRolloutService(self.db).request(self.actor, 'lv1', expected_replacement_key, transport='local')
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (replacement_child['id'],))
                 conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (job['id'],))

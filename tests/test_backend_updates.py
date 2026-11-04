@@ -55,7 +55,7 @@ class BackendUpdateTests(TestCase):
     def node(self):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,protocols_json,xray_transports_json,applied_revision) VALUES ('lv1','Latvia','EU',0,'[]','[]',1)")
-            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')")
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','local',NULL)")
 
     def test_dismiss_is_persistent_per_administrator_and_never_cancels_an_active_job(self):
         service = self.service()

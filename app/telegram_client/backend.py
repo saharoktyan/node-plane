@@ -20,11 +20,13 @@ class BackendClient:
             telegram_user_id=user_id, body={'action': action, 'revision': revision},
             command=True, command_key=command_key)
 
-    async def agent_enrollment(self, user_id, node_key, revision, restrict_to_controller, command_key):
+    async def agent_enrollment(self, user_id, node_key, revision, restrict_to_controller, command_key,
+                               over_ssh=False):
         # Server setup is queued too and continues once the agent enrolls.
+        # With over_ssh the controller runs the command over its SSH access.
         return await self.request('POST', f'/api/v1/nodes/{node_key}/agent-enrollment',
             telegram_user_id=user_id, body={'revision': revision,
-                'restrict_to_controller': restrict_to_controller},
+                'restrict_to_controller': restrict_to_controller, 'over_ssh': over_ssh},
             command=True, command_key=command_key)
 
     async def node_agent_enrollment(self, user_id, node_key):

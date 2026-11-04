@@ -2833,6 +2833,8 @@ CATALOG['en'].update({
     'recovery.cause.agent_update_rolled_back': 'The new agent did not start, so the server put the previous one back. Check journalctl -u node-plane-agent, then run node-plane-agent self-update on the server or reinstall the agent.',
     'recovery.cause.agent_update_unconfirmed': 'The agent did not come back after updating. Check the server: the previous agent returns by itself within a few minutes if the new one failed.',
     'recovery.cause.agent_update_failed': 'The agent could not update itself. Check its service logs.',
+    'recovery.cause.agent_update_requires_reinstall': 'This agent is from before self-update. Install it once more with a new install command; later updates are automatic.',
+    'recovery.cause.agent_install_command_required': 'The agent of this server is not reachable. Install it with a new install command.',
     'recovery.cause.rust_required': 'On-server build is obsolete. Use published release binaries.',
     'recovery.cause.build_resources': 'Local build is obsolete. Use published release binaries.',
     'recovery.cause.child_operation_blocked': 'An installation step is blocked.',
@@ -2900,6 +2902,8 @@ CATALOG['ru'].update({
     'recovery.cause.agent_update_rolled_back': 'Новый агент не запустился, и сервер вернул прежний. Посмотрите journalctl -u node-plane-agent, затем выполните на сервере node-plane-agent self-update или переустановите агент.',
     'recovery.cause.agent_update_unconfirmed': 'Агент не вернулся после обновления. Проверьте сервер: если новый агент не запустился, прежний вернётся сам в течение нескольких минут.',
     'recovery.cause.agent_update_failed': 'Агент не смог обновиться. Посмотрите журнал его сервиса.',
+    'recovery.cause.agent_update_requires_reinstall': 'Этот агент выпущен до самообновления. Установите его ещё раз новой командой установки; дальше обновления пойдут сами.',
+    'recovery.cause.agent_install_command_required': 'Агент этого сервера недоступен. Установите его новой командой установки.',
     'recovery.cause.rust_required': 'Сборка на сервере устарела. Используйте опубликованные бинарники.',
     'recovery.cause.build_resources': 'Сборка на сервере устарела. Используйте опубликованные бинарники.',
     'recovery.cause.child_operation_blocked': 'Один из шагов установки заблокирован.',
@@ -3876,6 +3880,13 @@ CATALOG['en'].update({
     'node_tools.agent_command.mismatch': 'The released agent installer differs from this controller version. Update the controller.',
     'node_tools.agent_command.agent_enrollment_rejected': 'The agent on the server rejected the command: it was installed with another command. Run the latest command again.',
     'node_tools.agent_command.agent_owned_by_another_node': 'The agent on the server belongs to another active node. Remove that node or use another server.',
+    'node_tools.agent_command.required': 'The agent of this server is not reachable. Install it with a new install command.',
+    'node_tools.agent_ssh.running': 'The controller is running the install command on the server over SSH. It logs in once and keeps no access; the screen updates by itself.',
+    'node_tools.agent_ssh.ssh_authentication': 'The controller could not log in over SSH. Add its public key (Settings → SSH key) to the server or run the install command yourself.',
+    'node_tools.agent_ssh.ssh_host_key': 'The SSH host key of the server changed. Check the server, then update the known_hosts entry on the controller or run the install command yourself.',
+    'node_tools.agent_ssh.ssh_prerequisites': 'The SSH user needs root or passwordless sudo. Use root or run the install command yourself.',
+    'node_tools.agent_ssh.ssh_unreachable': 'The controller could not reach the server over SSH.',
+    'node_tools.agent_ssh.agent_install_failed': 'The install command failed on the server. Run it yourself to see the output.',
 })
 
 CATALOG['ru'].update({
@@ -3898,4 +3909,11 @@ CATALOG['ru'].update({
     'node_tools.agent_command.mismatch': 'Установщик агента в релизе отличается от версии контроллера. Обновите контроллер.',
     'node_tools.agent_command.agent_enrollment_rejected': 'Агент на сервере отклонил команду: он установлен другой командой. Выполните последнюю команду ещё раз.',
     'node_tools.agent_command.agent_owned_by_another_node': 'Агент на сервере принадлежит другой активной ноде. Удалите ту ноду или используйте другой сервер.',
+    'node_tools.agent_command.required': 'Агент этого сервера недоступен. Установите его новой командой установки.',
+    'node_tools.agent_ssh.running': 'Контроллер выполняет команду установки на сервере по SSH. Он входит один раз и не сохраняет доступ; экран обновляется сам.',
+    'node_tools.agent_ssh.ssh_authentication': 'Контроллер не смог войти по SSH. Добавьте его открытый ключ (Настройки → SSH-ключ) на сервер или выполните команду установки сами.',
+    'node_tools.agent_ssh.ssh_host_key': 'SSH-ключ хоста сервера изменился. Проверьте сервер, затем обновите запись known_hosts на контроллере или выполните команду установки сами.',
+    'node_tools.agent_ssh.ssh_prerequisites': 'SSH-пользователю нужен root или sudo без пароля. Войдите под root или выполните команду установки сами.',
+    'node_tools.agent_ssh.ssh_unreachable': 'Контроллер не смог подключиться к серверу по SSH.',
+    'node_tools.agent_ssh.agent_install_failed': 'Команда установки завершилась с ошибкой на сервере. Выполните её сами, чтобы увидеть вывод.',
 })

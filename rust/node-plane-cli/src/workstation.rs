@@ -718,6 +718,12 @@ pub(crate) fn recovery_reason(code: &str) -> &str {
             "The agent did not come back after updating. The previous one returns by itself if the new one failed."
         }
         "agent_update_failed" => "The agent could not update itself. Check its service logs.",
+        "agent_update_requires_reinstall" => {
+            "This agent is from before self-update. Install it once more with Server setup; later updates are automatic."
+        }
+        "agent_install_command_required" => {
+            "The agent is not reachable. Install it again with Server setup."
+        }
         "rust_required" => "On-server build is obsolete. Use published release binaries.",
         "build_resources" => "Local build is obsolete. Use published release binaries.",
         "child_operation_blocked" => "An installation step is blocked.",

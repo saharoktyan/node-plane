@@ -16,7 +16,7 @@ from ..i18n import normalize_locale, tr
 from ..node_templates import NODE_TEMPLATES
 from .common import installation_progress_lines, schedule_refresh, render
 from ..navigation import remember_node, parent_path
-from .states import NodeDraftState, NodeEditState, MaintenanceState, AgentDraftState
+from .states import NodeDraftState, NodeEditState, MaintenanceState
 from .callbacks import (
     AdminNodesCallback, NewNodeCallback, AdminNodeCallback,
     NodeSettingsCallback, EditNodeFieldCallback, NodeProtocolsCallback,
@@ -24,7 +24,7 @@ from .callbacks import (
     BindLocalCallback, BindSshCallback, ConfirmNodeDrainCallback, DrainNodeCallback,
     CleanupStepCallback, VerifyRetirementCallback, ConfirmRegistryRemovalCallback,
     RetireRegistryCallback,
-    RolloutLocalCallback, RolloutSshCallback, RolloutStatusCallback, RetryRolloutCallback,
+    RolloutLocalCallback, RolloutStatusCallback, RetryRolloutCallback,
     ProbeNodeCallback, ApplyNodeCallback, NodeApplyStatusCallback
 )
 import asyncio
@@ -921,12 +921,16 @@ async def wizard_setup_agent_cb(query: CallbackQuery, bot: Bot,
         return
     node = await backend.request('GET', f"/api/v1/nodes/{w['key']}", telegram_user_id=query.from_user.id)
     await remember_node(state, node)
-    if node.get('transport') not in {'local', 'ssh'}:
+    if node.get('transport') == 'ssh':
+        from .admin_node_tools import show_agent_setup
+        await show_agent_setup(query.message.chat.id, query.from_user.id,
+            query.message.message_id, node, bot, backend, state)
         return
-    await state.update_data(rollout_node_key=w['key'], rollout_ssh_target=node.get('ssh_target'))
+    if node.get('transport') != 'local':
+        return
+    await state.update_data(rollout_node_key=w['key'], rollout_command_key=str(uuid4()))
     await queue_rollout(query.message.chat.id, query.from_user.id,
-        query.message.message_id, w['key'], node['transport'], bot, backend,
-        state, node.get('ssh_target'))
+        query.message.message_id, w['key'], 'local', bot, backend, state)
 
 def node_traffic_section(traffic, locale):
     if not traffic:
@@ -1976,41 +1980,15 @@ async def rollout_local_cb(query: CallbackQuery, callback_data: RolloutLocalCall
     await query.answer()
     user_id = query.from_user.id
     node_key = callback_data.node_key
-    await state.update_data(rollout_node_key=node_key, rollout_ssh_target=None,
+    await state.update_data(rollout_node_key=node_key,
                             rollout_command_key=str(uuid4()))
     await queue_rollout(query.message.chat.id, user_id, query.message.message_id, node_key, 'local', bot, backend, state)
 
-@router.callback_query(RolloutSshCallback.filter())
-async def rollout_ssh_cb(query: CallbackQuery, callback_data: RolloutSshCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    node_key = callback_data.node_key
-    await state.set_state(AgentDraftState.waiting_for_ssh_target)
-    await state.update_data(rollout_node_key=node_key,
-                            rollout_command_key=str(uuid4()))
-    locale = normalize_locale((await state.get_data()).get('locale'))
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.rollout.ssh_title'), (tr(locale, 'nodes.rollout.ssh_prompt'),), embedded_buttons=True, navigation=True), [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, query.message.message_id)
-
-@router.message(AgentDraftState.waiting_for_ssh_target, F.text)
-async def process_agent_ssh(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
-    if message.from_user is None or message.chat.type != 'private': return
-    user_id = message.from_user.id
-    target = (message.text or '').strip()
-    data = await state.get_data()
-    node_key, message_id = data['rollout_node_key'], data.get('control_message_id')
-    
-    if not re.fullmatch(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?[A-Za-z0-9.-]+', target):
-        locale = normalize_locale(data.get('locale'))
-        await render(bot, message.chat.id, Screen(tr(locale, 'nodes.rollout.ssh_title'), (tr(locale, 'nodes.rollout.ssh_prompt'),), embedded_buttons=True, navigation=True), [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
-        return
-        
-    await state.update_data(rollout_ssh_target=target)
-    await queue_rollout(message.chat.id, user_id, message_id, node_key, 'ssh', bot, backend, state, target)
-
-async def queue_rollout(chat_id, user_id, message_id, node_key, transport, bot, backend, state, ssh_target=None):
+async def queue_rollout(chat_id, user_id, message_id, node_key, transport, bot, backend, state):
+    """The controller's own host only; other servers enroll with a command."""
     try:
         data = await state.get_data()
         task = await backend.rollout_agent(user_id, node_key, transport,
-            ssh_target=ssh_target,
             command_key=data.get('rollout_command_key') or str(uuid4()))
         await _clear_node_flow(state)
         await show_rollout_status(chat_id, user_id, message_id, task['id'], bot, backend, state)
@@ -2022,12 +2000,11 @@ async def queue_rollout(chat_id, user_id, message_id, node_key, transport, bot, 
 async def retry_rollout_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext):
     await query.answer()
     data = await state.get_data()
-    node_key, ssh_target = data.get('rollout_node_key'), data.get('rollout_ssh_target')
+    node_key = data.get('rollout_node_key')
     if not node_key:
         await show_admin_nodes(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
         return
-    transport = 'ssh' if ssh_target else 'local'
-    await queue_rollout(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, transport, bot, backend, state, ssh_target)
+    await queue_rollout(query.message.chat.id, query.from_user.id, query.message.message_id, node_key, 'local', bot, backend, state)
 
 @router.callback_query(RolloutStatusCallback.filter())
 async def rollout_status_cb(query: CallbackQuery, callback_data: RolloutStatusCallback, bot: Bot, backend: BackendClient, state: FSMContext):
@@ -2096,23 +2073,6 @@ async def bootstrap_menu_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
     await query.answer()
     await show_install(query.message.chat.id, query.from_user.id, query.message.message_id,
                        query.data.split(':', 1)[1], bot, backend, state)
-
-
-@router.callback_query(F.data.startswith('rollout_saved:'))
-async def rollout_saved_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
-                           state: FSMContext):
-    await query.answer()
-    node_key = query.data.split(':', 1)[1]
-    node = await backend.request('GET', f'/api/v1/nodes/{node_key}', telegram_user_id=query.from_user.id)
-    await remember_node(state, node)
-    if node.get('transport') != 'ssh' or not node.get('ssh_target'):
-        await show_admin_node(query.message.chat.id, query.from_user.id,
-                              query.message.message_id, node_key, bot, backend, state)
-        return
-    await state.update_data(rollout_node_key=node_key, rollout_ssh_target=node['ssh_target'],
-                            rollout_command_key=str(uuid4()))
-    await queue_rollout(query.message.chat.id, query.from_user.id, query.message.message_id,
-                        node_key, 'ssh', bot, backend, state, node['ssh_target'])
 
 
 REGION_PRESETS = (

@@ -118,22 +118,26 @@ def command(release, node_key, token, port):
 
 
 class AgentEnrollmentService:
-    def __init__(self, db, driver=None, release=release_assets):
+    def __init__(self, db, driver=None, release=release_assets, ssh_installer=None):
         self.db, self.driver, self.release = db, driver, release
+        self.ssh_installer = ssh_installer
 
     def initialize_schema(self):
-        from db.migration_revisions.r0025_agent_enrollments import upgrade
+        from db.migration_revisions import r0025_agent_enrollments, r0026_agent_ssh_installs
         with self.db.transaction() as conn:
-            upgrade(conn)
+            r0025_agent_enrollments.upgrade(conn)
+            r0026_agent_ssh_installs.upgrade(conn)
 
     @staticmethod
-    def public(row):
+    def public(row, ssh=None):
         if row is None:
             return {'status': 'none'}
         return {'node_key': row['node_key'], 'status': row['status'], 'target': row['target'],
                 'restrict_to_controller': bool(row['restrict_to_controller']),
                 'error_code': row['error_code'], 'firewall': row['firewall'],
-                'expires_at': row['expires_at'], 'completed_at': row['completed_at']}
+                'expires_at': row['expires_at'], 'completed_at': row['completed_at'],
+                # Set when the controller runs the command over its own SSH access.
+                'ssh_install': ssh['status'] if ssh else None}
 
     def get(self, actor, node_key):
         require_permission(actor, 'nodes.manage')
@@ -141,13 +145,16 @@ class AgentEnrollmentService:
             if not conn.execute('SELECT 1 FROM backend_nodes WHERE key=?', (node_key,)).fetchone():
                 raise AccessDenied('resource_not_found', 404)
             row = conn.execute('SELECT * FROM backend_agent_enrollments WHERE node_key=?', (node_key,)).fetchone()
-        return self.public(row)
+            ssh = conn.execute('SELECT status FROM backend_agent_ssh_installs WHERE node_key=?', (node_key,)).fetchone()
+        return self.public(row, ssh)
 
-    def issue(self, actor, node_key, revision, command_key, *, restrict_to_controller=False, agent_host=None):
+    def issue(self, actor, node_key, revision, command_key, *, restrict_to_controller=False, agent_host=None,
+              over_ssh=False):
         """A new one-time command for the node, replacing an unused one, and
-        server setup that waits for it."""
+        server setup that waits for it. With `over_ssh` the controller runs the
+        command itself, once, over its SSH access to the node."""
         require_permission(actor, 'nodes.manage')
-        if type(restrict_to_controller) is not bool:
+        if type(restrict_to_controller) is not bool or type(over_ssh) is not bool:
             raise AccessDenied('invalid_input', 422)
         try:
             key = str(UUID(command_key))
@@ -155,8 +162,12 @@ class AgentEnrollmentService:
             raise AccessDenied('invalid_idempotency_key', 422) from None
         with self.db.connect() as conn:
             node = conn.execute('SELECT * FROM backend_nodes WHERE key=?', (node_key,)).fetchone()
+            connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?',
+                                      (node_key,)).fetchone()
         if node is None:
             raise AccessDenied('resource_not_found', 404)
+        if over_ssh and (connection is None or connection['transport'] != 'ssh' or not connection['ssh_target']):
+            raise AccessDenied('node_connection_mismatch', 409)
         host = agent_host or json.loads(node['settings_json'] or '{}').get('public_host')
         if not host:
             raise AccessDenied('node_settings_incomplete', 422)
@@ -185,7 +196,14 @@ class AgentEnrollmentService:
                     completed_at=NULL''',
                 (node_key, token, address, int(restrict_to_controller), actor.account.id,
                  expires.isoformat(), now.isoformat()))
-        if pending is None:
+            conn.execute('DELETE FROM backend_agent_ssh_installs WHERE node_key=?', (node_key,))
+            if over_ssh:
+                conn.execute('''INSERT INTO backend_agent_ssh_installs VALUES (?,?,'queued',NULL,?)''',
+                             (node_key, connection['ssh_target'], now.isoformat()))
+        if not json.loads(node['protocols_json'] or '[]'):
+            # A server without protocols only needs its agent.
+            bootstrap = None
+        elif pending is None:
             bootstrap = bootstraps.queue(actor, node_key, revision, key)
         elif pending['status'] == 'blocked' and not pending['child_id']:
             bootstrap = bootstraps.resume(actor, pending['id'])
@@ -203,6 +221,41 @@ class AgentEnrollmentService:
                                (node_key,)).fetchone()
         return row['status'] if row else None
 
+    def failure(self, node_key):
+        """Why an enrollment ended without the agent, if it is known."""
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT error_code FROM backend_agent_enrollments WHERE node_key=?',
+                               (node_key,)).fetchone()
+        return row['error_code'] if row else None
+
+    def recover(self):
+        # An interrupted SSH run is safe to repeat: the installer replaces its
+        # own earlier work and the token is the same.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_agent_ssh_installs SET status='queued' WHERE status='running'")
+
+    def _install_over_ssh(self, ssh_installer):
+        with self.db.transaction() as conn:
+            row = conn.execute('''SELECT s.node_key, s.ssh_target, e.token, e.target FROM backend_agent_ssh_installs s
+                JOIN backend_agent_enrollments e ON e.node_key=s.node_key
+                WHERE s.status='queued' AND e.status='waiting' ORDER BY s.created_at, s.node_key LIMIT 1''').fetchone()
+            if row is None:
+                return False
+            conn.execute("UPDATE backend_agent_ssh_installs SET status='running' WHERE node_key=?", (row['node_key'],))
+        try:
+            port = int(row['target'].rsplit(':', 1)[1])
+            code = ssh_installer(row['ssh_target'], installation(self.release(), row['node_key'], row['token'], port))
+        except Exception:
+            code = 'agent_install_failed'
+        with self.db.transaction() as conn:
+            conn.execute('UPDATE backend_agent_ssh_installs SET status=?, error_code=? WHERE node_key=? AND status=?',
+                         ('failed' if code else 'done', code, row['node_key'], 'running'))
+            if code:
+                # Nothing will run the command any more: end the enrollment.
+                conn.execute('''UPDATE backend_agent_enrollments SET status='expired', token=NULL, error_code=?
+                    WHERE node_key=? AND token=? AND status='waiting' ''', (code, row['node_key'], row['token']))
+        return True
+
     def _retired(self, conn):
         return [row['node_key'] for row in conn.execute('''SELECT r.node_key FROM backend_node_retirements r
             WHERE NOT EXISTS (SELECT 1 FROM backend_nodes n WHERE n.key=r.node_key) ORDER BY r.node_key''')]
@@ -213,6 +266,9 @@ class AgentEnrollmentService:
             expired = conn.execute('''UPDATE backend_agent_enrollments SET status='expired', token=NULL
                 WHERE status='waiting' AND expires_at<=? RETURNING node_key''', (now.isoformat(),)).fetchall()
         if expired:
+            return True
+        from . import agent_ssh_install
+        if self._install_over_ssh(self.ssh_installer or agent_ssh_install.run):
             return True
         with self.db.connect() as conn:
             row = conn.execute('''SELECT * FROM backend_agent_enrollments WHERE status='waiting'

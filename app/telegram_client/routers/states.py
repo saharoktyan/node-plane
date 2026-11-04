@@ -16,9 +16,6 @@ class NodeDraftState(StatesGroup):
     waiting_for_protocols = State()
     waiting_for_summary = State()
 
-class AgentDraftState(StatesGroup):
-    waiting_for_ssh_target = State()
-
 class NodeEditState(StatesGroup):
     waiting_for_value = State()
 

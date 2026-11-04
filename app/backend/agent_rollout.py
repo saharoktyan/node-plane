@@ -1,4 +1,6 @@
-"""Durable admin-requested rollout of the existing backend node agent installer."""
+"""Durable admin-requested agent installation on the controller's own host, and
+agent updates. Remote servers enroll with an install command and update
+themselves from signed releases; the controller has no SSH path to them."""
 from __future__ import annotations
 
 import json
@@ -72,6 +74,9 @@ class AgentRolloutService:
                 raise AccessDenied('invalid_input', 422)
         elif not isinstance(ssh_target, str) or not SSH_TARGET.fullmatch(ssh_target):
             raise AccessDenied('invalid_input', 422)
+        # A remote server is only updated, by its agent's signed self-update.
+        if transport != 'local' and not self_update:
+            raise AccessDenied('agent_install_command_required', 409)
         intent = {'transport': transport, 'ssh_target': ssh_target, 'ssh_port': ssh_port}
         if skip_driver:
             intent['skip_driver'] = True
@@ -140,31 +145,19 @@ class AgentRolloutService:
     def preflight_failed(self, row):
         """Only a confirmed safe boundary permits another installer dispatch.
 
-        Binary resolution, SSH checks and additive UFW configuration finish
-        before agent identity or journals are modified. A typed failure code
-        is recorded only after the subprocess returns; interrupted/unknown
-        executions never acquire this permission.
-
-        A retired-owner receipt is written only after independent SSH and DB
-        checks; it can authorize continuation of a legacy archival failure.
+        Binary resolution and a refused self-update finish before agent
+        identity or journals are modified. A typed failure code is recorded
+        only after the subprocess returns; interrupted/unknown executions never
+        acquire this permission.
         """
-        from .installation_progress import read_progress
-        progress = read_progress(row)
         with self.db.connect() as conn:
             failure = conn.execute('SELECT code FROM backend_agent_rollout_failures WHERE task_id=?', (row['id'],)).fetchone()
             node = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (row['node_key'],)).fetchone()
             abandoned = conn.execute("SELECT 1 FROM backend_node_bootstraps WHERE child_id=? AND status='superseded'", (row['id'],)).fetchone()
         return bool(row['status'] == 'blocked' and node and not abandoned and failure
-                    and (failure['code'] in {'release_binary_unavailable', 'rust_required',
-                                             'agent_update_rejected', 'agent_update_download_failed',
-                                             'agent_update_self_check_failed'}
-                         or progress and progress['stage'] == 'check_ssh'
-                         and failure['code'] in {'ssh_authentication', 'ssh_host_key', 'ssh_prerequisites',
-                                                 'runtime_owner_conflict'}
-                         or progress and progress['stage'] == 'agent_firewall'
-                         and failure['code'] == 'agent_firewall_failed'
-                         or progress and progress['stage'] == 'archive_journals'
-                         and failure['code'] == 'agent_previous_node_retired'))
+                    and failure['code'] in {'release_binary_unavailable', 'rust_required',
+                                            'agent_update_rejected', 'agent_update_download_failed',
+                                            'agent_update_self_check_failed'})
 
     def resume_preflight(self, actor, task_id):
         require_permission(actor, 'maintenance.manage')
@@ -198,55 +191,8 @@ class AgentRolloutService:
                 '--bin-source', 'auto']
         if intent.get('skip_driver'):
             args.append('--skip-driver')
-        if intent['transport'] == 'local':
-            args.append('--backend-local')
-        else:
-            args += ['--backend-ssh-target', intent['ssh_target'],
-                     '--backend-ssh-port', str(intent['ssh_port'])]
+        args.append('--backend-local')
         return root, args
-
-    def confirm_retired_owner(self, row):
-        """Recheck a blocked archival boundary without replaying installation.
-
-        This also handles pre-fix operations that have no saved failure code.
-        Progress alone never authorizes a retry: independently inspect remote
-        ownership and require the same controller's permanent retirement.
-        """
-        progress = self.progress(row)
-        if row['status'] != 'blocked' or not progress or progress['stage'] != 'archive_journals':
-            return None
-        root, args = self._installer_args(row)
-        env = dict(os.environ)
-        env.pop('NODE_PLANE_AGENT_PROGRESS_FILE', None)
-        env.pop('NODE_PLANE_AGENT_PROGRESS_ID', None)
-        result = subprocess.run([*args, '--check-agent-owner'], cwd=root,
-            capture_output=True, text=True, timeout=60, check=False, env=env)
-        prefix = f"AGENT_OWNER_CHECK|{row['node_key']}|"
-        receipts = [line[len(prefix):] for line in result.stdout.splitlines() if line.startswith(prefix)]
-        if result.returncode != 0 or len(receipts) != 1:
-            return None
-        try:
-            evidence = json.loads(receipts[0])
-        except ValueError:
-            return None
-        old_key = evidence.get('previous_node') if isinstance(evidence, dict) else None
-        if (not isinstance(old_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', old_key)
-                or old_key == row['node_key'] or evidence.get('reassignable') is not True):
-            return None
-        with self.db.transaction() as conn:
-            identity = conn.execute('SELECT id FROM backend_installation_identity WHERE singleton=1').fetchone()
-            retired = conn.execute('SELECT node_key FROM backend_node_retirements WHERE node_key=?', (old_key,)).fetchone()
-            active = conn.execute('SELECT key FROM backend_nodes WHERE key=?', (old_key,)).fetchone()
-            connection = conn.execute('SELECT transport,ssh_target FROM backend_node_connections WHERE node_key=?', (row['node_key'],)).fetchone()
-            intent = json.loads(row['intent_json'])
-            if (not identity or evidence.get('controller') != identity['id'] or not retired or active
-                    or not connection or (connection['transport'], connection['ssh_target']) !=
-                    (intent['transport'], intent['ssh_target'])):
-                return None
-            conn.execute('''INSERT INTO backend_agent_rollout_failures VALUES (?, ?)
-                ON CONFLICT(task_id) DO UPDATE SET code=excluded.code''',
-                (row['id'], 'agent_previous_node_retired'))
-        return {'previous_node': old_key, 'previous_node_retired': True, 'agent_setup_retryable': True}
 
     def _self_update(self, row):
         """Update a running agent to this controller's signed release.
@@ -294,6 +240,11 @@ class AgentRolloutService:
         updated = self._self_update(row)
         if updated is not None:
             return updated
+        if json.loads(row['intent_json'])['transport'] != 'local':
+            # An agent from before self-update: only a new install command
+            # replaces it.
+            self._failure_code = 'agent_update_requires_reinstall'
+            return False
         root, args = self._installer_args(row)
         if self.runner is not None:
             return self.runner(args)
@@ -329,16 +280,6 @@ class AgentRolloutService:
             self._failure_code = 'rust_required'
         elif 'Not enough free memory' in output or 'too busy' in output:
             self._failure_code = 'build_resources'
-        elif 'Permission denied (publickey' in output:
-            self._failure_code = 'ssh_authentication'
-        elif 'Host key verification failed' in output or 'REMOTE HOST IDENTIFICATION HAS CHANGED' in output:
-            self._failure_code = 'ssh_host_key'
-        elif 'SSH_PREREQUISITES_FAILED:' in output:
-            self._failure_code = 'ssh_prerequisites'
-        elif 'AGENT_FIREWALL_FAILED:' in output:
-            self._failure_code = 'agent_firewall_failed'
-        elif 'RUNTIME_OWNER_CONFLICT:' in output:
-            self._failure_code = 'runtime_owner_conflict'
         elif 'AGENT_JOURNAL_OWNER_CONFLICT:' in output:
             self._failure_code = 'agent_journal_owner_conflict'
         return result.returncode == 0
