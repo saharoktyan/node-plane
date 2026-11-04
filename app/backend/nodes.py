@@ -26,7 +26,8 @@ AGENT_INSTALLED_SQL = """(n.applied_revision>0 OR EXISTS (
     SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key AND a.status='succeeded')
     OR EXISTS (SELECT 1 FROM backend_node_settings_tasks s WHERE s.node_key=n.key AND s.status='succeeded')
     OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key AND j.status='succeeded'
-        AND j.action IN ('bootstrap','reinstall_keep','reinstall_clean','cleanup_runtime')))"""
+        AND j.action IN ('bootstrap','reinstall_keep','reinstall_clean','cleanup_runtime'))
+    OR EXISTS (SELECT 1 FROM backend_agent_enrollments e WHERE e.node_key=n.key AND e.status='enrolled'))"""
 
 
 def protocol_defaults(settings, protocols):

@@ -140,11 +140,15 @@ class AgentEnrollmentService:
             row = conn.execute('SELECT * FROM backend_agent_enrollments WHERE node_key=?', (node_key,)).fetchone()
         return self.public(row)
 
-    def issue(self, actor, node_key, revision, command_key, *, restrict_to_controller=False, agent_host=None):
-        """A new one-time command for the node, replacing an unused one, and
-        server setup that waits for it."""
+    def issue(self, actor, node_key, revision, command_key, *, restrict_to_controller=False, agent_host=None,
+              install_services=True):
+        """A new one-time command for the node, replacing an unused one.
+
+        With `install_services`, server setup is queued too and continues
+        once the agent enrolls; otherwise the services are installed later.
+        """
         require_permission(actor, 'nodes.manage')
-        if type(restrict_to_controller) is not bool:
+        if type(restrict_to_controller) is not bool or type(install_services) is not bool:
             raise AccessDenied('invalid_input', 422)
         try:
             key = str(UUID(command_key))
@@ -182,7 +186,9 @@ class AgentEnrollmentService:
                     completed_at=NULL''',
                 (node_key, token, address, int(restrict_to_controller), actor.account.id,
                  expires.isoformat(), now.isoformat()))
-        if pending is None:
+        if pending is None and not install_services:
+            bootstrap = None
+        elif pending is None:
             bootstrap = bootstraps.queue(actor, node_key, revision, key)
         elif pending['status'] == 'blocked' and not pending['child_id']:
             bootstrap = bootstraps.resume(actor, pending['id'])

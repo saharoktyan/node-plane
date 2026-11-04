@@ -777,6 +777,62 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertNotIn('rollout_saved:msk1', self.callbacks(draw))
         self.assertIn(tr('en', 'nodes.rollout.agent_ready'), draw.call_args.args[2].lines)
 
+    async def test_server_setup_without_an_agent_offers_the_install_command(self):
+        from telegram_client.backend import BackendError
+        self.node['applied_revision'] = 0
+        self.backend.node_services.side_effect = BackendError('node_agent_unconfigured', 409)
+        self.backend.node_agent_enrollment = AsyncMock(return_value={'status': 'none'})
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+            callbacks = self.callbacks(draw)
+            self.assertEqual(draw.call_args.args[2].title, tr('en', 'node_tools.setup_agent'))
+            self.assertEqual(callbacks[:2], ['agent_command', 'node_action:bootstrap:msk1'])
+            draft = self.data['agent_enrollment_draft']
+            self.assertEqual((draft['node_key'], draft['revision']), ('msk1', 3))
+            await tools.agent_command_cb(self.query, self.bot, self.backend, self.state)
+            self.assertEqual(self.callbacks(draw)[:2], ['agent_issue:open', 'agent_issue:restrict'])
+            self.backend.agent_enrollment = AsyncMock(return_value={
+                'command': 'curl -fsSLo /tmp/x https://example/x && sudo sh /tmp/x --token 1.ab',
+                'expires_at': '2026-11-04T13:05:00+00:00', 'bootstrap': None})
+            self.query.data = 'agent_issue:restrict'
+            await tools.agent_issue_cb(self.query, self.bot, self.backend, self.state)
+        self.backend.agent_enrollment.assert_awaited_once_with(123, 'msk1', 3, True, draft['command_key'])
+        screen = draw.call_args.args[2]
+        self.assertTrue(screen.uri.startswith('curl -fsSLo /tmp/x'))
+        self.assertIn(tr('en', 'node_tools.agent_command.expires', time='13:05'), screen.lines)
+        self.assertIn('bootstrap_menu:msk1', self.callbacks(draw))
+        self.assertIsNone(self.data['agent_enrollment_draft'])
+        # Without SSH access only the command is offered.
+        self.node['ssh_target'] = None
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertNotIn('node_action:bootstrap:msk1', self.callbacks(draw))
+        # While the command waits: check again or get a new one.
+        self.backend.node_agent_enrollment.return_value = {'status': 'waiting', 'error_code': None}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertEqual(self.callbacks(draw)[:2], ['bootstrap_menu:msk1', 'agent_command'])
+        self.assertIn(tr('en', 'node_tools.agent_command.waiting'), draw.call_args.args[2].lines)
+        # Once the agent answers, the protocols are a separate step.
+        self.backend.node_services.side_effect = None
+        self.backend.node_services.return_value = {'docker': False}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
+            await tools.show_install(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
+        self.assertEqual(draw.call_args.args[2].title, tr('en', 'node_tools.protocols_stage_button'))
+        self.assertIn('node_job_submit', self.callbacks(draw))
+
+    async def test_setup_waiting_for_the_command_offers_a_new_one(self):
+        self.backend.node_agent_enrollment = AsyncMock(return_value={
+            'status': 'waiting', 'error_code': 'agent_enrollment_rejected'})
+        job = {'id': 'b1', 'node_key': 'msk1', 'phase': 'agent', 'status': 'awaiting_executor',
+               'child_id': None, 'child_kind': None, 'error_code': None, 'waiting_for_agent': False}
+        with patch.object(tools, 'render', new_callable=AsyncMock) as draw, \
+                patch.object(tools, 'schedule_refresh'):
+            await tools.show_bootstrap(123, 123, 77, job, self.bot, self.backend, self.state)
+        self.assertIn('agent_command_new:msk1', self.callbacks(draw))
+        self.assertIn(tr('en', 'node_tools.agent_command.agent_enrollment_rejected'),
+                      draw.call_args.args[2].lines)
+
     async def test_adding_protocol_to_agent_only_node_offers_install_protocols(self):
         self.node.update(protocols=['awg'], applied_revision=0)
         self.backend.node_services.return_value = {'docker': False}

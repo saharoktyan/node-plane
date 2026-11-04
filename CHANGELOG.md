@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Install a node agent from a one-time command, without SSH or sudo for
+  the controller. The command downloads the release's
+  `node-plane-agent-installer.sh`, checks its SHA-256 and runs it as root;
+  the agent generates its own key, and the worker enrolls it with the token
+  (valid for one hour) and issues its certificate. The agent port stays open
+  under mutual TLS, or accepts only the controller address when asked (for
+  a static controller IP). In Telegram the agent is set up first and the
+  protocols are a separate step. Workstation's Server setup offers Manual
+  (the command with a copy button; Install protocols once the agent
+  answers) or Auto (runs it over one SSH login with a key or password,
+  nothing saved, and installs the protocols right after). Nodes with
+  controller SSH access can still be set up over SSH.
 - Collect traffic once per node: the agent reads every identity of a node
   with one Xray statistics query and one AWG transfer listing
   (`traffic_batch`), and the controller reads all profiles every 2 minutes

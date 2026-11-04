@@ -692,6 +692,7 @@ class AgentEnrollmentInput(BaseModel):
     revision: StrictInt
     restrict_to_controller: StrictBool = False
     agent_host: str | None = Field(default=None, max_length=253)
+    install_services: StrictBool = True
 
 
 class NodeRemovalInput(BaseModel):
@@ -1855,7 +1856,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         """A one-time install command for the server; server setup waits for it."""
         return agent_enrollments.issue(current, node_key, body.revision, idempotency_key,
                                        restrict_to_controller=body.restrict_to_controller,
-                                       agent_host=body.agent_host)
+                                       agent_host=body.agent_host,
+                                       install_services=body.install_services)
 
     @app.get('/api/v1/nodes/{node_key}/agent-enrollment')
     def get_node_agent_enrollment(node_key: str, current=Depends(actor)):
