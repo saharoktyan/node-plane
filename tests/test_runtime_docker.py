@@ -36,9 +36,19 @@ def load(name, file):
     return module
 
 
-XRAY = load('runtime_test_xray', 'xray-user-api.py')
 AWG = load('runtime_test_awg', 'awg_profile.py')
 OPERATIONS = load('runtime_test_operations', 'backend-node-operation.py')
+
+
+def xray_users(tag):
+    """Live users of an inbound, read through the built agent."""
+    result = subprocess.run([str(AGENT_BINARY), 'xray-api', f'--server={os.environ["NODE_PLANE_XRAY_API"]}',
+                             'inbound-users', f'--tag={tag}'], capture_output=True, text=True, timeout=15)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout).strip())
+    return {user['email']: {'id': (user.get('account') or {}).get('id'),
+                            'flow': (user.get('account') or {}).get('flow', '')}
+            for user in json.loads(result.stdout).get('users', []) if user.get('email')}
 
 
 def docker(*args, input=None, check=True):
@@ -62,8 +72,8 @@ class DockerRuntimeTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.prefix = 'np-test-' + uuid4().hex[:12]
-        # Helpers use the container CLI unless a test opts into the agent
-        # transport (agent_xray).
+        # The runtime entry points find no agent unless a test opts in
+        # (agent_xray).
         absent = patch.dict(os.environ, {'NODE_PLANE_AGENT_BIN': str(self.root / 'no-agent')})
         absent.start()
         self.addCleanup(absent.stop)
@@ -90,7 +100,7 @@ class DockerRuntimeTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while True:
             try:
-                return XRAY.users(container, 'reality-tcp')
+                return xray_users('reality-tcp')
             except RuntimeError:
                 if time.monotonic() >= deadline:
                     self.fail(docker('logs', container).stdout)
@@ -133,7 +143,7 @@ class DockerRuntimeTests(unittest.TestCase):
             engine.start_leased_runtime('xray',journal,execute)
         self.wait_users(container)
         for tag in ('reality-tcp','reality-xhttp'):
-            users = XRAY.users(container,tag)
+            users = xray_users(tag)
             self.assertIn('alice',users)
             self.assertNotIn(intent['runtime_name'],users)
         self.assertEqual(engine.expire_leases(journal,mutate),{'expired':1,'pending':0})
@@ -144,19 +154,27 @@ class DockerRuntimeTests(unittest.TestCase):
         identity, started = str(uuid4()), self.started(container)
         self.sync(path, container, 'add', identity)
         for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertEqual(XRAY.users(container, tag)['alice']['id'], identity)
+            self.assertEqual(xray_users(tag)['alice']['id'], identity)
         self.assertEqual(self.started(container), started)
         docker('restart', container)
         self.wait_users(container)
         for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertEqual(XRAY.users(container, tag)['alice']['id'], identity)
+            self.assertEqual(xray_users(tag)['alice']['id'], identity)
         started = self.started(container)
         self.sync(path, container, 'delete')
         self.assertEqual(self.started(container), started)
         docker('restart', container)
         self.wait_users(container)
         for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertNotIn('alice', XRAY.users(container, tag))
+            self.assertNotIn('alice', xray_users(tag))
+
+    def inspect(self, config, protocol, name, *extra, env=()):
+        """`inspect-profile.sh` as the profile intent journal runs it."""
+        result = subprocess.run([str(AGENT_BINARY), 'inspect-profile', protocol, name, *extra],
+            env={**os.environ, 'XRAY_CONFIG': str(config), **dict(env)},
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
 
     def agent_xray(self, *publish):
         """Xray with the API published on host loopback and the helpers
@@ -197,11 +215,10 @@ class DockerRuntimeTests(unittest.TestCase):
                                         'NODE_PLANE_XRAY_API': f'127.0.0.1:{port}'})
         agent.start()
         self.addCleanup(agent.stop)
-        self.assertEqual(XRAY.agent(), str(AGENT_BINARY))
         deadline = time.monotonic() + 10
         while True:
             try:
-                XRAY.users(container, 'reality-tcp')
+                xray_users('reality-tcp')
                 break
             except RuntimeError:
                 if time.monotonic() >= deadline:
@@ -222,14 +239,16 @@ class DockerRuntimeTests(unittest.TestCase):
             return {user['email']: user['account'] for user in json.loads(raw or '{}').get('users', [])}
 
         first, second = str(uuid4()), str(uuid4())
-        with patch.object(XRAY, 'xray_api', side_effect=AssertionError('container CLI used')):
-            self.sync(path, container, 'add', first)
-            self.assertEqual(cli_users('reality-tcp')['alice']['id'], first)
-            self.assertEqual(cli_users('reality-tcp')['alice']['flow'], 'xtls-rprx-vision')
-            self.assertNotIn('flow', cli_users('reality-xhttp')['alice'])
-            self.sync(path, container, 'add', second)
-            self.assertEqual(cli_users('reality-xhttp')['alice']['id'], second)
-            self.sync(path, container, 'delete')
+        self.sync(path, container, 'add', first)
+        self.assertEqual(cli_users('reality-tcp')['alice']['id'], first)
+        self.assertEqual(cli_users('reality-tcp')['alice']['flow'], 'xtls-rprx-vision')
+        self.assertNotIn('flow', cli_users('reality-xhttp')['alice'])
+        self.sync(path, container, 'add', second)
+        self.assertEqual(cli_users('reality-xhttp')['alice']['id'], second)
+        self.assertTrue(self.inspect(path, 'xray', 'alice', second)['identity_matches'])
+        self.assertFalse(self.inspect(path, 'xray', 'alice', first)['identity_matches'])
+        self.sync(path, container, 'delete')
+        self.assertEqual(set(self.inspect(path, 'xray', 'alice', second).values()), {False})
         self.assertEqual(cli_users('reality-tcp'), {})
         self.assertEqual(cli_users('reality-xhttp'), {})
 
@@ -332,7 +351,7 @@ class DockerRuntimeTests(unittest.TestCase):
         # Revocation removes the user and closes what is open.
         self.sync(path, server, 'delete')
         self.assertTrue(closed(newer))
-        self.assertNotIn('alice', XRAY.users(server, 'reality-tcp'))
+        self.assertNotIn('alice', xray_users('reality-tcp'))
 
     def cleanup_fixture(self, conflicting=False):
         for directory in ('xray', 'amnezia-awg/data', 'awg-clients', 'unrelated'):
@@ -462,6 +481,25 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertIn('0% packet loss', result.stdout)
         self.assertGreaterEqual(handshake() - first, 8)
         self.assertEqual(len(docker('exec', server, 'awg', 'show', 'awg0', 'peers').stdout.split()), 1)
+
+    @unittest.skipUnless(AGENT_BINARY.is_file(), 'requires a built node agent')
+    def test_agent_inspects_a_live_awg_peer(self):
+        server, client = self.awg_pair('quic')
+        # The production image aliases wg to awg; this fixture uses upstream.
+        docker('exec', server, 'sh', '-c', 'ln -sf "$(command -v awg)" /usr/local/bin/wg')
+        path = self.root / 'server-quic' / 'peer.conf'
+        path.write_text(path.read_text().replace('[Peer]', '# n1-alice\n[Peer]', 1))
+        clients = self.root / 'clients'
+        clients.mkdir()
+        (clients / 'n1-alice.txt').write_text('client config')
+        env = {'AWG_CONFIG': str(path), 'AWG_CLIENTS_DIR': str(clients), 'AWG_CONTAINER_NAME': server,
+               'AWG_IFACE': 'awg0', 'SERVER_KEY': 'n1'}
+        self.assertEqual(self.inspect(path, 'awg', 'alice', env=env),
+                         dict.fromkeys(('disk_present', 'live_present', 'identity_matches', 'config_available'), True))
+        peer = docker('exec', server, 'awg', 'show', 'awg0', 'peers').stdout.strip()
+        docker('exec', server, 'awg', 'set', 'awg0', 'peer', peer, 'remove')
+        found = self.inspect(path, 'awg', 'alice', env=env)
+        self.assertEqual((found['disk_present'], found['live_present'], found['identity_matches']), (True, False, False))
 
     def test_temporary_awg_expiry_disconnects_peer_and_preserves_other_peer(self):
         server,client = self.awg_pair('quic')

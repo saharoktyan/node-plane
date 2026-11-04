@@ -1,9 +1,14 @@
 //! AmneziaWG on this node.
+pub(crate) mod inspection;
+pub(crate) mod peers;
 pub(crate) mod rate;
 pub(crate) mod runtime;
+pub(crate) mod traffic;
 pub(crate) mod users;
 
 use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 
 use crate::agent::v1::RemoteProfileRecord;
 use crate::state::AgentState;
@@ -16,6 +21,56 @@ pub(crate) fn awg_config_uses_port(raw: &str, port: u32) -> bool {
                 key.trim() == "ListenPort" && value.trim().parse::<u32>().ok() == Some(port)
             })
     })
+}
+
+/// The AWG runtime of this node, from node.env.
+#[derive(Debug, Clone)]
+pub(crate) struct Node {
+    pub(crate) config: PathBuf,
+    pub(crate) clients: PathBuf,
+    pub(crate) container: String,
+    pub(crate) interface: String,
+    pub(crate) server_key: String,
+}
+
+impl Node {
+    pub(crate) fn read(setting: super::Setting<'_>) -> Self {
+        Self {
+            config: setting(
+                "AWG_CONFIG",
+                "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
+            )
+            .into(),
+            clients: setting("AWG_CLIENTS_DIR", "/opt/node-plane-runtime/awg-clients").into(),
+            container: setting("AWG_CONTAINER_NAME", "amnezia-awg"),
+            interface: setting("AWG_IFACE", "wg0"),
+            server_key: setting("SERVER_KEY", ""),
+        }
+    }
+
+    /// The peer name in wg0.conf and the clients directory.
+    pub(crate) fn peer_name(&self, profile: &str) -> String {
+        if self.server_key.is_empty() {
+            profile.to_string()
+        } else {
+            format!("{}-{profile}", self.server_key)
+        }
+    }
+
+    /// `wg show <interface> <what>` in the container.
+    pub(crate) fn wg_show(&self, what: &str) -> Result<String, String> {
+        let output = Command::new("docker")
+            .args(["exec", &self.container, "wg", "show", &self.interface, what])
+            .output()
+            .map_err(|err| format!("docker failed: {err}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "wg show failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
 }
 
 impl AgentState {

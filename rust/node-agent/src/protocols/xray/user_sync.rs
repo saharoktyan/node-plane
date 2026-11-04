@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use super::api::cli::{valid_email, valid_uuid};
 use super::api::{DEFAULT_ADDRESS, InboundUser, XrayApi};
 
-const VISION: &str = "xtls-rprx-vision";
+pub(crate) const VISION: &str = "xtls-rprx-vision";
 const DEPLOY: &str = "/opt/node-plane-runtime/deploy-xray.sh";
 
 /// What Xray holds for one user: UUID and flow.
@@ -272,16 +272,7 @@ async fn execute(args: &[String]) -> Result<(), String> {
         tcp_tag: tcp_tag.clone(),
         xhttp_tag: xhttp_tag.clone(),
     };
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(target.config.with_file_name(format!(
-            "{}.lock",
-            target.config.file_name().and_then(|n| n.to_str()).unwrap_or("config.json")
-        )))
-        .map_err(|err| format!("Xray config lock unavailable: {err}"))?;
-    lock.lock()
-        .map_err(|err| format!("Xray config lock unavailable: {err}"))?;
+    let _lock = crate::protocols::lock_config(&target.config)?;
     let raw = fs::read_to_string(&target.config).map_err(|err| err.to_string())?;
     let mut config: Value = serde_json::from_str(&raw).map_err(|err| err.to_string())?;
     clients(&mut config, tcp_tag)?;

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Inspect profiles and read traffic counters in the node agent instead of
+  `inspect-profile.py`, `traffic-snapshot.py` and `xray-user-api.py`, which
+  are removed; `inspect-profile.sh` only starts the agent.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

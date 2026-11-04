@@ -7,6 +7,7 @@ use tonic::Status;
 
 use crate::agent::v1::{BackendNodeActionRequest, RuntimeCommandResponse};
 use crate::host::metrics as host_metrics;
+use crate::protocols::traffic;
 use crate::protocols::xray::revocation;
 use crate::state::AgentState;
 
@@ -52,6 +53,23 @@ impl AgentState {
             return Ok(RuntimeCommandResponse {
                 summary: "node operation observation".into(),
                 payload_json: value.to_string(),
+            });
+        }
+        if req.action == "traffic" {
+            if req.recover {
+                return Err(Status::failed_precondition(
+                    "node operation needs attention",
+                ));
+            }
+            let setting = |key: &str, default: &str| self.node_env_value(key, default);
+            let journal = Path::new("/etc/node-plane/profile-intents.sqlite3");
+            let snapshot = traffic::observe(&setting, journal, &req.intent_json)
+                .await
+                .map_err(|_| Status::failed_precondition("node operation needs attention"))?;
+            return Ok(RuntimeCommandResponse {
+                summary: "backend node operation completed".into(),
+                payload_json: serde_json::to_string(&snapshot)
+                    .map_err(|_| Status::internal("invalid node operation response"))?,
             });
         }
         let inspect = req.action == "inspect";

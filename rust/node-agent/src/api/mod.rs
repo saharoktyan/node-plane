@@ -88,7 +88,7 @@ impl NodeAgentService for NodeAgentApi {
         request: Request<agent::v1::InspectProfileRequest>,
     ) -> Result<Response<agent::v1::ProfileInspection>, Status> {
         Ok(Response::new(
-            self.state.inspect_profile(request.into_inner())?,
+            self.state.inspect_profile(request.into_inner()).await?,
         ))
     }
 

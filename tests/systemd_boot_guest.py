@@ -26,7 +26,10 @@ if (subprocess.run(['systemd-detect-virt'],capture_output=True,text=True).stdout
         or not Path('/root/boot-fixture-ready').is_file()):
     raise SystemExit('This check requires the explicitly prepared disposable np-boot-test QEMU guest')
 engine=load('boot_intents','apply-profile-intent.py')
-xray=load('boot_xray','xray-user-api.py')
+def xray_users(tag):
+    # The container's Xray CLI: the guest needs no agent binary for this read.
+    response=json.loads(run('docker','exec','xray','xray','api','inbounduser','--server=127.0.0.1:10085','-tag='+tag))
+    return {user['email']:user for user in response.get('users',[]) if user.get('email')}
 def issue(protocol,name,temporary=False):
     intent=dict(command_id=str(uuid4()),protocol=protocol,runtime_name=name,revision=1,
                 action='ensure',uuid=str(uuid4()) if protocol=='xray' else '',
@@ -91,7 +94,7 @@ def verify():
         assert leases[values['valid']]=='active',leases
         if protocol=='xray':
             for tag in ('reality-tcp','reality-xhttp'):
-                users=xray.users('xray',tag)
+                users=xray_users(tag)
                 assert 'permanent' in users and values['valid'] in users,users
                 assert values['due'] not in users,users
         else:
@@ -153,7 +156,7 @@ def verify_guard():
                                 (protocol,values['due'])).fetchone()[0]=='revoking'
         if protocol=='xray':
             for tag in ('reality-tcp','reality-xhttp'):
-                users=xray.users('xray',tag)
+                users=xray_users(tag)
                 assert values['due'] not in users
                 assert 'permanent' in users and values['valid'] in users
         else:

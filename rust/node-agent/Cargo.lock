@@ -578,6 +578,7 @@ version = "1.0.0-beta.11"
 dependencies = [
  "chrono",
  "prost",
+ "ring",
  "serde",
  "serde_json",
  "tokio",

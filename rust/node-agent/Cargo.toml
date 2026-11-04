@@ -10,6 +10,8 @@ tonic-build = "0.12"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 prost = "0.13"
+# Already in the tree through rustls; used for SHA-256.
+ring = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "time"] }

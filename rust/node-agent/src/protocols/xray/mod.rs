@@ -1,18 +1,47 @@
 //! Xray (VLESS) on this node.
 pub(crate) mod admission;
 pub(crate) mod api;
+pub(crate) mod inspection;
 pub(crate) mod rate;
 pub(crate) mod revocation;
 pub(crate) mod runtime;
+pub(crate) mod traffic;
 pub(crate) mod user_sync;
 pub(crate) mod users;
 
 use std::fs;
+use std::path::PathBuf;
 
 use serde_json::Value;
 
 use crate::agent::v1::RemoteProfileRecord;
 use crate::state::AgentState;
+
+/// The Xray runtime of this node, from node.env.
+#[derive(Debug, Clone)]
+pub(crate) struct Node {
+    pub(crate) config: PathBuf,
+    pub(crate) container: String,
+    /// The Vision (TCP) inbound, then the XHTTP inbound.
+    pub(crate) tags: [String; 2],
+    pub(crate) api: String,
+}
+
+impl Node {
+    pub(crate) fn read(setting: super::Setting<'_>) -> Self {
+        Self {
+            config: setting("XRAY_CONFIG", "/opt/node-plane-runtime/xray/config.json").into(),
+            container: setting("XRAY_CONTAINER_NAME", "xray"),
+            tags: [
+                setting("XRAY_INBOUND_TCP_TAG", "reality-tcp"),
+                setting("XRAY_INBOUND_XHTTP_TAG", "reality-xhttp"),
+            ],
+            // Tests point the agent at a published API port; nodes use the default.
+            api: std::env::var("NODE_PLANE_XRAY_API")
+                .unwrap_or_else(|_| api::DEFAULT_ADDRESS.into()),
+        }
+    }
+}
 
 pub(crate) fn xray_config_uses_port(raw: &str, kind: &str, port: u32) -> bool {
     let tag = match kind {
