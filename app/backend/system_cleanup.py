@@ -154,16 +154,9 @@ class SystemCleanupService:
                 raise AccessDenied("maintenance_busy", 409)
             nodes = [
                 dict(r)
-                for r in conn.execute("""SELECT n.key,n.title,c.transport,c.ssh_target
+                for r in conn.execute("""SELECT n.key,n.title,c.transport
                 FROM backend_nodes n LEFT JOIN backend_node_connections c ON c.node_key=n.key ORDER BY n.key""").fetchall()
             ]
-            if cleanup_nodes:
-                for node in nodes:
-                    if node["transport"] not in {"local", "ssh"}:
-                        raise AccessDenied("verification_target_required", 409)
-                    self.removals.verifier(
-                        "local" if node["transport"] == "local" else node["ssh_target"]
-                    )
             intent = {
                 "action": action,
                 "cleanup_nodes": cleanup_nodes,

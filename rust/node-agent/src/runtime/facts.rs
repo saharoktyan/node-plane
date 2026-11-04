@@ -33,6 +33,9 @@ impl AgentState {
             binary_version: env!("NODE_PLANE_BINARY_VERSION").to_string(),
             binary_commit: env!("NODE_PLANE_BINARY_COMMIT").to_string(),
             update_rolled_back: self.update_rolled_back(),
+            host_id: crate::lifecycle::host_check::host_id(Path::new(
+                crate::lifecycle::host_check::MACHINE_ID,
+            )),
             runtime_root: self.config.runtime_root.clone(),
             xray_config_path,
             awg_config_path,

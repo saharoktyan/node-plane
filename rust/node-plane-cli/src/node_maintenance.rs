@@ -65,8 +65,8 @@ impl Browser {
                 Mode::Full => vec![
                     format!("• Revoke access for {profiles} profiles."),
                     "• Remove VPN containers, configuration and runtime files.".into(),
-                    "• Remove the agent, its service and credentials.".into(),
-                    "• Remove the server record after cleanup is verified.".into(),
+                    "• The agent checks the server, then removes itself.".into(),
+                    "• Remove the server record once the agent stops answering.".into(),
                 ],
                 Mode::RegistryOnly => vec![
                     format!(
@@ -79,6 +79,12 @@ impl Browser {
             };
         }
         match self.snapshot["status"].as_str() {
+            Some("removed") if self.snapshot["checked_by"] == "agent" => {
+                return vec![
+                    "Server removed. Its agent found no runtime left.".into(),
+                    "The agent's own removal is not verified.".into(),
+                ];
+            }
             Some("removed") => return vec!["Server removed. Cleanup verified.".into()],
             Some("removed_registry_only") => {
                 return vec![
@@ -137,8 +143,14 @@ impl Browser {
                     "VPN runtime is present or could not be checked, but this node has no confirmed VPN installation. Full removal stopped."
                 }
                 "node_revocations_blocked" => "Profile access revocation needs recovery.",
-                "verification_key_unavailable" | "independent_verification_key_required" => {
-                    "SSH access is required to verify cleanup."
+                "agent_still_running" => {
+                    "The agent checked the server but still answers instead of removing itself. Check the node-plane-agent service."
+                }
+                "agent_host_check_missing" => {
+                    "It is unknown whether the agent checked the server and removed itself. Check the server, then remove only the record."
+                }
+                "agent_update_required" => {
+                    "The agent is too old for removal without SSH. Update it, then retry."
                 }
                 "node_settings_uncertain"
                 | "node_operation_pending"

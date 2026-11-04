@@ -83,6 +83,7 @@ CLEAR = (
     "backend_node_commands",
     "backend_agent_rollout_failures",
     "backend_agent_rollouts",
+    "backend_node_agent_checks",
     "backend_node_cleanup",
     "backend_node_drains",
     "backend_node_verification_targets",

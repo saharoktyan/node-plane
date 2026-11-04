@@ -81,7 +81,6 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         class Driver:
             def decommission(self, node_key, command_id, phase):
                 calls.append(phase)
-                return 'OK'
         driver = Driver()
         first = lifecycle.cleanup(self.actor(), 'node', driver,
                                   expected_phase='not_started')
@@ -196,7 +195,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         class Driver:
             def decommission(self, node_key, command_id, phase):
                 calls.append((node_key, command_id, phase))
-                return 'OK'
+                return None
         driver = Driver()
         with self.assertRaises(Exception):
             lifecycle.cleanup(self.actor(), 'node', driver)
@@ -224,7 +223,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
                 calls.append((command_id, phase))
                 if phase == self.fail_phase:
                     raise TimeoutError('unknown remote result')
-                return 'OK'
+                return None
         driver = Driver()
         with self.assertRaises(TimeoutError):
             lifecycle.cleanup(self.actor(), 'node', driver)
@@ -254,7 +253,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         while worker.run_one():
             pass
         lifecycle.cleanup(self.actor(), 'node', type('Driver', (), {
-            'decommission': lambda self, *args: 'OK'})())
+            'decommission': lambda self, *args: None})())
         edited = self.client.patch(f'/api/v1/profiles/{profile}', headers=self.headers_for(3),
                                    json={'display_name': 'Changed'})
         self.assertEqual(edited.status_code, 200, edited.text)
@@ -330,8 +329,8 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         class Verifier:
             calls = 0
             fail = False
-            local = False
-            ssh_target = 'root@node.example'
+            method = 'local'
+            target = 'local'
             fingerprint = 'a' * 64
             def capture_identity(self, node_key):
                 return self.fingerprint
@@ -342,27 +341,27 @@ class BackendNodeLifecycleTests(unittest.TestCase):
                 self.calls += 1
                 if self.fail:
                     raise TimeoutError('host unreachable')
-                return {'method': 'ssh', 'target': 'root@node.example',
+                return {'method': 'local', 'target': 'local',
                     'inventory_digest': inventory_digest(resources),
                     'host_fingerprint': expected_fingerprint,
                     'checked_at': '2026-09-28T00:00:00+00:00',
                     'result': 'agent_and_standard_artifacts_absent'}
         verifier = Verifier()
-        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', verifier)['target'], 'root@node.example')
+        self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', verifier)['target'], 'local')
         self.assertEqual(lifecycle.bind_verification_target(self.actor(), 'node', verifier)['host_fingerprint'], 'a' * 64)
         verifier.fingerprint = 'b' * 64
         with self.assertRaises(Exception):
             lifecycle.bind_verification_target(self.actor(), 'node', verifier)
         verifier.fingerprint = 'a' * 64
-        verifier.ssh_target = 'root@wrong.example'
+        verifier.target = 'agent'
         with self.assertRaises(Exception):
             lifecycle.bind_verification_target(self.actor(), 'node', verifier)
-        verifier.ssh_target = 'root@node.example'
+        verifier.target = 'local'
         lifecycle.start_drain(self.actor(), 'node')
         with self.assertRaises(Exception):
             lifecycle.retire_verified(self.actor(), 'node', verifier)
         self.assertEqual(verifier.calls, 0)
-        driver = type('Driver', (), {'decommission': lambda self, *args: 'OK'})()
+        driver = type('Driver', (), {'decommission': lambda self, *args: None})()
         for _ in range(3):
             lifecycle.cleanup(self.actor(), 'node', driver)
         verifier.fail = True
@@ -376,7 +375,7 @@ class BackendNodeLifecycleTests(unittest.TestCase):
         self.assertEqual(verifier.calls, 2)
         row = self.db.connection.execute('SELECT mode, evidence_json FROM backend_node_retirements WHERE node_key = ?', ('node',)).fetchone()
         self.assertEqual(row['mode'], 'verified')
-        self.assertIn('root@node.example', row['evidence_json'])
+        self.assertIn('agent_and_standard_artifacts_absent', row['evidence_json'])
         self.assertIsNone(self.db.connection.execute('SELECT key FROM backend_nodes WHERE key = ?', ('node',)).fetchone())
 
 

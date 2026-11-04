@@ -39,6 +39,8 @@ message DecommissionNodeRequest {
 message DecommissionNodeResponse {
   string phase = 1;
   string summary = 2;
+  // uninstall: the agent's own check of the host before it removed itself.
+  string result_json = 3;
 }
 
 message ApplyBackendNodeSettingsRequest {

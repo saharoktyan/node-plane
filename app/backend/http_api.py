@@ -732,9 +732,9 @@ class NodeMaintenanceOutput(BaseModel):
 
 class VerificationTargetInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    transport: Literal['local', 'ssh']
-    ssh_target: str | None = None
-    ssh_port: Annotated[StrictInt, Field(ge=1, le=65535)] = 22
+    # local: the controller checks its own host; agent: a remote agent
+    # checks its host before it removes itself.
+    transport: Literal['local', 'agent']
 
 
 class VerificationTargetOutput(BaseModel):
@@ -1980,27 +1980,27 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def get_node_maintenance(node_key: str, current=Depends(actor)):
         return lifecycle.overview(current, node_key)
 
+    def removal_verifier(target, channel):
+        from .driver_transport import GrpcIntentDriver
+        from .node_removal import NodeRemovalService
+        return NodeRemovalService(db, GrpcIntentDriver(channel)).verifier(target)
+
     @app.post('/api/v1/nodes/{node_key}/bind-verification-target',
               response_model=VerificationTargetOutput)
     def bind_node_verification_target(node_key: str, body: VerificationTargetInput,
                                       current=Depends(actor)):
-        from .removal_verifier import RemovalVerifier, RemovalVerificationError
-        if body.transport == 'local':
-            if body.ssh_target is not None or body.ssh_port != 22:
-                raise AccessDenied('invalid_input', 422)
-        elif not body.ssh_target or body.ssh_port != 22:
-            raise AccessDenied('invalid_input', 422)
-        try:
-            verifier = RemovalVerifier(local=body.transport == 'local',
-                ssh_target=body.ssh_target,
-                ssh_identity_file=(os.environ.get('SSH_KEY') or SSH_KEY) if body.transport == 'ssh' else None,
-                ssh_port=body.ssh_port)
-        except ValueError:
-            raise AccessDenied('invalid_input', 422) from None
+        import grpc
+        from .driver_transport import local_channel
+        from .removal_verifier import RemovalVerificationError
         with maintenance_lock(current):
             try:
-                return lifecycle.bind_verification_target(current, node_key, verifier)
-            except RemovalVerificationError:
+                with local_channel(os.environ.get('NODE_DRIVER_GRPC_TARGET',
+                                                  '127.0.0.1:50051')) as channel:
+                    return lifecycle.bind_verification_target(
+                        current, node_key, removal_verifier(body.transport, channel))
+            except AccessDenied:
+                raise
+            except (RemovalVerificationError, grpc.RpcError):
                 raise AccessDenied('host_verification_failed', 409) from None
 
     @app.post('/api/v1/nodes/{node_key}/drain', response_model=DrainOutput)
@@ -2032,34 +2032,23 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.post('/api/v1/nodes/{node_key}/verify-and-retire',
               response_model=VerifiedRetirementOutput)
     def verify_and_retire_node(node_key: str, current=Depends(actor)):
-        from .removal_verifier import RemovalVerifier, RemovalVerificationError
+        import grpc
+        from .driver_transport import local_channel
+        from .removal_verifier import RemovalVerificationError
         with maintenance_lock(current):
             with db.connect() as conn:
                 bound = conn.execute('''SELECT target FROM backend_node_verification_targets
                     WHERE node_key = ?''', (node_key,)).fetchone()
             if bound is None:
                 raise AccessDenied('verification_target_required', 409)
-            bot_key_file = os.environ.get('NODE_PLANE_BOT_PUBLIC_KEY_FILE')
-            if not bot_key_file and os.environ.get('SSH_KEY'):
-                bot_key_file = os.environ['SSH_KEY'] + '.pub'
-            if not bot_key_file:
-                raise AccessDenied('verification_key_unavailable', 503)
             try:
-                bot_key = Path(bot_key_file).read_text(encoding='utf-8').strip()
-                if bound['target'] == 'local':
-                    verifier = RemovalVerifier(local=True, bot_public_key=bot_key)
-                else:
-                    independent_key = os.environ.get('NODE_PLANE_REMOVAL_SSH_KEY')
-                    if not independent_key or not Path(independent_key).is_file():
-                        raise AccessDenied('independent_verification_key_required', 503)
-                    bot_private_key = os.environ.get('SSH_KEY')
-                    if bot_private_key and Path(bot_private_key).is_file() and os.path.samefile(
-                            independent_key, bot_private_key):
-                        raise AccessDenied('independent_verification_key_required', 503)
-                    verifier = RemovalVerifier(ssh_target=bound['target'],
-                        ssh_identity_file=independent_key, bot_public_key=bot_key)
-                return lifecycle.retire_verified(current, node_key, verifier)
-            except (OSError, ValueError, RemovalVerificationError):
+                with local_channel(os.environ.get('NODE_DRIVER_GRPC_TARGET',
+                                                  '127.0.0.1:50051')) as channel:
+                    return lifecycle.retire_verified(current, node_key,
+                                                     removal_verifier(bound['target'], channel))
+            except AccessDenied:
+                raise
+            except (OSError, ValueError, RemovalVerificationError, grpc.RpcError):
                 raise AccessDenied('host_verification_failed', 409) from None
 
     @app.post('/api/v1/nodes/{node_key}/retire-registry-only',

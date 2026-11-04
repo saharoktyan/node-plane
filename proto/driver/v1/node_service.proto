@@ -76,4 +76,5 @@ message BackendNodeObservation {
   string agent_commit = 8;
   // The version the agent's last self-update rolled back from, if any.
   string agent_update_rolled_back = 9;
+  string host_id = 10;
 }

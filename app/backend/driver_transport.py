@@ -124,6 +124,7 @@ class GrpcIntentDriver:
                 'runtime_version': response.runtime_version, 'runtime_commit': response.runtime_commit,
                 'agent_version': response.agent_version, 'agent_commit': response.agent_commit,
                 'agent_update_rolled_back': response.agent_update_rolled_back,
+                'host_id': response.host_id,
                 'xray_config_present': response.xray_config_present,
                 'awg_config_present': response.awg_config_present}
 
@@ -322,7 +323,9 @@ class GrpcIntentDriver:
             node_key=node_key, command_id=command_id, phase=phase), timeout=max(self.timeout, 240))
         if response.phase != phase:
             raise ValueError('driver returned the wrong decommission phase')
-        return response.summary
+        # uninstall: the agent's check of its host before it removed itself.
+        import json
+        return json.loads(response.result_json) if response.result_json else None
 
     def lookup(self, task_id, intent):
         from driver.v1 import operation_service_pb2

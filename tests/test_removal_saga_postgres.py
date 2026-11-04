@@ -45,7 +45,7 @@ class RemovalSagaPostgresTests(unittest.TestCase):
         return profile
 
     def verifier(self, target, final=False):
-        return SimpleNamespace(local=True, ssh_target=None,
+        return SimpleNamespace(method='local', target='local',
             capture_identity=lambda key: 'a' * 64,
             capture_resources=lambda key, expected: RESOURCES,
             verify=lambda key, expected, resources: {'result': 'agent_and_standard_artifacts_absent',

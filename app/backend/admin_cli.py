@@ -96,25 +96,19 @@ def main():
     registry_only.add_argument('--lock-file', type=Path, required=True)
     registry_only.add_argument('--reason', required=True)
     registry_only.add_argument('--accept-unverified-runtime', action='store_true', required=True)
-    verified = commands.add_parser('verify-and-remove-node', help='Inspect host independently, then remove backend node record')
+    verified = commands.add_parser('verify-and-remove-node', help='Check the host (this one, or by its agent), then remove backend node record')
     verified.add_argument('--node-key', required=True)
     verified.add_argument('--admin-account-id', required=True)
     verified.add_argument('--lock-file', type=Path, required=True)
-    verified.add_argument('--bot-public-key-file', type=Path, required=True)
-    verification_target = verified.add_mutually_exclusive_group(required=True)
-    verification_target.add_argument('--local', action='store_true')
-    verification_target.add_argument('--ssh-target')
-    verified.add_argument('--ssh-identity-file', type=Path)
-    verified.add_argument('--ssh-port', type=int, default=22)
-    bind = commands.add_parser('bind-node-verification-target', help='Bind local or SSH host before draining a node')
+    verified.add_argument('--driver', default='127.0.0.1:50051')
+    bind = commands.add_parser('bind-node-verification-target', help='Bind the local host or the remote agent before draining a node')
     bind.add_argument('--node-key', required=True)
     bind.add_argument('--admin-account-id', required=True)
     bind.add_argument('--lock-file', type=Path, required=True)
+    bind.add_argument('--driver', default='127.0.0.1:50051')
     bind_target = bind.add_mutually_exclusive_group(required=True)
     bind_target.add_argument('--local', action='store_true')
-    bind_target.add_argument('--ssh-target')
-    bind.add_argument('--ssh-identity-file', type=Path)
-    bind.add_argument('--ssh-port', type=int, default=22)
+    bind_target.add_argument('--agent', action='store_true', help='a remote node, checked by its agent')
     args = parser.parse_args()
     from db import get_db
     from db.migrations import MigrationError
@@ -228,7 +222,7 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 with local_channel(args.driver) as channel:
                     outcome = NodeLifecycle(db).cleanup(actor, args.node_key, GrpcIntentDriver(channel))
-            print(f"Node {args.node_key}: cleanup phase {outcome['phase']}. The registry is retained pending independent verification of agent removal.")
+            print(f"Node {args.node_key}: cleanup phase {outcome['phase']}. The registry is retained until the host check passes.")
         elif args.command == 'remove-node-registry-only':
             from uuid import UUID
             account = identities.get_account(str(UUID(args.admin_account_id)))
@@ -248,15 +242,24 @@ def main():
                 parser.error('an approved backend administrator account is required')
             actor = Actor(Principal('local-verified-removal', PrincipalKind.ACCOUNT,
                                     frozenset({'maintenance.manage'}), account.id), account)
-            from .removal_verifier import RemovalVerifier
-            verifier = RemovalVerifier(local=args.local, ssh_target=args.ssh_target,
-                ssh_identity_file=args.ssh_identity_file, ssh_port=args.ssh_port,
-                bot_public_key=args.bot_public_key_file.read_text().strip())
+            from .driver_transport import GrpcIntentDriver, local_channel
+            from .node_removal import NodeRemovalService
+            with db.connect() as conn:
+                bound = conn.execute('SELECT target FROM backend_node_verification_targets WHERE node_key = ?',
+                                     (args.node_key,)).fetchone()
+            if bound is None:
+                parser.error('the node has no bound verification target')
             fd = os.open(args.lock_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, 'a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                outcome = NodeLifecycle(db).retire_verified(actor, args.node_key, verifier)
-            print(f"Node {outcome['node_key']} verified absent and removed from backend registry.")
+                with local_channel(args.driver) as channel:
+                    verifier = NodeRemovalService(db, GrpcIntentDriver(channel)).verifier(bound['target'])
+                    outcome = NodeLifecycle(db).retire_verified(actor, args.node_key, verifier)
+            if bound['target'] == 'local':
+                print(f"Node {outcome['node_key']} verified absent and removed from backend registry.")
+            else:
+                print(f"Node {outcome['node_key']} removed from backend registry: its agent checked the host "
+                      "and stopped answering. The agent's own removal was not verified.")
         elif args.command == 'bind-node-verification-target':
             from uuid import UUID
             account = identities.get_account(str(UUID(args.admin_account_id)))
@@ -264,13 +267,15 @@ def main():
                 parser.error('an approved backend administrator account is required')
             actor = Actor(Principal('local-verification-binding', PrincipalKind.ACCOUNT,
                                     frozenset({'maintenance.manage'}), account.id), account)
-            from .removal_verifier import RemovalVerifier
-            verifier = RemovalVerifier(local=args.local, ssh_target=args.ssh_target,
-                ssh_identity_file=args.ssh_identity_file, ssh_port=args.ssh_port)
+            from .driver_transport import GrpcIntentDriver, local_channel
+            from .node_removal import NodeRemovalService
             fd = os.open(args.lock_file, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, 'a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                outcome = NodeLifecycle(db).bind_verification_target(actor, args.node_key, verifier)
+                with local_channel(args.driver) as channel:
+                    verifier = NodeRemovalService(db, GrpcIntentDriver(channel)).verifier(
+                        'local' if args.local else 'agent')
+                    outcome = NodeLifecycle(db).bind_verification_target(actor, args.node_key, verifier)
             print(f"Node {outcome['node_key']} verification target bound: {outcome['target']} (active agent identity checked).")
     except (OSError, ValueError, AccessDenied, MigrationError) as error:
         parser.error(str(error))

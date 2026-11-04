@@ -94,9 +94,6 @@ class NodeMaintenanceCallback(CallbackData, prefix="node_maintenance"):
 class BindLocalCallback(CallbackData, prefix="bind_local"):
     node_key: str
 
-class BindSshCallback(CallbackData, prefix="bind_ssh"):
-    node_key: str
-
 class ConfirmNodeDrainCallback(CallbackData, prefix="confirm_node_drain"):
     node_key: str
 

@@ -668,6 +668,7 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             raise BackendError(result['error_code'], 409)
         if result['status'] in {'removed', 'removed_registry_only', 'removed_unprovisioned'}:
             note = ('node_tools.unprovisioned_removed' if result['status'] == 'removed_unprovisioned'
+                    else 'node_tools.removed_note_agent' if result.get('checked_by') == 'agent'
                     else 'node_tools.removed_note' if result['status'] == 'removed'
                     else 'nodes.maintenance.registry_removed_note')
             await render(bot, chat_id, Screen(tr(locale, 'node_tools.removed'),
@@ -695,8 +696,8 @@ async def advance_removal(chat_id, user_id, message_id, node_key, bot, backend, 
             lines = [tr(locale, 'node_tools.cleanup_failed')]
         elif exc.code == 'node_cleanup_scope_unconfirmed':
             lines = [tr(locale, 'node_tools.cleanup_scope_unconfirmed')]
-        elif exc.code in {'independent_verification_key_required', 'verification_key_unavailable'}:
-            lines = [tr(locale, 'node_tools.verification_key')]
+        elif exc.code in {'agent_still_running', 'agent_host_check_missing', 'agent_update_required'}:
+            lines = [tr(locale, 'node_tools.removal.' + exc.code)]
         else:
             lines = [error(locale, exc)]
     if allow_registry:

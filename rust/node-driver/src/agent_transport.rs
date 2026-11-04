@@ -233,15 +233,16 @@ impl AgentTransport {
         &self,
         command_id: &str,
         bot_public_key: &str,
-    ) -> Result<(), tonic::Status> {
+    ) -> Result<String, tonic::Status> {
         let mut client = self.client().await.map_err(connection_status)?;
         let mut request = tonic::Request::new(DecommissionRequest {
             command_id: command_id.to_string(),
             bot_public_key: bot_public_key.to_string(),
         });
-        request.set_timeout(Duration::from_secs(30));
-        client.uninstall_agent_for_decommission(request).await?;
-        Ok(())
+        // The agent checks the host first, Docker included.
+        request.set_timeout(Duration::from_secs(90));
+        let response = client.uninstall_agent_for_decommission(request).await?;
+        Ok(response.into_inner().payload_json)
     }
 
     pub async fn refresh_awg_config(

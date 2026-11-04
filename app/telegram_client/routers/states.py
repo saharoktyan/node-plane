@@ -19,9 +19,6 @@ class NodeDraftState(StatesGroup):
 class NodeEditState(StatesGroup):
     waiting_for_value = State()
 
-class MaintenanceState(StatesGroup):
-    waiting_for_ssh_target = State()
-
 class BackupNameState(StatesGroup):
     waiting_for_name = State()
 

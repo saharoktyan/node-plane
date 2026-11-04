@@ -1,7 +1,8 @@
-"""Read-only host verification after agent self-uninstall.
+"""Read-only check of the controller's own host after its agent removed itself.
 
-SSH uses an independently configured root credential and a pinned known_hosts
-entry. The bot's own SSH key is removed by the agent's transient unit.
+Only the local node is checked this way. Remote agents check their host
+themselves before they go (see agent_removal); the controller has no SSH
+access to look afterwards.
 """
 from __future__ import annotations
 
@@ -20,17 +21,18 @@ class RemovalVerificationError(ValueError):
     pass
 
 
+def host_fingerprint(machine_id):
+    if not isinstance(machine_id, str) or not re.fullmatch(r'[0-9a-f]{32}', machine_id):
+        raise RemovalVerificationError('invalid host identity')
+    return hashlib.sha256(machine_id.encode('ascii')).hexdigest()
+
+
 class RemovalVerifier:
     SUCCESS = 'NODE_PLANE_REMOVED_OK'
+    method = 'local'
+    target = 'local'
 
-    def __init__(self, *, local=False, ssh_target=None, ssh_identity_file=None,
-                 ssh_port=22, bot_public_key=None, runner=subprocess.run):
-        if local == bool(ssh_target):
-            raise ValueError('choose exactly one verification target')
-        if ssh_target is not None and not re.fullmatch(r'root@[A-Za-z0-9.\[\]:_-]{1,255}', ssh_target):
-            raise ValueError('SSH verification target must be root@host')
-        if type(ssh_port) is not int or not 1 <= ssh_port <= 65535:
-            raise ValueError('invalid SSH port')
+    def __init__(self, *, bot_public_key=None, runner=subprocess.run):
         if bot_public_key is not None:
             if (not isinstance(bot_public_key, str) or not 20 <= len(bot_public_key) <= 4096
                     or any(char in bot_public_key for char in '\r\n\0')):
@@ -39,16 +41,10 @@ class RemovalVerifier:
             if (len(parts) < 2 or not parts[0].startswith(('ssh-', 'ecdsa-'))
                     or not re.fullmatch(r'[A-Za-z0-9+/=]{16,}', parts[1])):
                 raise ValueError('invalid bot SSH public key')
-        self.local = local
-        self.ssh_target = ssh_target
-        self.ssh_identity_file = str(ssh_identity_file) if ssh_identity_file else None
-        self.ssh_port = ssh_port
         self.bot_public_key = bot_public_key.strip() if bot_public_key is not None else None
         self.runner = runner
 
     def script(self, resources=None):
-        if self.bot_public_key is None and not self.local:
-            raise ValueError('bot SSH public key is required for final verification')
         key = shlex.quote(self.bot_public_key or '')
         resource_checks = ''
         containers = ['xray', 'amnezia-awg']
@@ -147,15 +143,8 @@ printf 'NODE_PLANE_HOST_ID:%s\\n' "$(cat /etc/machine-id)"
 '''
 
     def _run(self, script):
-        command = ['sh', '-s'] if self.local else [
-            'ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-            '-o', 'ConnectTimeout=10', '-p', str(self.ssh_port)]
-        if not self.local:
-            if self.ssh_identity_file:
-                command += ['-o', 'IdentitiesOnly=yes', '-i', self.ssh_identity_file]
-            command += ['--', self.ssh_target, 'sh -s']
         try:
-            result = self.runner(command, input=script, text=True,
+            result = self.runner(['sh', '-s'], input=script, text=True,
                                  capture_output=True, timeout=40, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise RemovalVerificationError('node verification unavailable') from error
@@ -166,18 +155,12 @@ printf 'NODE_PLANE_HOST_ID:%s\\n' "$(cat /etc/machine-id)"
             raise RemovalVerificationError(detail)
         return result.stdout.strip()
 
-    @staticmethod
-    def _fingerprint(machine_id):
-        if not re.fullmatch(r'[0-9a-f]{32}', machine_id):
-            raise RemovalVerificationError('invalid host identity')
-        return hashlib.sha256(machine_id.encode('ascii')).hexdigest()
-
     def capture_identity(self, node_key):
         output = self._run(self.identity_script(node_key))
         prefix = 'NODE_PLANE_HOST_ID:'
         if not output.startswith(prefix):
             raise RemovalVerificationError('agent identity unavailable')
-        return self._fingerprint(output[len(prefix):])
+        return host_fingerprint(output[len(prefix):])
 
     def capture_resources(self, node_key, expected_fingerprint):
         # Read directly through the independently authenticated host connection,
@@ -194,7 +177,7 @@ NODE_PLANE_INVENTORY_PY
 '''
         output = self._run(script).splitlines()
         if (len(output) != 2 or not output[0].startswith('NODE_PLANE_HOST_ID:')
-                or self._fingerprint(output[0].partition(':')[2]) != expected_fingerprint
+                or host_fingerprint(output[0].partition(':')[2]) != expected_fingerprint
                 or not output[1].startswith('NODE_PLANE_RESOURCES:')):
             raise RemovalVerificationError('resource inventory unavailable')
         try:
@@ -203,20 +186,16 @@ NODE_PLANE_INVENTORY_PY
             raise RemovalVerificationError('invalid resource inventory') from error
 
     def verify(self, node_key, expected_fingerprint, resources=None):
-        return self._verify_script(node_key, expected_fingerprint, resources, self.script(resources))
-
-    def _verify_script(self, node_key, expected_fingerprint, resources, script):
         if not re.fullmatch(r'[0-9a-f]{64}', expected_fingerprint):
             raise ValueError('invalid expected host fingerprint')
-        output = self._run(script)
+        output = self._run(self.script(resources))
         prefix = self.SUCCESS + ':'
         if not output.startswith(prefix):
             raise RemovalVerificationError('node verification failed')
-        fingerprint = self._fingerprint(output[len(prefix):])
+        fingerprint = host_fingerprint(output[len(prefix):])
         if fingerprint != expected_fingerprint:
             raise RemovalVerificationError('host identity changed')
-        return {'method': 'local' if self.local else 'ssh',
-                'target': 'local' if self.local else self.ssh_target,
+        return {'method': 'local', 'target': 'local',
                 'host_fingerprint': fingerprint,
                 'checked_at': datetime.now(timezone.utc).isoformat(),
                 'inventory_digest': inventory_digest(resources) if resources is not None else None,

@@ -207,7 +207,8 @@ message DeleteRuntimeRequest {
 
 message DecommissionRequest {
   string command_id = 1;
-  string bot_public_key = 2; // uninstall phase only
+  // uninstall phase only; empty leaves authorized_keys untouched.
+  string bot_public_key = 2;
 }
 
 message DeleteRuntimeResponse {

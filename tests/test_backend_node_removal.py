@@ -2,7 +2,6 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-import tempfile
 
 from tests import test_backend_node_jobs
 from tests.test_backend_executor import FakeDriver
@@ -108,48 +107,94 @@ class BackendNodeRemovalTests(unittest.TestCase):
         self.assertEqual(result['error_code'], 'node_revocations_blocked')
         self.assertFalse(result['revocations_complete'])
 
-    def test_remote_cleanup_automatically_selects_managed_verification_key(self):
-        from backend.removal_credentials import ManagedRemovalVerifier
-        with tempfile.TemporaryDirectory() as directory:
-            private = Path(directory) / 'bot-key'
-            private.write_text('fixture')
-            Path(str(private) + '.pub').write_text('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAExample bot-key')
-            with patch.dict('os.environ', {'SSH_KEY': str(private)}, clear=True):
-                verifier = NodeRemovalService(self.db).verifier('root@node.example')
-                self.assertIsInstance(verifier, ManagedRemovalVerifier)
-                self.assertNotEqual(verifier.ssh_identity_file, str(private))
-                self.assertEqual(verifier.original_key, str(private))
-            with patch.dict('os.environ', {'SSH_KEY': str(private), 'NODE_PLANE_REMOVAL_SSH_KEY': str(private)}, clear=True):
-                with self.assertRaisesRegex(AccessDenied, 'independent_verification_key_required'):
-                    NodeRemovalService(self.db).verifier('root@node.example')
+    def agent_driver(self, phases, host='0123456789abcdef0123456789abcdef', reported=None,
+                     stops=True):
+        """An agent that reports `reported` (its host) when it removes itself."""
+        import grpc
+        # A token-installed server: the controller has no connection to it.
+        self.db.connection.execute("DELETE FROM backend_node_connections WHERE node_key='n1'")
+        self.db.connection.commit()
+        state = {'gone': False}
+        class Gone(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.UNAVAILABLE
+        def inspect(key):
+            if state['gone']:
+                raise Gone()
+            return {'host_id': host, 'xray_config_present': False, 'awg_config_present': False}
+        def decommission(key, command, phase):
+            phases.append(phase)
+            if phase == 'uninstall':
+                state['gone'] = stops
+                return {'host_id': reported or host, 'containers': 'absent',
+                        'absent_paths': ['/opt/node-plane-runtime', '/etc/node-plane/node.env']}
+            return None
+        return SimpleNamespace(decommission=decommission, inspect_node=inspect)
 
-    def test_managed_verifier_is_prepared_before_drain_and_discarded_after_retirement(self):
+    def test_remote_node_is_checked_by_its_agent_without_ssh(self):
+        from backend.agent_removal import AgentRemovalVerifier
         phases = []
-        verifier = self.verifier('local')
-        verifier.prepare = lambda key: phases.append('prepare_key')
-        verifier.discard = lambda: phases.append('discard_key')
-        driver = SimpleNamespace(decommission=lambda key, command, phase: phases.append(phase))
-        worker = NodeRemovalService(self.db, driver, lambda target, final: verifier)
+        worker = NodeRemovalService(self.db, self.agent_driver(phases))
+        self.assertIsInstance(worker.verifier('agent'), AgentRemovalVerifier)
         worker.request(self.actor, 'n1')
         for _ in range(5):
             worker.run_one()
-        self.assertEqual(phases[0], 'prepare_key')
-        self.assertEqual(phases.count('prepare_key'), 1)
-        self.assertEqual(phases[-1], 'discard_key')
-        self.assertEqual(worker.get(self.actor, 'n1')['status'], 'removed')
+        self.assertEqual(phases, ['prepare', 'delete_runtime', 'uninstall'])
+        self.assertEqual(worker.get(self.actor, 'n1'),
+                         {'node_key': 'n1', 'status': 'removed', 'checked_by': 'agent'})
+        retirement = self.db.connection.execute(
+            "SELECT reason, evidence_json FROM backend_node_retirements WHERE node_key='n1'").fetchone()
+        self.assertIn('agent removal not verified', retirement['reason'])
+        import json
+        evidence = json.loads(retirement['evidence_json'])
+        self.assertIs(evidence['agent_removal_verified'], False)
+        self.assertEqual(evidence['agent_check']['containers'], 'absent')
+        self.assertIsNone(self.db.connection.execute(
+            "SELECT 1 FROM backend_node_agent_checks WHERE node_key='n1'").fetchone())
+
+    def test_agent_reporting_another_host_does_not_retire_the_node(self):
+        phases = []
+        worker = NodeRemovalService(self.db, self.agent_driver(
+            phases, reported='fedcba9876543210fedcba9876543210'))
+        worker.request(self.actor, 'n1')
+        for _ in range(5):
+            worker.run_one()
+        self.assertEqual(worker.get(self.actor, 'n1')['error_code'], 'host_verification_failed')
+        self.assertIsNotNone(self.db.connection.execute("SELECT 1 FROM backend_nodes WHERE key='n1'").fetchone())
+
+    def test_agent_that_keeps_answering_is_waited_for_then_reported(self):
+        phases = []
+        worker = NodeRemovalService(self.db, self.agent_driver(phases, stops=False))
+        worker.request(self.actor, 'n1')
+        for _ in range(5):
+            worker.run_one()
+        self.assertEqual(phases, ['prepare', 'delete_runtime', 'uninstall'])
+        self.assertEqual(worker.get(self.actor, 'n1')['removal_status'], 'running')
+        self.db.connection.execute("UPDATE backend_node_agent_checks SET scheduled_at='2020-01-01T00:00:00+00:00'")
+        self.db.connection.commit()
+        worker.run_one()
+        self.assertEqual(worker.get(self.actor, 'n1')['error_code'], 'agent_still_running')
+
+    def test_agent_without_host_identity_is_not_drained(self):
+        phases = []
+        driver = self.agent_driver(phases, host='')
+        worker = NodeRemovalService(self.db, driver)
+        worker.request(self.actor, 'n1')
+        self.assertFalse(worker.run_one())
+        self.assertEqual(worker.get(self.actor, 'n1')['error_code'], 'agent_update_required')
+        self.assertIsNone(self.db.connection.execute("SELECT 1 FROM backend_node_drains WHERE node_key='n1'").fetchone())
+        self.assertEqual(phases, [])
 
     def test_local_cleanup_without_ssh_credentials(self):
         with patch.dict('os.environ', {'NODE_PLANE_BOT_PUBLIC_KEY_FILE': '/nonexistent/bot-key.pub'}, clear=True):
             worker = NodeRemovalService(self.db)
             verifier = worker.verifier('local')
-            self.assertTrue(verifier.local)
+            self.assertEqual(verifier.target, 'local')
             self.assertIsNone(verifier.bot_public_key)
             self.assertIn('agent_binary', verifier.script())
-            with self.assertRaisesRegex(AccessDenied, 'verification_key_unavailable'):
-                worker.verifier('root@node.example')
 
     def verifier(self, target, final=False):
-        return SimpleNamespace(local=True, ssh_target=None,
+        return SimpleNamespace(method='local', target='local',
             capture_identity=lambda key: 'a' * 64,
             capture_resources=lambda key, expected: RESOURCES,
             verify=lambda key, expected, resources: {'result': 'agent_and_standard_artifacts_absent',

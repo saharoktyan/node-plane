@@ -451,11 +451,11 @@ class BackendClient:
                                   telegram_user_id=telegram_user_id)
 
     async def bind_verification_target(self, telegram_user_id: int, node_key: str,
-                                       transport: str, ssh_target: str | None = None) -> dict:
+                                       transport: str) -> dict:
         return await self.request('POST',
             f'/api/v1/nodes/{node_key}/bind-verification-target',
             telegram_user_id=telegram_user_id,
-            body={'transport': transport, 'ssh_target': ssh_target},
+            body={'transport': transport},
             timeout_seconds=60)
 
     async def drain_node(self, telegram_user_id: int, node_key: str) -> dict:

@@ -1,7 +1,9 @@
 """Trusted first phase of backend-owned node retirement.
 
 The node stays in the registry while its profiles are revoked. Runtime and
-agent cleanup require a separate, verifiable contract before final deletion.
+agent cleanup require a separate, verifiable contract before final deletion:
+the controller checks its own host itself, and a remote agent checks its
+host before it removes itself (see agent_removal).
 """
 from __future__ import annotations
 
@@ -59,15 +61,18 @@ class NodeLifecycle:
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key),
                 resources_json TEXT NOT NULL
             )''')
+            from db.migration_revisions import r0027_node_agent_checks
+            r0027_node_agent_checks.upgrade(conn)
 
     def bind_verification_target(self, actor, node_key, verifier):
         """Bind an active agent and its host fingerprint before draining."""
         require_permission(actor, 'maintenance.manage')
-        target = 'local' if verifier.local else verifier.ssh_target
+        target = verifier.target
         fingerprint = verifier.capture_identity(node_key)
         resources = verifier.capture_resources(node_key, fingerprint)
         from .removal_inventory import validate_inventory
-        encoded = json.dumps(validate_inventory(resources), sort_keys=True)
+        # A remote agent checks its own paths when it removes itself.
+        encoded = json.dumps(validate_inventory(resources), sort_keys=True) if resources is not None else None
         with self.db.transaction() as conn:
             node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
                 WHERE key = ? RETURNING enabled''', (node_key,)).fetchone()
@@ -89,7 +94,7 @@ class NodeLifecycle:
             inventory = conn.execute('SELECT resources_json FROM backend_node_removal_inventories WHERE node_key=?', (node_key,)).fetchone()
             if inventory is not None and inventory['resources_json'] != encoded:
                 raise AccessDenied('verification_inventory_conflict', 409)
-            if inventory is None:
+            if inventory is None and encoded is not None:
                 conn.execute('INSERT INTO backend_node_removal_inventories VALUES (?,?)', (node_key, encoded))
             return {'node_key': node_key, 'target': target, 'host_fingerprint': fingerprint}
 
@@ -276,7 +281,7 @@ class NodeLifecycle:
                 if changed is None:
                     raise AccessDenied('cleanup_phase_conflict', 409)
             try:
-                driver.decommission(node_key, command_id, 'uninstall')
+                check = driver.decommission(node_key, command_id, 'uninstall')
             except grpc.RpcError as exc:
                 # These responses explicitly reject the request before the
                 # agent schedules removal. Timeouts/transport loss stay uncertain.
@@ -288,6 +293,16 @@ class NodeLifecycle:
                             (node_key, command_id))
                 raise
             next_phase = 'uninstall_scheduled'
+            if check is not None:
+                # Kept even if the phase update below loses a race: it is what
+                # the agent found before it removed itself.
+                from .agent_removal import validate_check
+                with self.db.transaction() as conn:
+                    conn.execute('''INSERT INTO backend_node_agent_checks VALUES (?,?,?)
+                        ON CONFLICT(node_key) DO UPDATE SET check_json=excluded.check_json,
+                            scheduled_at=excluded.scheduled_at''',
+                        (node_key, json.dumps(validate_check(check), sort_keys=True),
+                         datetime.now(timezone.utc).isoformat()))
         with self.db.transaction() as conn:
             changed = conn.execute('''UPDATE backend_node_cleanup SET phase = ?
                 WHERE node_key = ? AND command_id = ? AND phase = ? RETURNING node_key''',
@@ -359,6 +374,7 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_removal_inventories WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_agent_checks WHERE node_key = ?', (node_key,))
             conn.execute("UPDATE backend_node_removals SET status = 'abandoned' WHERE node_key = ?", (node_key,))
             from .alerts import AlertService
             AlertService.retire_node(conn, node_key)
@@ -367,10 +383,12 @@ class NodeLifecycle:
                     'unfinished_tasks': len(changed)}
 
     def retire_verified(self, actor, node_key, verifier):
-        """Remove the registry record only after independent host inspection.
+        """Remove the registry record only after its host was checked.
 
-        The caller holds the worker lock. Verification runs outside the DB
-        transaction, then all safety predicates are rechecked before deletion.
+        The local host is inspected by the controller; a remote one by its
+        agent, before the agent removed itself. The caller holds the worker
+        lock. Verification runs outside the DB transaction, then all safety
+        predicates are rechecked before deletion.
         """
         require_permission(actor, 'maintenance.manage')
         with self.db.connect() as conn:
@@ -384,19 +402,32 @@ class NodeLifecycle:
                 raise AccessDenied('agent_uninstall_not_requested', 409)
             bound = conn.execute('SELECT target FROM backend_node_verification_targets WHERE node_key = ?', (node_key,)).fetchone()
             identity = conn.execute('SELECT fingerprint FROM backend_node_host_identities WHERE node_key = ?', (node_key,)).fetchone()
-            requested_target = 'local' if verifier.local else verifier.ssh_target
-            if bound is None or bound['target'] != requested_target or identity is None:
+            if bound is None or bound['target'] != verifier.target or identity is None:
                 raise AccessDenied('verification_target_mismatch', 409)
-            inventory = conn.execute('SELECT resources_json FROM backend_node_removal_inventories WHERE node_key=?', (node_key,)).fetchone()
-            if inventory is None:
-                raise AccessDenied('verification_inventory_required', 409)
-            resources = json.loads(inventory['resources_json'])
-        evidence = verifier.verify(node_key, identity['fingerprint'], resources)
+            if verifier.method == 'agent':
+                check = conn.execute('SELECT check_json FROM backend_node_agent_checks WHERE node_key=?', (node_key,)).fetchone()
+                if check is None:
+                    # The uninstall request may never have reached the agent.
+                    raise AccessDenied('agent_host_check_missing', 409)
+                recorded = json.loads(check['check_json'])
+            else:
+                inventory = conn.execute('SELECT resources_json FROM backend_node_removal_inventories WHERE node_key=?', (node_key,)).fetchone()
+                if inventory is None:
+                    raise AccessDenied('verification_inventory_required', 409)
+                recorded = json.loads(inventory['resources_json'])
+        evidence = verifier.verify(node_key, identity['fingerprint'], recorded)
         from .removal_inventory import inventory_digest
-        if (not isinstance(evidence, dict) or evidence.get('result') != 'agent_and_standard_artifacts_absent'
-                or evidence.get('inventory_digest') != inventory_digest(resources)
-                or evidence.get('method') not in {'local', 'ssh'}
-                or not isinstance(evidence.get('target'), str)
+        if verifier.method == 'agent':
+            valid = (isinstance(evidence, dict) and evidence.get('result') == 'runtime_absent_agent_stopped'
+                     and evidence.get('agent_check') == recorded
+                     and evidence.get('agent_removal_verified') is False)
+            reason = 'host checked by its agent; agent removal not verified'
+        else:
+            valid = (isinstance(evidence, dict) and evidence.get('result') == 'agent_and_standard_artifacts_absent'
+                     and evidence.get('inventory_digest') == inventory_digest(recorded))
+            reason = 'independent host verification passed'
+        if (not valid or evidence.get('method') != verifier.method
+                or evidence.get('target') != verifier.target
                 or evidence.get('host_fingerprint') != identity['fingerprint']
                 or not isinstance(evidence.get('checked_at'), str)):
             raise ValueError('invalid host verification evidence')
@@ -419,7 +450,7 @@ class NodeLifecycle:
                 node_key, actor_id, mode, reason, previous_cleanup_phase,
                 unfinished_tasks, evidence_json, retired_at)
                 VALUES (?, ?, 'verified', ?, ?, 0, ?, ?)''',
-                (node_key, actor.account.id, 'independent host verification passed',
+                (node_key, actor.account.id, reason,
                  cleanup['phase'], json.dumps(evidence, sort_keys=True),
                  datetime.now(timezone.utc).isoformat()))
             conn.execute('DELETE FROM backend_node_cleanup WHERE node_key = ?', (node_key,))
@@ -427,6 +458,7 @@ class NodeLifecycle:
             conn.execute('DELETE FROM backend_node_verification_targets WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_host_identities WHERE node_key = ?', (node_key,))
             conn.execute('DELETE FROM backend_node_removal_inventories WHERE node_key = ?', (node_key,))
+            conn.execute('DELETE FROM backend_node_agent_checks WHERE node_key = ?', (node_key,))
             from .alerts import AlertService
             AlertService.retire_node(conn, node_key)
             conn.execute('DELETE FROM backend_nodes WHERE key = ?', (node_key,))

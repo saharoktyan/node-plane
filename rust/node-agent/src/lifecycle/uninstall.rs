@@ -3,7 +3,6 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
 use std::process::Command;
 
 use tonic::Status;
@@ -38,18 +37,13 @@ impl AgentState {
     ) -> Result<RuntimeCommandResponse, Status> {
         let _guard = self.guard_prepared_decommission(command_id)?;
         // The backend must call this only after a verified runtime delete.
-        // The agent independently checks that its owned runtime paths are gone.
-        if Path::new(&self.config.runtime_root).exists()
-            || Path::new(&self.config.node_env_path).exists()
-        {
-            return Err(Status::failed_precondition(
-                "runtime cleanup is not complete",
-            ));
-        }
-        // Local installations need no SSH key. Remote removal is verified by
-        // the controller with an independent SSH identity and the original key.
+        // The agent checks the host itself and reports what it found.
+        let check = self.decommission_host_check()?;
+        // The controller's SSH key, when it has one, leaves with the agent.
         let key = (!bot_public_key.trim().is_empty()).then_some(bot_public_key);
-        self.schedule_uninstall(key)
+        let mut response = self.schedule_uninstall(key)?;
+        response.payload_json = check;
+        Ok(response)
     }
 
     pub(crate) fn schedule_uninstall(

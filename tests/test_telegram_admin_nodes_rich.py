@@ -985,10 +985,6 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             await nodes.bind_local_cb(self.query, nodes.BindLocalCallback(node_key='msk1'), self.bot, self.backend, self.state)
             show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
 
-        with patch.object(nodes, 'show_admin_node', new_callable=AsyncMock) as show:
-            await nodes.bind_ssh_cb(self.query, nodes.BindSshCallback(node_key='msk1'), self.bot, self.backend, self.state)
-            show.assert_awaited_once_with(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
-
         self.backend.node_maintenance = AsyncMock()
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_node_maintenance(123, 123, 77, 'msk1', self.bot, self.backend, self.state)

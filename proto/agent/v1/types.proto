@@ -17,6 +17,8 @@ message RuntimeFacts {
   string binary_commit = 10;
   // The version a self-update rolled back from, if the last one failed.
   string update_rolled_back = 11;
+  // /etc/machine-id: removal checks the agent reports from the same host.
+  string host_id = 12;
 }
 
 message LocalHealth {

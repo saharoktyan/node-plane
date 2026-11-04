@@ -95,26 +95,6 @@ impl XrayPublicMetadata {
     }
 }
 
-// Only a loopback agent can be removed without an SSH public key.
-fn decommission_public_key(target: &str, key: Result<String, Status>) -> Result<String, Status> {
-    let endpoint = target
-        .strip_prefix("http://")
-        .or_else(|| target.strip_prefix("https://"))
-        .unwrap_or(target);
-    let local = endpoint
-        .parse::<std::net::SocketAddr>()
-        .map(|address| address.ip().is_loopback())
-        .unwrap_or(false)
-        || endpoint
-            .strip_prefix("localhost:")
-            .and_then(|port| port.parse::<u16>().ok())
-            .is_some();
-    match key {
-        Err(_) if local => Ok(String::new()),
-        other => other,
-    }
-}
-
 impl DriverContext {
     fn runtime_assets_dir(&self) -> PathBuf {
         let app_root = env::var_os("NODE_PLANE_APP_DIR").map(PathBuf::from);
@@ -502,6 +482,7 @@ impl NodeService for NodeApi {
             agent_version: facts.binary_version,
             agent_commit: facts.binary_commit,
             agent_update_rolled_back: facts.update_rolled_back,
+            host_id: facts.host_id,
         }))
     }
 
@@ -1100,6 +1081,7 @@ impl RuntimeService for RuntimeApi {
             .agent_target(&req.node_key)
             .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
         let transport = agent_transport::AgentTransport::new(target.clone());
+        let mut result_json = String::new();
         let summary = match req.phase.as_str() {
             "prepare" => {
                 transport.prepare_decommission(&req.command_id).await?;
@@ -1112,17 +1094,20 @@ impl RuntimeService for RuntimeApi {
                 "runtime cleanup verified by agent"
             }
             "uninstall" => {
-                let public_key = decommission_public_key(&target, self.ctx.bot_public_key())?;
-                transport
+                // Without an SSH key of its own the controller has none to
+                // remove from the server.
+                let public_key = self.ctx.bot_public_key().unwrap_or_default();
+                result_json = transport
                     .uninstall_agent_for_decommission(&req.command_id, &public_key)
                     .await?;
-                "agent uninstall scheduled; independent verification still required"
+                "host checked by agent; agent uninstall scheduled"
             }
             _ => return Err(Status::invalid_argument("invalid decommission phase")),
         };
         Ok(Response::new(DecommissionNodeResponse {
             phase: req.phase,
             summary: summary.to_string(),
+            result_json,
         }))
     }
     async fn refresh_awg_config(

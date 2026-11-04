@@ -1,14 +1,24 @@
-"""Worker-driven full removal using the independently verified lifecycle saga."""
+"""Worker-driven full removal using the verified lifecycle saga.
+
+The controller checks its own host itself. A remote node is checked by its
+agent before the agent removes itself; the worker then waits for that agent
+to stop answering. No SSH is involved.
+"""
+from datetime import datetime, timedelta, timezone
+import json
 import os
 import logging
 import grpc
 from pathlib import Path
 
+from .agent_removal import AgentRemovalVerifier, AgentStillRunning
 from .authorization import Actor, Account, Principal, PrincipalKind, ADMIN_PERMISSIONS, require_permission, AccessDenied
 from .node_lifecycle import NodeLifecycle
 from .removal_verifier import RemovalVerifier, RemovalVerificationError
 
 logger = logging.getLogger(__name__)
+# The agent removes itself two seconds after it schedules that.
+AGENT_STOP_WAIT = timedelta(minutes=10)
 
 
 class NodeRemovalService:
@@ -39,17 +49,25 @@ class NodeRemovalService:
         require_permission(actor, 'maintenance.manage')
         with self.db.connect() as conn:
             row = conn.execute('SELECT * FROM backend_node_removals WHERE node_key = ?', (node_key,)).fetchone()
-            retirement = (conn.execute('SELECT mode FROM backend_node_retirements WHERE node_key = ?', (node_key,)).fetchone()
-                          if row is None else None)
+            retirement = conn.execute('SELECT mode, evidence_json FROM backend_node_retirements WHERE node_key = ?',
+                                      (node_key,)).fetchone()
+        # Who checked the host: the controller itself, or the agent that then
+        # removed itself without anyone verifying that part.
+        checked_by = (json.loads(retirement['evidence_json']).get('method')
+                      if retirement is not None and retirement['evidence_json'] else None)
         if row is None:
             # Registry-only retirement may have no worker job. Its tombstone
             # still confirms the outcome after a lost HTTP response.
             if retirement is not None and retirement['mode'] in {'verified', 'registry_only'}:
-                return {'node_key': node_key, 'status': 'removed' if retirement['mode'] == 'verified' else 'removed_registry_only'}
+                if retirement['mode'] == 'verified':
+                    return {'node_key': node_key, 'status': 'removed', 'checked_by': checked_by}
+                return {'node_key': node_key, 'status': 'removed_registry_only'}
             raise AccessDenied('resource_not_found', 404)
-        if row['status'] in {'succeeded', 'abandoned', 'unprovisioned'}:
+        if row['status'] == 'succeeded':
+            return {'node_key': node_key, 'status': 'removed', 'checked_by': checked_by}
+        if row['status'] in {'abandoned', 'unprovisioned'}:
             return {'node_key': node_key, 'status': {
-                'succeeded': 'removed', 'abandoned': 'removed_registry_only',
+                'abandoned': 'removed_registry_only',
                 'unprovisioned': 'removed_unprovisioned'}[row['status']]}
         return {**NodeLifecycle(self.db).overview(actor, node_key),
                 'removal_status': row['status'], 'error_code': row['error_code']}
@@ -57,29 +75,13 @@ class NodeRemovalService:
     def verifier(self, target, final=False):
         if self.verifier_factory:
             return self.verifier_factory(target, final)
-        local = target == 'local'
+        if target != 'local':
+            return AgentRemovalVerifier(self.driver)
+        # The agent also takes the controller's SSH key off its host, when the
+        # controller has one; check that it did.
         bot_key_path = os.environ.get('NODE_PLANE_BOT_PUBLIC_KEY_FILE') or (os.environ.get('SSH_KEY', '') + '.pub')
         bot_key = Path(bot_key_path).read_text().strip() if Path(bot_key_path).is_file() else None
-        if not local and bot_key is None:
-            raise AccessDenied('verification_key_unavailable', 503)
-        if local:
-            return RemovalVerifier(local=True, bot_public_key=bot_key)
-        independent = os.environ.get('NODE_PLANE_REMOVAL_SSH_KEY')
-        original = os.environ.get('SSH_KEY')
-        if not independent:
-            if not original or not Path(original).is_file():
-                raise AccessDenied('verification_key_unavailable', 503)
-            from .installation_identity import controller_identity
-            from .removal_credentials import ManagedRemovalVerifier, credential_directory
-            return ManagedRemovalVerifier(original_key=original,
-                directory=credential_directory(original, controller_identity(self.db), target),
-                ssh_target=target, bot_public_key=bot_key)
-        if not Path(independent).is_file():
-            raise AccessDenied('independent_verification_key_required', 503)
-        if original and Path(original).is_file() and os.path.samefile(independent, original):
-            raise AccessDenied('independent_verification_key_required', 503)
-        return RemovalVerifier(ssh_target=target, ssh_identity_file=independent,
-                              bot_public_key=bot_key)
+        return RemovalVerifier(bot_public_key=bot_key)
 
     def run_one(self):
         with self.db.connect() as conn:
@@ -88,7 +90,7 @@ class NodeRemovalService:
             key = row['node_key']
             with self.db.connect() as conn:
                 account = conn.execute('SELECT role, status FROM backend_accounts WHERE id = ?', (row['actor_id'],)).fetchone()
-                node = conn.execute('SELECT transport, ssh_target FROM backend_node_connections WHERE node_key = ?', (key,)).fetchone()
+                node = conn.execute('SELECT transport FROM backend_node_connections WHERE node_key = ?', (key,)).fetchone()
             if account is None:
                 continue
             actor = Actor(Principal('node-removal-worker', PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
@@ -98,16 +100,11 @@ class NodeRemovalService:
             try:
                 if self.retire_unprovisioned(actor, key):
                     return True
-                if node is None:
-                    raise AccessDenied('verification_target_required', 409)
-                target = 'local' if node['transport'] == 'local' else node['ssh_target']
-                # Verify credentials before revoking access or removing anything.
+                target = 'local' if node is not None and node['transport'] == 'local' else 'agent'
                 verifier = self.verifier(target)
                 state = lifecycle.overview(actor, key)
                 phase = state['cleanup_phase'] or 'start_drain'
                 if state['status'] == 'active':
-                    if hasattr(verifier, 'prepare'):
-                        verifier.prepare(key)
                     lifecycle.bind_verification_target(actor, key, verifier)
                     lifecycle.start_drain(actor, key)
                     with self.db.transaction() as conn:
@@ -118,15 +115,14 @@ class NodeRemovalService:
                         raise AccessDenied('node_revocations_blocked', 409)
                     continue
                 if state['cleanup_phase'] in {'uninstall_uncertain', 'uninstall_scheduled'}:
-                    final_verifier = self.verifier(target, final=True)
-                    lifecycle.retire_verified(actor, key, final_verifier)
+                    try:
+                        lifecycle.retire_verified(actor, key, self.verifier(target, final=True))
+                    except AgentStillRunning:
+                        if self.agent_stopping(key):
+                            continue
+                        raise AccessDenied('agent_still_running', 409) from None
                     with self.db.transaction() as conn:
                         conn.execute("UPDATE backend_node_removals SET status = 'succeeded' WHERE node_key = ?", (key,))
-                    if hasattr(final_verifier, 'discard'):
-                        try:
-                            final_verifier.discard()
-                        except OSError:
-                            logger.exception('Could not discard verification credentials: node=%s', key)
                 else:
                     lifecycle.cleanup(actor, key, self.driver, expected_phase=state['cleanup_phase'] or 'not_started')
                 return True
@@ -145,6 +141,14 @@ class NodeRemovalService:
                 with self.db.transaction() as conn:
                     conn.execute("UPDATE backend_node_removals SET status = 'blocked', error_code = ? WHERE node_key = ?", (code, key))
         return False
+
+    def agent_stopping(self, node_key):
+        """Whether the agent may still be about to remove itself."""
+        with self.db.connect() as conn:
+            row = conn.execute('SELECT scheduled_at FROM backend_node_agent_checks WHERE node_key = ?',
+                               (node_key,)).fetchone()
+        return (row is not None and
+                datetime.now(timezone.utc) - datetime.fromisoformat(row['scheduled_at']) < AGENT_STOP_WAIT)
 
     def retire_unprovisioned(self, actor, node_key):
         """Remove only a registry entry with no possibly executed mutations.

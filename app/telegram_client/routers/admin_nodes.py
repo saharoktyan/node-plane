@@ -16,12 +16,12 @@ from ..i18n import normalize_locale, tr
 from ..node_templates import NODE_TEMPLATES
 from .common import installation_progress_lines, schedule_refresh, render
 from ..navigation import remember_node, parent_path
-from .states import NodeDraftState, NodeEditState, MaintenanceState
+from .states import NodeDraftState, NodeEditState
 from .callbacks import (
     AdminNodesCallback, NewNodeCallback, AdminNodeCallback,
     NodeSettingsCallback, EditNodeFieldCallback, NodeProtocolsCallback,
     ToggleNodeProtocolCallback, ToggleNodeTransportCallback, NodeMaintenanceCallback,
-    BindLocalCallback, BindSshCallback, ConfirmNodeDrainCallback, DrainNodeCallback,
+    BindLocalCallback, ConfirmNodeDrainCallback, DrainNodeCallback,
     CleanupStepCallback, VerifyRetirementCallback, ConfirmRegistryRemovalCallback,
     RetireRegistryCallback,
     RolloutLocalCallback, RolloutStatusCallback, RetryRolloutCallback,
@@ -1782,49 +1782,6 @@ async def show_node_maintenance_error(chat_id, message_id, node_key, bot, state)
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
         state, message_id)
-
-@router.callback_query(BindSshCallback.filter())
-async def bind_ssh_cb(query: CallbackQuery, callback_data: BindSshCallback, bot: Bot, backend: BackendClient, state: FSMContext):
-    await query.answer()
-    node = await backend.request('GET', f'/api/v1/nodes/{callback_data.node_key}', telegram_user_id=query.from_user.id)
-    if not installed_agent(node):
-        return await show_admin_node(query.message.chat.id, query.from_user.id,
-            query.message.message_id, callback_data.node_key, bot, backend, state)
-    await state.set_state(MaintenanceState.waiting_for_ssh_target)
-    await state.update_data(maintenance_node_key=callback_data.node_key)
-    locale = normalize_locale((await state.get_data()).get('locale'))
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'nodes.maintenance.ssh_title'),
-        (tr(locale, 'nodes.maintenance.ssh_prompt'),
-         tr(locale, 'nodes.maintenance.ssh_port_note')), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'back'),
-            callback_data=NodeMaintenanceCallback(node_key=callback_data.node_key).pack())]],
-        state, query.message.message_id)
-
-@router.message(MaintenanceState.waiting_for_ssh_target, F.text)
-async def process_maintenance_ssh(message: Message, bot: Bot, backend: BackendClient, state: FSMContext):
-    if message.from_user is None or message.chat.type != 'private': return
-    user_id = message.from_user.id
-    data = await state.get_data()
-    node_key, message_id = data['maintenance_node_key'], data.get('control_message_id')
-    target = (message.text or '').strip()
-    locale = normalize_locale(data.get('locale'))
-    
-    if not re.fullmatch(r'root@[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]', target):
-        await render(bot, message.chat.id, Screen(tr(locale, 'nodes.maintenance.ssh_title'),
-            (tr(locale, 'nodes.maintenance.ssh_invalid'),
-             tr(locale, 'nodes.maintenance.ssh_port_note')), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'),
-                callback_data=NodeMaintenanceCallback(node_key=node_key).pack())]],
-            state, message_id)
-        return
-        
-    try:
-        await backend.bind_verification_target(user_id, node_key, 'ssh', target)
-        await _clear_node_flow(state)
-        await show_node_maintenance(message.chat.id, user_id, message_id, node_key, bot, backend, state)
-    except BackendError:
-        await show_node_maintenance_error(message.chat.id, message_id, node_key,
-                                          bot, state)
 
 @router.callback_query(ConfirmNodeDrainCallback.filter())
 async def confirm_node_drain_cb(query: CallbackQuery, callback_data: ConfirmNodeDrainCallback, bot: Bot, backend: BackendClient, state: FSMContext):

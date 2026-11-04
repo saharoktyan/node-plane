@@ -668,7 +668,7 @@ chmod +x /usr/local/bin/systemctl
     def test_actual_uninstall_shell_removes_credentials_journals_and_binary_preserving_unrelated_resources(self):
         container, script, args = self.uninstall_fixture()
         docker('exec', container, 'sh', '-c', script, 'node-plane-uninstall', *args)
-        verifier = RemovalVerifier(local=True, bot_public_key=self.bot_key)
+        verifier = RemovalVerifier(bot_public_key=self.bot_key)
         result = docker('exec', '-i', container, 'sh', '-s', input=verifier.script())
         self.assertIn(verifier.SUCCESS, result.stdout)
         for path in ('/root/.ssh/authorized_keys', '/home/test/.ssh/authorized_keys'):

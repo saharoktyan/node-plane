@@ -6,7 +6,7 @@ import subprocess
 import unittest
 
 from backend.removal_inventory import read_inventory, validate_inventory, inventory_digest
-from backend.removal_verifier import RemovalVerifier, RemovalVerificationError
+from backend.removal_verifier import RemovalVerifier, RemovalVerificationError, host_fingerprint
 
 
 class RemovalInventoryTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class RemovalInventoryTests(unittest.TestCase):
             self.assertIn(str(root / 'runtime'), resources['paths'])
             self.assertIn(str(root / 'custom/config.json.lock'), resources['paths'])
             self.assertEqual(resources['containers'], ['custom.xray', 'custom-awg'])
-            verifier = RemovalVerifier(local=True,
+            verifier = RemovalVerifier(
                 bot_public_key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAExample key')
             script = verifier.script(resources)
             self.assertIn(str(root / 'runtime'), script)
@@ -59,14 +59,14 @@ class RemovalInventoryTests(unittest.TestCase):
 
     def test_capture_resources_rejects_another_host_and_invalid_inventory(self):
         import subprocess
-        verifier = RemovalVerifier(local=True, runner=lambda command, **kwargs:
+        verifier = RemovalVerifier(runner=lambda command, **kwargs:
             subprocess.CompletedProcess(command, 0,
                 'NODE_PLANE_HOST_ID:0123456789abcdef0123456789abcdef\n'
                 'NODE_PLANE_RESOURCES:{}\n', ''))
         with self.assertRaises(RemovalVerificationError):
             verifier.capture_resources('node', 'a' * 64)
         with self.assertRaisesRegex(RemovalVerificationError, 'invalid resource inventory'):
-            verifier.capture_resources('node', verifier._fingerprint('0123456789abcdef0123456789abcdef'))
+            verifier.capture_resources('node', host_fingerprint('0123456789abcdef0123456789abcdef'))
 
     def test_invalid_resource_paths_and_container_names_are_rejected(self):
         for path in ('/', '/opt', '/opt/../etc', '/opt/runtime\nanything'):
@@ -88,7 +88,7 @@ class RemovalInventoryTests(unittest.TestCase):
                 executable.chmod(0o700)
             leftover = root / 'custom config.json'
             resources = {'paths': [str(leftover)], 'containers': ['custom.xray', 'custom-awg']}
-            verifier = RemovalVerifier(local=True,
+            verifier = RemovalVerifier(
                 bot_public_key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAExample key')
 
             def run(names=''):

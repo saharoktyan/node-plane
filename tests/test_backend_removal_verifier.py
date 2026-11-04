@@ -12,40 +12,23 @@ class RemovalVerifierTests(unittest.TestCase):
     MACHINE_ID = '0123456789abcdef0123456789abcdef'
     FINGERPRINT = hashlib.sha256(MACHINE_ID.encode()).hexdigest()
 
-    def test_ssh_verification_uses_strict_host_key_and_independent_identity(self):
+    def test_local_verification_runs_on_this_host_with_or_without_a_key(self):
         calls = []
         def runner(command, **kwargs):
             calls.append((command, kwargs))
-            marker = ('NODE_PLANE_HOST_ID:' if 'NODE_PLANE_HOST_ID:' in kwargs['input']
-                      else 'NODE_PLANE_REMOVED_OK:')
-            return subprocess.CompletedProcess(command, 0, marker + self.MACHINE_ID + '\n', '')
-        verifier = RemovalVerifier(ssh_target='root@node.example', ssh_port=2222,
-            ssh_identity_file='/tmp/admin-key', bot_public_key=self.KEY, runner=runner)
-        self.assertEqual(verifier.capture_identity('node'), self.FINGERPRINT)
-        evidence = verifier.verify('node', self.FINGERPRINT)
-        self.assertEqual(evidence['result'], 'agent_and_standard_artifacts_absent')
-        self.assertEqual(evidence['host_fingerprint'], self.FINGERPRINT)
-        command, kwargs = calls[0]
-        self.assertIn('StrictHostKeyChecking=yes', command)
-        self.assertIn('/tmp/admin-key', command)
-        self.assertIn('2222', command)
-        self.assertIn('node-plane-agent.service', kwargs['input'])
-        self.assertIn('node_key = "node"', kwargs['input'])
-        self.assertIn('bot_ssh_key_present', calls[1][1]['input'])
-        self.assertIn('node-plane-lease-expiry.timer', calls[1][1]['input'])
-        self.assertIn('node-plane-lease-expiry.service', calls[1][1]['input'])
-        self.assertEqual(evidence['target'], 'root@node.example')
-
-    def test_only_local_verification_can_omit_ssh_key(self):
-        verifier = RemovalVerifier(local=True, runner=lambda command, **kwargs:
-            subprocess.CompletedProcess(command, 0, 'NODE_PLANE_REMOVED_OK:' + self.MACHINE_ID + '\n', ''))
+            return subprocess.CompletedProcess(command, 0, 'NODE_PLANE_REMOVED_OK:' + self.MACHINE_ID + '\n', '')
+        verifier = RemovalVerifier(runner=runner)
         self.assertIn("key=''", verifier.script())
-        self.assertEqual(verifier.verify('node', self.FINGERPRINT)['target'], 'local')
-        with self.assertRaisesRegex(ValueError, 'public key is required'):
-            RemovalVerifier(ssh_target='root@node.example').script()
+        evidence = verifier.verify('node', self.FINGERPRINT)
+        self.assertEqual((evidence['method'], evidence['target']), ('local', 'local'))
+        self.assertEqual(evidence['result'], 'agent_and_standard_artifacts_absent')
+        self.assertEqual(calls[0][0], ['sh', '-s'])
+        verifier = RemovalVerifier(bot_public_key=self.KEY, runner=runner)
+        self.assertIn('bot_ssh_key_present', verifier.script())
+        self.assertIn('node-plane-lease-expiry.timer', verifier.script())
 
     def test_remaining_progress_does_not_hide_real_agent_artifacts(self):
-        script = RemovalVerifier(local=True).script()
+        script = RemovalVerifier().script()
         # Execute the real artifact checks against an isolated host directory.
         checks = script[script.index('check_absent()'):script.index('check_absent /opt/node-plane-runtime')]
         with TemporaryDirectory() as directory:
@@ -74,7 +57,7 @@ class RemovalVerifierTests(unittest.TestCase):
     def test_unavailable_or_failed_host_check_never_succeeds(self):
         def failed(command, **kwargs):
             return subprocess.CompletedProcess(command, 22, '', 'artifact_present:agent_binary\n')
-        verifier = RemovalVerifier(local=True, bot_public_key=self.KEY, runner=failed)
+        verifier = RemovalVerifier(bot_public_key=self.KEY, runner=failed)
         with self.assertRaisesRegex(RemovalVerificationError, 'artifact_present:agent_binary'):
             verifier.verify('node', self.FINGERPRINT)
         def unreachable(command, **kwargs):
@@ -86,23 +69,19 @@ class RemovalVerifierTests(unittest.TestCase):
     def test_wrong_agent_or_changed_host_cannot_verify_removal(self):
         def wrong_agent(command, **kwargs):
             return subprocess.CompletedProcess(command, 21, '', 'agent_node_key_mismatch\n')
-        verifier = RemovalVerifier(local=True, runner=wrong_agent)
+        verifier = RemovalVerifier(runner=wrong_agent)
         with self.assertRaisesRegex(RemovalVerificationError, 'agent_node_key_mismatch'):
             verifier.capture_identity('node')
         def changed_host(command, **kwargs):
             return subprocess.CompletedProcess(command, 0,
                 'NODE_PLANE_REMOVED_OK:ffffffffffffffffffffffffffffffff\n', '')
-        verifier = RemovalVerifier(local=True, bot_public_key=self.KEY, runner=changed_host)
+        verifier = RemovalVerifier(bot_public_key=self.KEY, runner=changed_host)
         with self.assertRaisesRegex(RemovalVerificationError, 'host identity changed'):
             verifier.verify('node', self.FINGERPRINT)
 
-    def test_invalid_target_or_key_is_rejected(self):
-        for target in ('user@host', 'root@host;touch /tmp/x', '-oProxyCommand=bad'):
-            with self.assertRaises(ValueError):
-                RemovalVerifier(ssh_target=target, bot_public_key=self.KEY)
+    def test_invalid_key_is_rejected(self):
         with self.assertRaises(ValueError):
-            RemovalVerifier(local=True, bot_public_key=self.KEY + '\nother key')
-
+            RemovalVerifier(bot_public_key=self.KEY + '\nother key')
 
 if __name__ == '__main__':
     unittest.main()
