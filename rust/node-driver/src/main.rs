@@ -716,26 +716,6 @@ impl RuntimeService for RuntimeApi {
         if req.action == "install_docker" && !req.recover {
             transport.install_docker().await?;
         }
-        if req.action == "inspect"
-            && !transport
-                .path_exists("/opt/node-plane-runtime/backend-node-operation.py")
-                .await?
-        {
-            let diagnostics = transport.run_diagnostics().await?;
-            let docker = diagnostics
-                .items
-                .iter()
-                .any(|item| item.kind == "docker" && item.status == "ok");
-            return Ok(Response::new(BackendNodeSettingsResult { result_json: serde_json::json!({
-                "docker": docker, "xray_config_valid": false, "awg_config_valid": false,
-                "xray_installed": false, "awg_installed": false,
-                "xray_running": false, "awg_running": false, "entropy": [],
-                "runtime_version": facts.version, "runtime_commit": facts.commit,
-                "desired_runtime_version": self.ctx.app_semver, "desired_runtime_commit": self.ctx.app_commit,
-                "agent_version": facts.binary_version, "agent_commit": facts.binary_commit,
-                "runtime_drift": true,
-            }).to_string() }));
-        }
         if req.action == "operation_progress" && !req.recover {
             return Err(Status::invalid_argument("progress is read-only"));
         }
@@ -750,7 +730,7 @@ impl RuntimeService for RuntimeApi {
             }
             transport.sync_runtime_files(files).await?;
         }
-        let response = transport
+        let response = match transport
             .backend_node_action(agent::v1::BackendNodeActionRequest {
                 node_key: req.node_key,
                 command_id: req.command_id,
@@ -758,7 +738,29 @@ impl RuntimeService for RuntimeApi {
                 intent_json: req.intent_json,
                 recover: req.recover,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            // An agent that cannot inspect its runtime still reports Docker
+            // and its versions; the runtime then needs a sync.
+            Err(_) if req.action == "inspect" => {
+                let diagnostics = transport.run_diagnostics().await?;
+                let docker = diagnostics
+                    .items
+                    .iter()
+                    .any(|item| item.kind == "docker" && item.status == "ok");
+                return Ok(Response::new(BackendNodeSettingsResult { result_json: serde_json::json!({
+                    "docker": docker, "xray_config_valid": false, "awg_config_valid": false,
+                    "xray_installed": false, "awg_installed": false,
+                    "xray_running": false, "awg_running": false, "entropy": [],
+                    "runtime_version": facts.version, "runtime_commit": facts.commit,
+                    "desired_runtime_version": self.ctx.app_semver, "desired_runtime_commit": self.ctx.app_commit,
+                    "agent_version": facts.binary_version, "agent_commit": facts.binary_commit,
+                    "runtime_drift": true,
+                }).to_string() }));
+            }
+            Err(err) => return Err(err),
+        };
         let mut result: serde_json::Value = serde_json::from_str(&response.payload_json)
             .map_err(|_| Status::internal("invalid backend node response"))?;
         if req.action == "inspect" {
