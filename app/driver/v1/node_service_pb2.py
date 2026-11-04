@@ -25,25 +25,25 @@ _sym_db = _symbol_database.Default()
 from driver.v1 import types_pb2 as driver_dot_v1_dot_types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64river/v1/node_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"w\n\x12\x45nrollAgentRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0e\n\x06target\x18\x02 \x01(\t\x12\r\n\x05token\x18\x03 \x01(\t\x12\x15\n\rcontroller_id\x18\x04 \x01(\t\x12\x19\n\x11retired_node_keys\x18\x05 \x03(\t\"@\n\x13\x45nrollAgentResponse\x12\x10\n\x08\x66irewall\x18\x01 \x01(\t\x12\x17\n\x0fjournal_archive\x18\x02 \x01(\t\"-\n\x19GetNodeDiagnosticsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"s\n\x1aGetNodeDiagnosticsResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\x12\x32\n\x05items\x18\x03 \x03(\x0b\x32#.nodeplane.driver.v1.DiagnosticItem\"-\n\x19InspectBackendNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\xd7\x01\n\x16\x42\x61\x63kendNodeObservation\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0chealth_state\x18\x02 \x01(\t\x12\x17\n\x0fruntime_version\x18\x03 \x01(\t\x12\x16\n\x0eruntime_commit\x18\x04 \x01(\t\x12\x1b\n\x13xray_config_present\x18\x05 \x01(\x08\x12\x1a\n\x12\x61wg_config_present\x18\x06 \x01(\x08\x12\x15\n\ragent_version\x18\x07 \x01(\t\x12\x14\n\x0c\x61gent_commit\x18\x08 \x01(\t2\xd9\x02\n\x0bNodeService\x12u\n\x12GetNodeDiagnostics\x12..nodeplane.driver.v1.GetNodeDiagnosticsRequest\x1a/.nodeplane.driver.v1.GetNodeDiagnosticsResponse\x12q\n\x12InspectBackendNode\x12..nodeplane.driver.v1.InspectBackendNodeRequest\x1a+.nodeplane.driver.v1.BackendNodeObservation\x12`\n\x0b\x45nrollAgent\x12\'.nodeplane.driver.v1.EnrollAgentRequest\x1a(.nodeplane.driver.v1.EnrollAgentResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64river/v1/node_service.proto\x12\x13nodeplane.driver.v1\x1a\x15\x64river/v1/types.proto\"\x97\x01\n\x12\x45nrollAgentRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0e\n\x06target\x18\x02 \x01(\t\x12\r\n\x05token\x18\x03 \x01(\t\x12\x15\n\rcontroller_id\x18\x04 \x01(\t\x12\x19\n\x11retired_node_keys\x18\x05 \x03(\t\x12\x1e\n\x16restrict_to_controller\x18\x06 \x01(\x08\"@\n\x13\x45nrollAgentResponse\x12\x10\n\x08\x66irewall\x18\x01 \x01(\t\x12\x17\n\x0fjournal_archive\x18\x02 \x01(\t\"-\n\x19GetNodeDiagnosticsRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"s\n\x1aGetNodeDiagnosticsResponse\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x0f\n\x07summary\x18\x02 \x01(\t\x12\x32\n\x05items\x18\x03 \x03(\x0b\x32#.nodeplane.driver.v1.DiagnosticItem\"-\n\x19InspectBackendNodeRequest\x12\x10\n\x08node_key\x18\x01 \x01(\t\"\xd7\x01\n\x16\x42\x61\x63kendNodeObservation\x12\x10\n\x08node_key\x18\x01 \x01(\t\x12\x14\n\x0chealth_state\x18\x02 \x01(\t\x12\x17\n\x0fruntime_version\x18\x03 \x01(\t\x12\x16\n\x0eruntime_commit\x18\x04 \x01(\t\x12\x1b\n\x13xray_config_present\x18\x05 \x01(\x08\x12\x1a\n\x12\x61wg_config_present\x18\x06 \x01(\x08\x12\x15\n\ragent_version\x18\x07 \x01(\t\x12\x14\n\x0c\x61gent_commit\x18\x08 \x01(\t2\xd9\x02\n\x0bNodeService\x12u\n\x12GetNodeDiagnostics\x12..nodeplane.driver.v1.GetNodeDiagnosticsRequest\x1a/.nodeplane.driver.v1.GetNodeDiagnosticsResponse\x12q\n\x12InspectBackendNode\x12..nodeplane.driver.v1.InspectBackendNodeRequest\x1a+.nodeplane.driver.v1.BackendNodeObservation\x12`\n\x0b\x45nrollAgent\x12\'.nodeplane.driver.v1.EnrollAgentRequest\x1a(.nodeplane.driver.v1.EnrollAgentResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'driver.v1.node_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_ENROLLAGENTREQUEST']._serialized_start=76
-  _globals['_ENROLLAGENTREQUEST']._serialized_end=195
-  _globals['_ENROLLAGENTRESPONSE']._serialized_start=197
-  _globals['_ENROLLAGENTRESPONSE']._serialized_end=261
-  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_start=263
-  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_end=308
-  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_start=310
-  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_end=425
-  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_start=427
-  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_end=472
-  _globals['_BACKENDNODEOBSERVATION']._serialized_start=475
-  _globals['_BACKENDNODEOBSERVATION']._serialized_end=690
-  _globals['_NODESERVICE']._serialized_start=693
-  _globals['_NODESERVICE']._serialized_end=1038
+  _globals['_ENROLLAGENTREQUEST']._serialized_start=77
+  _globals['_ENROLLAGENTREQUEST']._serialized_end=228
+  _globals['_ENROLLAGENTRESPONSE']._serialized_start=230
+  _globals['_ENROLLAGENTRESPONSE']._serialized_end=294
+  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_start=296
+  _globals['_GETNODEDIAGNOSTICSREQUEST']._serialized_end=341
+  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_start=343
+  _globals['_GETNODEDIAGNOSTICSRESPONSE']._serialized_end=458
+  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_start=460
+  _globals['_INSPECTBACKENDNODEREQUEST']._serialized_end=505
+  _globals['_BACKENDNODEOBSERVATION']._serialized_start=508
+  _globals['_BACKENDNODEOBSERVATION']._serialized_end=723
+  _globals['_NODESERVICE']._serialized_start=726
+  _globals['_NODESERVICE']._serialized_end=1071
 # @@protoc_insertion_point(module_scope)

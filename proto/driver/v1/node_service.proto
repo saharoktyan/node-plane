@@ -22,6 +22,9 @@ message EnrollAgentRequest {
   // only those may hand their agent over to another node.
   string controller_id = 4;
   repeated string retired_node_keys = 5;
+  // Keep the agent port for this controller's address only; for a
+  // controller with a static address. Otherwise mutual TLS alone guards it.
+  bool restrict_to_controller = 6;
 }
 
 message EnrollAgentResponse {

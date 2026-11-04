@@ -161,8 +161,16 @@ class AgentEnrollmentDockerTests(unittest.TestCase):
         self.assertIn('n2', taken.exception.details())
         self.assertFalse(self.registry.exists())
         # Once the controller retired n2 for good, the agent is handed over.
-        result = self.driver.enroll_agent('n1', self.target, self.token, CONTROLLER, ['n2'])
+        result = self.driver.enroll_agent('n1', self.target, self.token, CONTROLLER, ['n2'],
+                                          restrict_to_controller=True)
         self.assertEqual(result['journal_archive'], '')
+        # A controller with a static address keeps the port for itself.
+        peer = re.fullmatch(r'agent port 50061 allowed from (\S+) only', result['firewall'])
+        self.assertIsNotNone(peer, result)
+        ufw = docker('exec', self.name, 'cat', '/test/ufw.log').stdout.splitlines()
+        self.assertEqual(ufw, ["allow 50061/tcp comment Node Plane agent enrollment",
+                               f"allow proto tcp from {peer[1]} to any port 50061 comment Node Plane agent",
+                               "delete allow 50061/tcp"])
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
 
     def test_the_installer_refuses_a_tampered_agent(self):
@@ -189,14 +197,12 @@ class AgentEnrollmentDockerTests(unittest.TestCase):
 
         result = self.enroll(self.token)
         self.assertEqual(result['journal_archive'], '')
-        # The installer opened the port for enrollment; then only the
-        # controller's address (Docker's gateway here) keeps it.
-        peer = re.fullmatch(r'agent port 50061 allowed from (\S+) only', result['firewall'])
-        self.assertIsNotNone(peer, result)
+        # The installer opened the port for enrollment; by default the agent
+        # keeps it open under its own rule and mutual TLS guards it.
+        self.assertEqual(result['firewall'], 'agent port 50061 open; mutual TLS guards it')
         ufw = docker('exec', self.name, 'cat', '/test/ufw.log').stdout.splitlines()
         self.assertEqual(ufw, ["allow 50061/tcp comment Node Plane agent enrollment",
-                               f"allow proto tcp from {peer[1]} to any port 50061 comment Node Plane agent",
-                               "delete allow 50061/tcp"])
+                               "delete allow 50061/tcp", "allow 50061/tcp comment Node Plane agent"])
         self.assertIn('restart node-plane-agent', docker('exec', self.name, 'cat', '/test/systemctl.log').stdout)
         self.assertEqual(self.registry.read_text(), f'n1={self.target}\n')
         files = docker('exec', self.name, 'sh', '-c',
@@ -220,6 +226,7 @@ class AgentEnrollmentDockerTests(unittest.TestCase):
             self.driver.enroll_agent('n1', self.target, self.token, CONTROLLER)
         self.process.terminate()
         self.process.wait(timeout=10)
+        self.driver_env['NODE_DRIVER_LISTEN_ADDR'] = self.driver_address = f'127.0.0.1:{free_port()}'
         self.driver = self.start_driver()
         self.assertEqual(inspected()['node_key'], 'n1')
 

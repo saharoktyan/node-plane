@@ -447,6 +447,7 @@ impl NodeService for NodeApi {
         let controller = enrollment::Controller {
             id: &req.controller_id,
             retired_node_keys: &req.retired_node_keys,
+            restrict_to_controller: req.restrict_to_controller,
         };
         let ca = env::var("NODE_AGENT_CA_CERT")
             .ok()

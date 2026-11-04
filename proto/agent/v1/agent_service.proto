@@ -371,6 +371,10 @@ message EnrollmentCompleteRequest {
   bytes proof = 3;
   // The controller installation: a journal of another one is archived.
   string controller_id = 4;
+  // Only the controller's address keeps the agent port. Off: the port stays
+  // open to any address and mutual TLS alone guards it, which survives a
+  // controller with a dynamic address.
+  bool restrict_to_controller = 5;
 }
 
 message EnrollmentCompleteResponse {

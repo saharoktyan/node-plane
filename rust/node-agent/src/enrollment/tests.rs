@@ -75,7 +75,7 @@ fn the_key_is_generated_once_and_private() {
 }
 
 #[test]
-fn only_the_controller_keeps_the_agent_port() {
+fn the_agent_port_is_open_or_kept_for_the_controller() {
     let host = |status: &'static str| {
         Scripted::new(move |args| match args {
             ["env", "LC_ALL=C", "ufw", "status"] => (0, status.into()),
@@ -85,7 +85,7 @@ fn only_the_controller_keeps_the_agent_port() {
     let active = host("Status: active\n\nTo Action From\n");
     let peer = "::ffff:198.51.100.7".parse().ok();
     assert_eq!(
-        restrict(&active, peer, 50061),
+        firewall(&active, Access::Controller(peer), 50061),
         "agent port 50061 allowed from 198.51.100.7 only"
     );
     assert_eq!(active.ran(&["ufw", "allow"]).len(), 1);
@@ -95,11 +95,29 @@ fn only_the_controller_keeps_the_agent_port() {
         1
     );
 
+    // By default any address may connect: a controller with a dynamic
+    // address keeps reaching the agent.
+    let open = host("Status: active\n");
+    assert_eq!(
+        firewall(&open, Access::Anyone, 50061),
+        "agent port 50061 open; mutual TLS guards it"
+    );
+    assert_eq!(
+        open.ran(&["ufw"]),
+        [
+            vec!["ufw", "delete", "allow", "50061/tcp"],
+            vec!["ufw", "allow", "50061/tcp", "comment", "Node Plane agent"],
+        ]
+    );
+
     let inactive = host("Status: inactive\n");
-    assert_eq!(restrict(&inactive, peer, 50061), "ufw is inactive");
+    assert_eq!(
+        firewall(&inactive, Access::Controller(peer), 50061),
+        "ufw is inactive"
+    );
     assert!(inactive.ran(&["ufw", "allow"]).is_empty());
     let unknown = host("Status: active\n");
-    assert!(restrict(&unknown, None, 50061).contains("stays open"));
+    assert!(firewall(&unknown, Access::Controller(None), 50061).contains("stays open"));
     assert!(unknown.ran(&["ufw", "delete"]).is_empty());
 }
 
@@ -211,7 +229,7 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
     let served = {
         let config = config.clone();
         tokio::spawn(async move {
-            serve_with(&config, |peer, port| format!("{peer:?} {port}"))
+            serve_with(&config, |access, port| format!("{access:?} {port}"))
                 .await
                 .map_err(|err| err.to_string())
         })
@@ -267,6 +285,7 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
     let complete =
         |ca_pem: &str, certificate_pem: &str, proof: Vec<u8>| EnrollmentCompleteRequest {
             controller_id: CONTROLLER.into(),
+            restrict_to_controller: true,
             ca_pem: ca_pem.into(),
             certificate_pem: certificate_pem.into(),
             proof,
@@ -275,7 +294,13 @@ async fn the_controller_enrolls_the_agent_and_its_key_serves_mutual_tls() {
         controller
             .proof(
                 "controller",
-                &[b"n1", CONTROLLER.as_bytes(), ca.as_bytes(), cert.as_bytes()],
+                &[
+                    b"n1",
+                    CONTROLLER.as_bytes(),
+                    b"restrict",
+                    ca.as_bytes(),
+                    cert.as_bytes(),
+                ],
             )
             .as_ref()
             .to_vec()

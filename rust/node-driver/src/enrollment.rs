@@ -196,6 +196,7 @@ pub(crate) struct Enrolled {
 pub(crate) struct Controller<'a> {
     pub(crate) id: &'a str,
     pub(crate) retired_node_keys: &'a [String],
+    pub(crate) restrict_to_controller: bool,
 }
 
 /// Refuses to take the agent of another active node of this controller.
@@ -306,6 +307,11 @@ pub(crate) async fn enroll(
         &[
             node_key.as_bytes(),
             controller.id.as_bytes(),
+            if controller.restrict_to_controller {
+                b"restrict"
+            } else {
+                b"open"
+            },
             ca_pem.as_bytes(),
             certificate_pem.as_bytes(),
         ],
@@ -316,6 +322,7 @@ pub(crate) async fn enroll(
             certificate_pem,
             proof,
             controller_id: controller.id.to_string(),
+            restrict_to_controller: controller.restrict_to_controller,
         })
         .await?
         .into_inner();
@@ -398,6 +405,7 @@ mod tests {
         let controller = Controller {
             id: "c1",
             retired_node_keys: &retired,
+            restrict_to_controller: false,
         };
         let check = |previous: &str, by: &str, ca: &str| {
             check_owner(&controller, "ca", "n1", previous, by, ca).is_ok()

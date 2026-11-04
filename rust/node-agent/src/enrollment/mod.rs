@@ -168,9 +168,18 @@ fn replace(path: &Path, data: &[u8]) -> Result<(), String> {
         .map_err(|err| format!("{}: {err}", path.display()))
 }
 
-/// Allows only `peer` to the agent port and drops the installer's open
-/// rule. Returns what was done; enrollment succeeds either way.
-pub(crate) fn restrict(host: &dyn Host, peer: Option<IpAddr>, port: u16) -> String {
+/// Who keeps the agent port after enrollment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Access {
+    /// Any address; mutual TLS guards the port.
+    Anyone,
+    /// The controller's address as the agent saw it.
+    Controller(Option<IpAddr>),
+}
+
+/// Replaces the installer's enrollment rule with the agent's own. Returns
+/// what was done; enrollment succeeds either way.
+pub(crate) fn firewall(host: &dyn Host, access: Access, port: u16) -> String {
     if !host.installed("ufw") {
         return "ufw is not installed".into();
     }
@@ -180,34 +189,45 @@ pub(crate) fn restrict(host: &dyn Host, peer: Option<IpAddr>, port: u16) -> Stri
     if !status.starts_with("Status: active") {
         return "ufw is inactive".into();
     }
-    let Some(peer) = peer.map(|ip| ip.to_canonical()) else {
-        return "controller address unknown; the agent port stays open".into();
-    };
-    let (peer, port) = (peer.to_string(), port.to_string());
-    let allow = [
-        "ufw",
-        "allow",
-        "proto",
-        "tcp",
-        "from",
-        &peer,
-        "to",
-        "any",
-        "port",
-        &port,
-        "comment",
-        "Node Plane agent",
-    ];
-    if !host.succeeds(&allow, Some(30)) {
-        return "could not allow the controller; the agent port stays open".into();
-    }
     let open = format!("{port}/tcp");
-    host.succeeds(&["ufw", "delete", "allow", &open], Some(30));
-    format!("agent port {port} allowed from {peer} only")
+    let port = port.to_string();
+    match access {
+        Access::Anyone => {
+            host.succeeds(&["ufw", "delete", "allow", &open], Some(30));
+            let allow = ["ufw", "allow", &open, "comment", "Node Plane agent"];
+            if !host.succeeds(&allow, Some(30)) {
+                return "could not open the agent port".into();
+            }
+            format!("agent port {port} open; mutual TLS guards it")
+        }
+        Access::Controller(None) => "controller address unknown; the agent port stays open".into(),
+        Access::Controller(Some(peer)) => {
+            let peer = peer.to_canonical().to_string();
+            let allow = [
+                "ufw",
+                "allow",
+                "proto",
+                "tcp",
+                "from",
+                &peer,
+                "to",
+                "any",
+                "port",
+                &port,
+                "comment",
+                "Node Plane agent",
+            ];
+            if !host.succeeds(&allow, Some(30)) {
+                return "could not allow the controller; the agent port stays open".into();
+            }
+            host.succeeds(&["ufw", "delete", "allow", &open], Some(30));
+            format!("agent port {port} allowed from {peer} only")
+        }
+    }
 }
 
-/// The firewall step: `restrict` on the real host, a recorder in tests.
-type Firewall = fn(Option<IpAddr>, u16) -> String;
+/// The firewall step: `firewall` on the real host, a recorder in tests.
+type Firewall = fn(Access, u16) -> String;
 
 struct Enrollment {
     node_key: String,
@@ -269,6 +289,11 @@ impl NodeEnrollmentService for Enrollment {
             &[
                 self.node_key.as_bytes(),
                 request.controller_id.as_bytes(),
+                if request.restrict_to_controller {
+                    b"restrict"
+                } else {
+                    b"open"
+                },
                 request.ca_pem.as_bytes(),
                 request.certificate_pem.as_bytes(),
             ],
@@ -303,8 +328,13 @@ impl NodeEnrollmentService for Enrollment {
         store(&self.files.certificate, &request.certificate_pem)?;
         fs::remove_file(&self.files.token).map_err(|err| Status::internal(err.to_string()))?;
         let _ = fs::remove_file(&self.files.previous_node);
-        let (port, restrict) = (self.port, self.firewall);
-        let firewall = tokio::task::spawn_blocking(move || restrict(peer, port))
+        let access = if request.restrict_to_controller {
+            Access::Controller(peer)
+        } else {
+            Access::Anyone
+        };
+        let (port, step) = (self.port, self.firewall);
+        let firewall = tokio::task::spawn_blocking(move || step(access, port))
             .await
             .unwrap_or_else(|_| "firewall step failed; the agent port is unchanged".into());
         if let Some(done) = self.done.lock().ok().and_then(|mut done| done.take()) {
@@ -321,7 +351,7 @@ impl NodeEnrollmentService for Enrollment {
 
 /// Serves enrollment until the controller completes it.
 pub(crate) async fn serve(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    serve_with(config, |peer, port| restrict(&System, peer, port)).await
+    serve_with(config, |access, port| firewall(&System, access, port)).await
 }
 
 async fn serve_with(
