@@ -121,17 +121,13 @@ class AgentEnrollmentTests(unittest.TestCase):
         self.assertTrue(self.bootstraps.run_one())
         self.assertEqual(self.bootstraps.get(self.actor, issued['bootstrap']['id'])['phase'], 'docker')
 
-    def test_an_agent_only_command_leaves_services_for_later(self):
-        issued = self.issue(install_services=False)
-        self.assertIsNone(issued['bootstrap'])
-        with self.db.connect() as conn:
-            self.assertIsNone(conn.execute('SELECT 1 FROM backend_node_bootstraps').fetchone())
+    def test_an_enrolled_agent_counts_as_installed(self):
+        self.issue()
         from backend.nodes import NodeService
         installed = lambda: NodeService(self.db).get(self.actor, 'n1')['agent_installed']
         self.assertFalse(installed())
         self.driver.failure = None
         self.assertTrue(self.service.run_one())
-        # Enrolled: the node offers the services setup.
         self.assertTrue(installed())
 
     def test_a_rejected_token_is_shown_and_still_retried(self):

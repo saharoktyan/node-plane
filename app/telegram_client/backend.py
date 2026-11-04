@@ -21,10 +21,10 @@ class BackendClient:
             command=True, command_key=command_key)
 
     async def agent_enrollment(self, user_id, node_key, revision, restrict_to_controller, command_key):
-        # The services are installed after the agent enrolls, from its card.
+        # Server setup is queued too and continues once the agent enrolls.
         return await self.request('POST', f'/api/v1/nodes/{node_key}/agent-enrollment',
             telegram_user_id=user_id, body={'revision': revision,
-                'restrict_to_controller': restrict_to_controller, 'install_services': False},
+                'restrict_to_controller': restrict_to_controller},
             command=True, command_key=command_key)
 
     async def node_agent_enrollment(self, user_id, node_key):

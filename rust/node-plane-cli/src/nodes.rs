@@ -1640,24 +1640,12 @@ async fn execute_inner(
                         ("open".into(), "Any address (recommended; works when the controller's IP changes)".into()),
                         ("restrict".into(), "Only this controller's address (only for a static controller IP)".into()),
                     ])?.context("Server setup cancelled")?;
-                    let path = format!("/api/v1/nodes/{}/agent-enrollment", item.key);
-                    if mode == 0 {
-                        // The agent only: once it answers, the card offers the protocols.
-                        let body = json!({"revision": item.desired_revision, "restrict_to_controller": access == 1,
-                            "install_services": false});
-                        let enrollment = backend::request(session, &credential, Method::POST, &path, Some(body),
-                            Some(Uuid::new_v4())).await?;
-                        let command = enrollment["command"].as_str().context("The controller did not return the install command")?;
-                        events::show_command(tx, "Install command", format!(
-                            "Run as root on {} · {} within an hour. When the agent answers, install the protocols from the node card. A new Server setup replaces the command.",
-                            item.region, item.title), command.into())?;
-                        return Ok("Waiting for the agent installation".into());
-                    }
                     let command_id = Uuid::new_v4();
                     let pending = Operation { kind: "node-bootstraps".into(), id: command_id, node_key: item.key.clone(),
                         action: "bootstrap".into(), status: "unconfirmed".into(), error: String::new(), command_id: Some(command_id) };
                     SavedOperation::save(&request, &credential.account_id, &pending)?;
                     let _ = tx.send(Event::Nodes(Update::Operation(pending.clone())));
+                    let path = format!("/api/v1/nodes/{}/agent-enrollment", item.key);
                     let body = json!({"revision": item.desired_revision, "restrict_to_controller": access == 1});
                     let enrollment = match backend::request(session, &credential, Method::POST, &path, Some(body), Some(command_id)).await {
                         Ok(value) => value,
@@ -1676,6 +1664,13 @@ async fn execute_inner(
                     let _ = tx.send(Event::Nodes(Update::Operation(operation.clone())));
                     SavedOperation::save(&request, &credential.account_id, &operation)
                         .context("Server setup was accepted, but its local record could not be saved. Do not resubmit")?;
+                    let command = enrollment["command"].as_str().context("The controller did not return the install command")?;
+                    if mode == 0 {
+                        events::show_command(tx, "Install command", format!(
+                            "Run as root on {} · {} within an hour. Once the agent answers, the protocols install automatically; the node card shows the progress. A new Server setup replaces the command.",
+                            item.region, item.title), command.into())?;
+                        return Ok("Waiting for the agent installation".into());
+                    }
                     let login = match item.ssh_target.as_deref() {
                         Some(target) => target.to_string(),
                         None => UiInteraction(tx.clone()).input_line("SSH login",

@@ -998,10 +998,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
         if not bootstrap and job and job['status'] in {'awaiting_executor', 'running', 'blocked'}:
             install_rows.append((InlineKeyboardButton(text=tr(locale, 'node_tools.last_operation'), callback_data='node_job:' + job['id'], style='primary'),))
         if not bootstrap and not installed_agent(node):
-            # The agent comes first; a local node installs everything at once.
-            label = ('nodes.card.bootstrap' if node['protocols'] and node.get('transport') == 'local'
-                     else 'node_tools.setup_agent')
-            install_rows.append((InlineKeyboardButton(text=tr(locale, label), callback_data=f'bootstrap_menu:{node_key}', style='primary'),))
+            install_rows.append((InlineKeyboardButton(text=tr(locale, 'nodes.card.bootstrap' if node['protocols'] else 'node_tools.setup_agent'), callback_data=f'bootstrap_menu:{node_key}', style='primary'),))
         sections.append(Section(tr(locale, 'nodes.rich.access'), tables=(Table(
             (tr(locale, 'admin.rich.item'), tr(locale, 'admin.rich.value')),
             ((tr(locale, 'nodes.rich.ready'), str(overview['ready'])),
@@ -1049,7 +1046,7 @@ async def node_manage_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     rows = []
     if node['protocols']:
         rows.append([InlineKeyboardButton(text=tr(locale,
-            'nodes.draft.reinstall' if node['applied_revision'] else 'node_tools.protocols_stage_button'),
+            'nodes.draft.reinstall' if node['applied_revision'] else 'nodes.card.bootstrap'),
             callback_data=f'bootstrap_menu:{node_key}', style='primary')])
     rows.extend([
         [InlineKeyboardButton(text=tr(locale, 'nodes.maintenance.title'), callback_data=NodeMaintenanceCallback(node_key=node_key).pack())],
