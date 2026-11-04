@@ -122,6 +122,13 @@ class GrpcIntentDriver:
                 'xray_config_present': response.xray_config_present,
                 'awg_config_present': response.awg_config_present}
 
+    def enroll_agent(self, node_key, target, token):
+        """Dial an agent installed with a one-time token and issue its certificate."""
+        from driver.v1 import node_service_pb2
+        response = self.nodes.EnrollAgent(node_service_pb2.EnrollAgentRequest(
+            node_key=node_key, target=target, token=token), timeout=self.timeout)
+        return {'firewall': response.firewall}
+
     def diagnose_node(self, node_key):
         """Read agent diagnostics without accepting the driver's legacy DB fallback."""
         from driver.v1 import node_service_pb2

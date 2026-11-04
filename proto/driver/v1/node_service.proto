@@ -8,6 +8,21 @@ service NodeService {
   rpc GetNodeDiagnostics(GetNodeDiagnosticsRequest) returns (GetNodeDiagnosticsResponse);
   // Backend-owned read path: only the configured agent target is consulted.
   rpc InspectBackendNode(InspectBackendNodeRequest) returns (BackendNodeObservation);
+  // Dials an agent installed with a one-time token, issues its certificate
+  // and remembers its target. No SSH or sudo on the node.
+  rpc EnrollAgent(EnrollAgentRequest) returns (EnrollAgentResponse);
+}
+
+message EnrollAgentRequest {
+  string node_key = 1;
+  // host:port the agent listens on; its certificate names the host.
+  string target = 2;
+  string token = 3;
+}
+
+message EnrollAgentResponse {
+  // How the agent restricted its port, for the operator.
+  string firewall = 1;
 }
 
 message GetNodeDiagnosticsRequest {

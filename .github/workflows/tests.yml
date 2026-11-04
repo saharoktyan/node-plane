@@ -137,10 +137,14 @@ jobs:
         run: rustup toolchain install 1.90.0 --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/node-agent
+          workspaces: |
+            rust/node-agent
+            rust/node-driver
           shared-key: docker-agent-tests
-      - name: Build current agent
-        run: cargo +1.90.0 build --locked --manifest-path rust/node-agent/Cargo.toml
+      - name: Build current agent and driver
+        run: |
+          cargo +1.90.0 build --locked --manifest-path rust/node-agent/Cargo.toml
+          cargo +1.90.0 build --locked --manifest-path rust/node-driver/Cargo.toml
       - name: Prepare isolated runtime fixtures
         run: |
           docker pull ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0

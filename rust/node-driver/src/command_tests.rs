@@ -325,13 +325,13 @@ fn anonymous_requests_remain_independent() {
 
 #[tokio::test]
 async fn failed_command_is_not_reexecuted_after_configuration_changes() {
-    let mut api = RuntimeApi {
+    let api = RuntimeApi {
         ctx: DriverContext {
             state: DriverState::default(),
 
             app_semver: "test".into(),
             app_commit: "test".into(),
-            agent_targets: HashMap::new(),
+            agent_targets: Default::default(),
         },
     };
     let first = api
@@ -341,6 +341,8 @@ async fn failed_command_is_not_reexecuted_after_configuration_changes() {
         .into_inner();
     api.ctx
         .agent_targets
+        .write()
+        .unwrap()
         .insert("node".into(), "127.0.0.1:1".into());
     let repeated = api
         .apply_backend_node_settings(install_request("failed-1"))
@@ -368,7 +370,7 @@ async fn every_rpc_returns_existing_command_without_execution() {
 
         app_semver: "test".into(),
         app_commit: "test".into(),
-        agent_targets: HashMap::new(),
+        agent_targets: Default::default(),
     };
     let runtime = RuntimeApi { ctx: ctx.clone() };
     let provisioning = ProvisioningApi { ctx: ctx.clone() };

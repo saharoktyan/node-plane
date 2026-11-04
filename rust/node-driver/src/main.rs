@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 mod force_approval;
 use std::env;
 use std::fs;
@@ -9,6 +10,7 @@ use serde::Deserialize;
 use tonic::{Request, Response, Status, transport::Server};
 
 mod agent_transport;
+mod enrollment;
 mod operations;
 
 use operations::{CommandIdentity, CommandStart, DriverState};
@@ -38,10 +40,10 @@ use driver::v1::provisioning_service_server::{ProvisioningService, ProvisioningS
 use driver::v1::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use driver::v1::{
     ApplyBackendNodeSettingsRequest, BackendNodeObservation, BackendNodeSettingsResult,
-    DecommissionNodeRequest, DecommissionNodeResponse, GetNodeDiagnosticsRequest,
-    GetNodeDiagnosticsResponse, GetOperationRequest, InspectBackendNodeRequest,
-    ListOperationsRequest, ListOperationsResponse, Operation, OperationEvent,
-    RefreshAwgConfigRequest, RefreshAwgConfigResponse, StartOperationResponse,
+    DecommissionNodeRequest, DecommissionNodeResponse, EnrollAgentRequest, EnrollAgentResponse,
+    GetNodeDiagnosticsRequest, GetNodeDiagnosticsResponse, GetOperationRequest,
+    InspectBackendNodeRequest, ListOperationsRequest, ListOperationsResponse, Operation,
+    OperationEvent, RefreshAwgConfigRequest, RefreshAwgConfigResponse, StartOperationResponse,
     WatchOperationRequest,
 };
 
@@ -50,7 +52,7 @@ struct DriverContext {
     state: DriverState,
     app_semver: String,
     app_commit: String,
-    agent_targets: HashMap<String, String>,
+    agent_targets: Arc<RwLock<HashMap<String, String>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -151,7 +153,7 @@ impl DriverContext {
             state: DriverState::open(operations_path)?,
             app_semver,
             app_commit,
-            agent_targets: Self::parse_agent_targets(),
+            agent_targets: Arc::new(RwLock::new(Self::parse_agent_targets())),
         })
     }
 
@@ -176,6 +178,12 @@ impl DriverContext {
             .unwrap_or_else(|_| "/etc/node-plane/agent.toml".to_string());
         if let Some((node_key, target)) = local_agent_target_from_config(Path::new(&local_config)) {
             targets.entry(node_key).or_insert(target);
+        }
+        // An enrollment is newer than the installer's list.
+        if let Ok(ca) = env::var("NODE_AGENT_CA_CERT") {
+            targets.extend(enrollment::load(&enrollment::registry(Path::new(
+                ca.trim(),
+            ))));
         }
         targets
     }
@@ -257,8 +265,11 @@ impl DriverContext {
         }
     }
 
-    fn agent_target(&self, node_key: &str) -> Option<&str> {
-        self.agent_targets.get(node_key).map(String::as_str)
+    fn agent_target(&self, node_key: &str) -> Option<String> {
+        self.agent_targets
+            .read()
+            .ok()
+            .and_then(|targets| targets.get(node_key).cloned())
     }
 
     fn shell_quote(&self, value: &str) -> String {
@@ -411,6 +422,41 @@ struct OperationApi {
 
 #[tonic::async_trait]
 impl NodeService for NodeApi {
+    async fn enroll_agent(
+        &self,
+        request: Request<EnrollAgentRequest>,
+    ) -> Result<Response<EnrollAgentResponse>, Status> {
+        let req = request.into_inner();
+        let valid_key = !req.node_key.is_empty()
+            && req.node_key.len() <= 64
+            && req.node_key.bytes().enumerate().all(|(index, c)| {
+                c.is_ascii_alphanumeric() || (index > 0 && matches!(c, b'.' | b'_' | b'-'))
+            });
+        if !valid_key {
+            return Err(Status::invalid_argument("invalid node key"));
+        }
+        let token = enrollment::Token::parse(&req.token)?;
+        let ca = env::var("NODE_AGENT_CA_CERT")
+            .ok()
+            .map(|value| PathBuf::from(value.trim()))
+            .filter(|path| path.is_file())
+            .ok_or_else(|| Status::failed_precondition("agent CA is not configured"))?;
+        let now = chrono::Utc::now().timestamp();
+        let firewall = enrollment::enroll(&ca, &req.node_key, &req.target, &token, now).await?;
+        let mut targets = self
+            .ctx
+            .agent_targets
+            .write()
+            .map_err(|_| Status::internal("agent targets unavailable"))?;
+        let registry = enrollment::registry(&ca);
+        let mut enrolled = enrollment::load(&registry);
+        enrolled.insert(req.node_key.clone(), req.target.clone());
+        enrollment::save(&registry, &enrolled)
+            .map_err(|err| Status::internal(format!("enrolled agent not recorded: {err}")))?;
+        targets.insert(req.node_key, req.target);
+        Ok(Response::new(EnrollAgentResponse { firewall }))
+    }
+
     async fn inspect_backend_node(
         &self,
         request: Request<InspectBackendNodeRequest>,
@@ -1008,7 +1054,7 @@ impl RuntimeService for RuntimeApi {
             .ctx
             .agent_target(&req.node_key)
             .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
-        let transport = agent_transport::AgentTransport::new(target);
+        let transport = agent_transport::AgentTransport::new(target.clone());
         let summary = match req.phase.as_str() {
             "prepare" => {
                 transport.prepare_decommission(&req.command_id).await?;
@@ -1021,7 +1067,7 @@ impl RuntimeService for RuntimeApi {
                 "runtime cleanup verified by agent"
             }
             "uninstall" => {
-                let public_key = decommission_public_key(target, self.ctx.bot_public_key())?;
+                let public_key = decommission_public_key(&target, self.ctx.bot_public_key())?;
                 transport
                     .uninstall_agent_for_decommission(&req.command_id, &public_key)
                     .await?;

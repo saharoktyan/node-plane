@@ -44,6 +44,11 @@ class NodeServiceStub(object):
                 request_serializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
                 response_deserializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
                 _registered_method=True)
+        self.EnrollAgent = channel.unary_unary(
+                '/nodeplane.driver.v1.NodeService/EnrollAgent',
+                request_serializer=driver_dot_v1_dot_node__service__pb2.EnrollAgentRequest.SerializeToString,
+                response_deserializer=driver_dot_v1_dot_node__service__pb2.EnrollAgentResponse.FromString,
+                _registered_method=True)
 
 
 class NodeServiceServicer(object):
@@ -62,6 +67,14 @@ class NodeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def EnrollAgent(self, request, context):
+        """Dials an agent installed with a one-time token, issues its certificate
+        and remembers its target. No SSH or sudo on the node.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -74,6 +87,11 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.InspectBackendNode,
                     request_deserializer=driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.FromString,
                     response_serializer=driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.SerializeToString,
+            ),
+            'EnrollAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.EnrollAgent,
+                    request_deserializer=driver_dot_v1_dot_node__service__pb2.EnrollAgentRequest.FromString,
+                    response_serializer=driver_dot_v1_dot_node__service__pb2.EnrollAgentResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -130,6 +148,33 @@ class NodeService(object):
             '/nodeplane.driver.v1.NodeService/InspectBackendNode',
             driver_dot_v1_dot_node__service__pb2.InspectBackendNodeRequest.SerializeToString,
             driver_dot_v1_dot_node__service__pb2.BackendNodeObservation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EnrollAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/nodeplane.driver.v1.NodeService/EnrollAgent',
+            driver_dot_v1_dot_node__service__pb2.EnrollAgentRequest.SerializeToString,
+            driver_dot_v1_dot_node__service__pb2.EnrollAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,

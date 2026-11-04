@@ -45,7 +45,7 @@ fn context() -> DriverContext {
 
         app_semver: "test".into(),
         app_commit: "test".into(),
-        agent_targets: HashMap::new(),
+        agent_targets: Default::default(),
     }
 }
 
@@ -626,6 +626,8 @@ async fn backend_mutations_reject_execution_when_journal_cannot_be_written() {
     let mut ctx = context();
     ctx.state = DriverState::open(parent.join("operations.bin")).unwrap();
     ctx.agent_targets
+        .write()
+        .unwrap()
         .insert("node".into(), "127.0.0.1:1".into());
     std::fs::rename(&parent, directory.join("moved")).unwrap();
     std::fs::write(&parent, b"").unwrap();
