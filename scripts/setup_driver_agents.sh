@@ -1508,6 +1508,18 @@ EOF
       if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_CERT" "$TLS_CLIENT_CERT"; then ENV_CHANGED=1; fi
       if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_KEY" "$TLS_CLIENT_KEY"; then ENV_CHANGED=1; fi
       echo "Configured NODE_AGENT_TARGETS in ${ENV_FILE}: ${mapping_csv}"
+      # A token enrollment of these nodes is older than this install; the
+      # driver must not keep its target over the one written here.
+      local enrolled="${TLS_ROOT}/enrolled-agents" installed_mapping
+      if [[ -f "$enrolled" ]]; then
+        for installed_mapping in "${mappings[@]}"; do
+          if grep -q "^${installed_mapping%%=*}=" "$enrolled"; then
+            grep -v "^${installed_mapping%%=*}=" "$enrolled" > "${enrolled}.new" || true
+            mv "${enrolled}.new" "$enrolled"
+            ENV_CHANGED=1
+          fi
+        done
+      fi
     fi
   fi
 
