@@ -12,6 +12,9 @@
 - Apply node settings to the protocol configs in the node agent;
   `apply-node-settings.sh` only starts it. Deployment stays in the deploy
   scripts.
+- Create the AWG config and regenerate its parameters in the node agent;
+  `init-awg.sh` and `regenerate-awg-entropy.sh` only start it. Parameter
+  generation stays in `awg_profile.py`.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

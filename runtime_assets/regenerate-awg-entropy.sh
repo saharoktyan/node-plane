@@ -1,48 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -a
 source /etc/node-plane/node.env
+set +a
 
-CFG="${AWG_CONFIG:-/opt/node-plane-runtime/amnezia-awg/data/wg0.conf}"
-PRESET="${AWG_I1_PRESET:-quic}"
-CONTAINER="${AWG_CONTAINER_NAME:-amnezia-awg}"
-PROFILE_TOOL="${AWG_PROFILE_TOOL:-/opt/node-plane-runtime/awg_profile.py}"
-
-[[ -f "$CFG" ]] || { echo "AWG config not found: $CFG" >&2; exit 1; }
-BACKUP="$(mktemp "$(dirname "$CFG")/.awg-regenerate-backup-XXXXXX")"
-cp -p "$CFG" "$BACKUP"
-prepare_leased() {
-  if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then
-    python3 /opt/node-plane-runtime/apply-profile-intent.py prepare-leased-runtime awg >/dev/null
-  fi
-}
-restore_config() {
-  cp -p "$BACKUP" "$CFG"
-  prepare_leased || return 1
-  if docker info >/dev/null 2>&1; then
-    docker restart "$CONTAINER" >/dev/null 2>&1 || true
-  else
-    sudo docker restart "$CONTAINER" >/dev/null 2>&1 || true
-  fi
-  rm -f "$BACKUP"
-  echo "AWG entropy update failed; previous config restored" >&2
-}
-trap restore_config EXIT
-python3 "$PROFILE_TOOL" regenerate "$CFG" "$PRESET"
-prepare_leased
-
-if docker info >/dev/null 2>&1; then
-  docker restart "$CONTAINER" >/dev/null
-else
-  sudo docker restart "$CONTAINER" >/dev/null
-fi
-sleep 2
-if docker info >/dev/null 2>&1; then
-  STATE="$(docker inspect -f '{{.State.Status}}' "$CONTAINER")"
-else
-  STATE="$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER")"
-fi
-[[ "$STATE" == "running" ]] || { echo "AWG container is $STATE after entropy update" >&2; exit 1; }
-trap - EXIT
-rm -f "$BACKUP"
-/opt/node-plane-runtime/show-awg-entropy.sh
-echo "WARNING: client AWG configs must be reissued after entropy regeneration."
+# The agent does the work (protocols/awg/setup.rs); this script stays only
+# as the name the profile intent journal runs. An agent without
+# `awg-config` would start its server instead: the probe settings make it
+# exit.
+NODE_AGENT_CONFIG_PATH=/nonexistent/node-plane-agent-probe.toml NODE_AGENT_LISTEN_ADDR=probe \
+exec "${NODE_PLANE_AGENT_BIN:-/usr/local/bin/node-plane-agent}" awg-config regenerate

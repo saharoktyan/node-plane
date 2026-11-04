@@ -62,7 +62,7 @@ fn report(config: &str, preset: &str) -> String {
     lines.join("\n")
 }
 
-fn read(setting: Setting<'_>) -> Result<String, String> {
+pub(crate) fn read(setting: Setting<'_>) -> Result<String, String> {
     let config = setting(
         "AWG_CONFIG",
         "/opt/node-plane-runtime/amnezia-awg/data/wg0.conf",
