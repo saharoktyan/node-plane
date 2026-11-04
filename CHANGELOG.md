@@ -20,6 +20,11 @@
   `amnezia-config-decoder.py` and `awg-template.json` are removed; the
   AmneziaVPN template is built into the agent. Adds the `miniz_oxide` crate
   for `vpn://` keys.
+- Deploy the Xray and AWG containers in the node agent
+  (`node-plane-agent container-deploy`), with the same ownership checks and
+  rollback; `deploy-xray.sh` and `deploy-awg.sh` only start it, and
+  `deploy-container-guard.sh` is removed. Deployments run the agent's
+  release image pin.
 - Temporary VLESS configurations report what revocation actually does on
   their node: cards in Workstation and Telegram say open connections close
   when the node runs the Node Plane Xray image, and keep the old warning

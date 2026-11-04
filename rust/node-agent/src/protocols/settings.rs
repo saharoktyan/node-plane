@@ -4,8 +4,9 @@
 //! Replaces `apply-node-settings.sh`, which only starts this subcommand for
 //! the profile intent journal.
 //!
-//! Deployment stays in `deploy-xray.sh` and `deploy-awg.sh`, AWG parameter
-//! generation in `awg_profile.py`.
+//! Deployments run through `deploy-xray.sh` and `deploy-awg.sh`, entry
+//! points of `container-deploy` (`protocols/deploy`); AWG parameter
+//! generation stays in `awg_profile.py`.
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use super::{Setting, process_setting};
 const RUNTIME: &str = "/opt/node-plane-runtime";
 
 /// The runtime directory; tests point it elsewhere.
-fn runtime() -> PathBuf {
+pub(crate) fn runtime() -> PathBuf {
     std::env::var("NODE_PLANE_RUNTIME_ROOT")
         .unwrap_or_else(|_| RUNTIME.into())
         .into()
@@ -42,13 +43,13 @@ pub(crate) fn copy_preserving(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// A copy of `config` next to it, restored by `restore`.
-struct Backup {
+pub(crate) struct Backup {
     config: PathBuf,
     copy: PathBuf,
 }
 
 impl Backup {
-    fn take(config: &Path, prefix: &str) -> Result<Self, String> {
+    pub(crate) fn take(config: &Path, prefix: &str) -> Result<Self, String> {
         let dir = config.parent().unwrap_or(Path::new("."));
         let copy = dir.join(format!("{prefix}{}", std::process::id()));
         copy_preserving(config, &copy)?;
@@ -58,7 +59,7 @@ impl Backup {
         })
     }
 
-    fn restore(&self) {
+    pub(crate) fn restore(&self) {
         let _ = copy_preserving(&self.copy, &self.config);
     }
 }

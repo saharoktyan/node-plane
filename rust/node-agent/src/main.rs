@@ -67,6 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(code) = protocols::awg::setup::run(&args) {
         std::process::exit(code);
     }
+    if let Some(code) = protocols::deploy::run(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = protocols::settings::run(&args) {
         std::process::exit(code);
     }

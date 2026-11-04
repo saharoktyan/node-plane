@@ -2,12 +2,12 @@
 //!
 //! Earlier releases wrote their default image into node.env, where it kept
 //! overriding the default of every later release. A node.env value that some
-//! release used as its default is managed: a runtime update removes it, so
-//! the deploy scripts fall back to their own default, the release pin below.
+//! release used as its default is managed: a runtime update removes it, and
+//! deployments run the release pin below instead.
 //! Any other value is an administrator's override and stays.
 //!
 //! A runtime update then redeploys installed containers that run another
-//! image, through the deploy scripts with their rollback.
+//! image, through the deploy entry points with their rollback.
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -57,7 +57,7 @@ impl Kind {
         }
     }
 
-    /// The default of the deploy script delivered with this release.
+    /// The image deployments of this release run by default.
     pub(crate) fn release(self) -> &'static str {
         match self {
             Kind::Xray => {
@@ -86,7 +86,7 @@ impl Kind {
         configured.is_empty() || configured == self.release() || self.former().contains(&configured)
     }
 
-    /// The image the deploy script runs for this node.env value.
+    /// The image a deployment runs for this node.env value.
     pub(crate) fn resolve(self, configured: &str) -> String {
         if self.managed(configured) {
             self.release().to_string()
@@ -277,19 +277,6 @@ mod tests {
         );
         for kind in Kind::ALL {
             assert!(!kind.former().contains(&kind.release()));
-        }
-    }
-
-    #[test]
-    fn deploy_scripts_default_to_the_release_pins() {
-        let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime_assets");
-        for kind in Kind::ALL {
-            let script = fs::read_to_string(assets.join(kind.deploy_script())).unwrap();
-            assert!(
-                script.contains(&format!("{}:-{}}}", kind.variable(), kind.release())),
-                "{}",
-                kind.deploy_script()
-            );
         }
     }
 

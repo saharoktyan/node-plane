@@ -1,6 +1,7 @@
 //! Xray (VLESS) on this node.
 pub(crate) mod admission;
 pub(crate) mod api;
+pub(crate) mod deploy;
 pub(crate) mod inspection;
 pub(crate) mod rate;
 pub(crate) mod revocation;

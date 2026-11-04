@@ -1,10 +1,5 @@
 [
   {
-    "target_path": "/opt/node-plane-runtime/deploy-container-guard.sh",
-    "asset_path": "deploy-container-guard.sh",
-    "mode": "0644"
-  },
-  {
     "target_path": "/opt/node-plane-runtime/awg_ports.py",
     "asset_path": "awg_ports.py",
     "mode": "0644"

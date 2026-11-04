@@ -61,11 +61,9 @@ class DockerRuntimeTests(unittest.TestCase):
     def test_xray_image_reference_is_version_and_digest_pinned(self):
         self.assertRegex(XRAY_IMAGE, r'ghcr\.io/saharoktyan/xray-core:v26\.10\.31-np\.2@sha256:[0-9a-f]{64}')
         root = Path(__file__).resolve().parents[1]
-        # Check the runtime entry points that select an image.
-        # The agent's own default lives in runtime/images.rs (checked there).
-        for name in ('deploy-xray.sh', 'apply-profile-intent.py'):
-            with self.subTest(path=name):
-                path = root / 'runtime_assets' / name
+        # Deployments run the agent's release pin; the journal names it too.
+        for path in (root / 'rust/node-agent/src/runtime/images.rs', root / 'runtime_assets/apply-profile-intent.py'):
+            with self.subTest(path=path.name):
                 self.assertIn(XRAY_IMAGE, path.read_text())
 
     def setUp(self):

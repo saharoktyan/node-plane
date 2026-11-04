@@ -1,6 +1,7 @@
 //! AmneziaWG on this node.
 pub(crate) mod addresses;
 pub(crate) mod client;
+pub(crate) mod deploy;
 pub(crate) mod entropy;
 pub(crate) mod inspection;
 pub(crate) mod peer_issue;

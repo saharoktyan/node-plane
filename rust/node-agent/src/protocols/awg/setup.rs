@@ -13,9 +13,10 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use super::entropy;
+use crate::protocols::deploy::prepare_leased;
 use crate::protocols::{Setting, process_setting};
 
-fn profile_tool(setting: Setting<'_>) -> String {
+pub(crate) fn profile_tool(setting: Setting<'_>) -> String {
     setting("AWG_PROFILE_TOOL", "/opt/node-plane-runtime/awg_profile.py")
 }
 
@@ -28,7 +29,7 @@ fn config_path(setting: Setting<'_>) -> PathBuf {
 }
 
 /// `python3 awg_profile.py ARGS`: its stdout, or its error.
-fn profile(tool: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) fn profile(tool: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("python3")
         .arg(tool)
         .args(args)
@@ -106,26 +107,6 @@ fn docker(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Lets the lease supervisor drop expired peers before the container starts.
-fn prepare_leased() -> Result<(), String> {
-    if !Path::new("/etc/systemd/system/node-plane-leased-awg.service").exists() {
-        return Ok(());
-    }
-    let status = Command::new("python3")
-        .args([
-            "/opt/node-plane-runtime/apply-profile-intent.py",
-            "prepare-leased-runtime",
-            "awg",
-        ])
-        .stdout(Stdio::null())
-        .status()
-        .map_err(|err| err.to_string())?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "lease preparation failed".into())
-}
-
 /// New parameters for the preset, applied by restarting the container;
 /// the previous config comes back when that fails. Client configs must be
 /// reissued afterwards.
@@ -146,7 +127,7 @@ fn regenerate(setting: Setting<'_>) -> Result<String, String> {
                 &setting("AWG_I1_PRESET", "quic"),
             ],
         )?;
-        prepare_leased()?;
+        prepare_leased("awg")?;
         docker(&["restart", &container])?;
         std::thread::sleep(Duration::from_secs(2));
         let state = docker(&["inspect", "-f", "{{.State.Status}}", &container])?;
@@ -157,7 +138,7 @@ fn regenerate(setting: Setting<'_>) -> Result<String, String> {
     };
     let result = attempt();
     if let Err(err) = &result {
-        let restored = fs::copy(&backup, &config).is_ok() && prepare_leased().is_ok();
+        let restored = fs::copy(&backup, &config).is_ok() && prepare_leased("awg").is_ok();
         let _ = fs::remove_file(&backup);
         if restored {
             let _ = docker(&["restart", &container]);

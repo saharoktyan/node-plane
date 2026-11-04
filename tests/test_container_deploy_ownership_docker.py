@@ -1,3 +1,6 @@
+"""Container deployments through deploy-xray.sh and deploy-awg.sh, which
+start the built agent, against a stateful fake Docker. In the Docker suite,
+where CI builds the agent."""
 import json
 import os
 import pathlib
@@ -11,6 +14,7 @@ import uuid
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 ASSETS = REPO_ROOT / "runtime_assets"
+AGENT_BINARY = REPO_ROOT / "rust/node-agent/target/debug/node-plane-agent"
 HEX64_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
@@ -547,6 +551,15 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
 
     server_key = "test-node-key"
     node_env = root / "node.env"
+    # The agent finds the marker, the runtime and the TUN device here, and
+    # does not wait for containers to settle.
+    common = (
+        f"NODE_PLANE_INSTALLATION_MARKER={shlex.quote(str(installation_file))}\n"
+        f"NODE_PLANE_RUNTIME_ROOT={shlex.quote(str(root))}\n"
+        "NODE_PLANE_DEPLOY_SETTLE_SECONDS=0\n"
+        "AWG_TUN_DEVICE=/dev/null\n"
+        f"AWG_PROFILE_TOOL={shlex.quote(str(ASSETS / 'awg_profile.py'))}\n"
+    )
 
     if protocol == "xray":
         docker_dir = root / "xray"
@@ -558,6 +571,7 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
         mount_source = str(docker_dir)
         mount_dest = "/etc/xray"
         node_env.write_text(
+            common +
             f"SERVER_KEY={server_key}\n"
             f"XRAY_DOCKER_DIR={shlex.quote(str(docker_dir))}\n"
             f"XRAY_CONFIG={shlex.quote(str(config_file))}\n"
@@ -582,6 +596,7 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
         mount_source = str(data_dir)
         mount_dest = "/opt/amnezia/awg"
         node_env.write_text(
+            common +
             f"SERVER_KEY={server_key}\n"
             f"AWG_DOCKER_DIR={shlex.quote(str(docker_dir))}\n"
             f"AWG_CONFIG={shlex.quote(str(config_file))}\n"
@@ -593,38 +608,9 @@ def prepare_deployment_env(root: pathlib.Path, protocol: str, fake_docker: FakeD
     else:
         raise ValueError(f"Unknown protocol: {protocol}")
 
-    # Copy and adapt deploy-container-guard.sh beside scripts
-    guard_src = ASSETS / "deploy-container-guard.sh"
-    guard_dst = root / "deploy-container-guard.sh"
-    guard_content = guard_src.read_text(encoding="utf-8").replace(
-        "/var/lib/node-plane-agent/controller-installation-id", str(installation_file)
-    )
-    guard_dst.write_text(guard_content, encoding="utf-8")
-    guard_dst.chmod(0o755)
-
-    # Copy and adapt target deployment script
-    if protocol == "xray":
-        script_src = ASSETS / "deploy-xray.sh"
-        script_dst = root / "deploy-xray.sh"
-        script_content = (
-            script_src.read_text(encoding="utf-8")
-            .replace("source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
-            .replace("chmod 0755 /opt >/dev/null 2>&1 || true", ":")
-            .replace("chmod 0755 /opt/node-plane-runtime >/dev/null 2>&1 || true", ":")
-            .replace("if [[ -f /etc/systemd/system/node-plane-leased-xray.service ]]; then", "if false; then")
-        )
-    else:
-        script_src = ASSETS / "deploy-awg.sh"
-        script_dst = root / "deploy-awg.sh"
-        script_content = (
-            script_src.read_text(encoding="utf-8")
-            .replace("source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
-            .replace("if [[ ! -c /dev/net/tun ]]; then", "if false; then")
-            .replace("if [[ -f /etc/systemd/system/node-plane-leased-awg.service ]]; then", "if false; then")
-            .replace("/opt/node-plane-runtime/awg_profile.py", str(ASSETS / "awg_profile.py"))
-            .replace("/opt/node-plane-runtime/awg_ipv6.py", str(ASSETS / "awg_ipv6.py"))
-        )
-
+    script_dst = root / f"deploy-{protocol}.sh"
+    script_content = (ASSETS / script_dst.name).read_text(encoding="utf-8").replace(
+        "source /etc/node-plane/node.env", f"source {shlex.quote(str(node_env))}")
     script_dst.write_text(script_content, encoding="utf-8")
     script_dst.chmod(0o755)
 
@@ -649,6 +635,7 @@ def execute_deploy(dep_env: dict, timeout: int = 15) -> subprocess.CompletedProc
     env = os.environ.copy()
     env["PATH"] = f"{dep_env['bin_dir']}:{env['PATH']}"
     env["TMPDIR"] = str(dep_env["root"])
+    env["NODE_PLANE_AGENT_BIN"] = str(AGENT_BINARY)
     return subprocess.run(
         ["bash", str(dep_env["script"])],
         env=env,
@@ -658,6 +645,7 @@ def execute_deploy(dep_env: dict, timeout: int = 15) -> subprocess.CompletedProc
     )
 
 
+@unittest.skipUnless(os.environ.get("NODE_PLANE_TEST_DOCKER") == "1", "requires the Docker suite")
 class ContainerDeployOwnershipTests(unittest.TestCase):
     def test_first_deployment_records_owned_container_without_previous_instance(self):
         for protocol in ('xray', 'awg'):
@@ -1192,72 +1180,6 @@ class ContainerDeployOwnershipTests(unittest.TestCase):
             res = execute_deploy(dep)
             self.assertNotEqual(res.returncode, 0)
             self.assertEqual(fake_docker.get_mutations(), [])
-
-    def test_container_guard_validate_unit_cases(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = pathlib.Path(temp_dir)
-            fake_docker = FakeDocker(root)
-            dep = prepare_deployment_env(root, "xray", fake_docker)
-            guard_script = dep["root"] / "deploy-container-guard.sh"
-
-            def run_guard_validate(cid, expected_name, deployment=""):
-                cmd = f"""set -euo pipefail
-source {shlex.quote(str(dep["env_file"]))}
-source {shlex.quote(str(guard_script))}
-docker_cmd() {{
-  {shlex.quote(str(fake_docker.bin_dir / "docker"))} "$@"
-}}
-container_guard_init xray {shlex.quote(expected_name)} {shlex.quote(dep["mount_source"])} /etc/xray
-trap 'rm -rf -- "$NP_GUARD_DIR"' EXIT
-container_guard_validate {shlex.quote(cid)} {shlex.quote(expected_name)} {shlex.quote(deployment)}
-"""
-                env = os.environ.copy()
-                env["PATH"] = f"{fake_docker.bin_dir}:{env['PATH']}"
-                env["TMPDIR"] = str(root)
-                return subprocess.run(["bash", "-c", cmd], env=env, capture_output=True, text=True, timeout=10)
-
-            # 1. Invalid CID regex (not 64-hex)
-            r = run_guard_validate("not-a-64-hex-id", "xray")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("Invalid Docker container identity", r.stderr)
-
-            # 2. Valid CID but inspect reveals ID changed
-            valid_cid = "a" * 64
-            fake_docker.add_container(
-                "xray", dep["mount_source"], "/etc/xray", rw=False, container_id=valid_cid
-            )
-            # Change Id in state to simulate mismatch
-            state = fake_docker._load_state()
-            state["containers"][valid_cid]["Id"] = "b" * 64
-            fake_docker._save_state(state)
-            r = run_guard_validate(valid_cid, "xray")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("Container identity changed during deployment", r.stderr)
-
-            # 3. Valid CID but Name mismatch
-            valid_cid_2 = "c" * 64
-            fake_docker.add_container(
-                "other-name", dep["mount_source"], "/etc/xray", rw=False, container_id=valid_cid_2
-            )
-            r = run_guard_validate(valid_cid_2, "xray")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("Container identity changed during deployment", r.stderr)
-
-            # 4. Deployment token mismatch
-            valid_cid_3 = "d" * 64
-            labels = {
-                "org.node-plane.managed": "1",
-                "org.node-plane.installation": dep["installation_id"],
-                "org.node-plane.node": dep["server_key"],
-                "org.node-plane.service": "xray",
-                "org.node-plane.deployment": "token-1111",
-            }
-            fake_docker.add_container(
-                "xray", dep["mount_source"], "/etc/xray", rw=False, labels=labels, container_id=valid_cid_3
-            )
-            r = run_guard_validate(valid_cid_3, "xray", deployment="token-2222")
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("Container belongs to another deployment", r.stderr)
 
 
 if __name__ == "__main__":

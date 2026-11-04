@@ -1,16 +1,17 @@
+"""An AWG deployment from an older config that fails, through the built
+agent. In the Docker suite."""
+import os
 import pathlib
 import tempfile
 import unittest
 
-from tests.test_container_deploy_ownership import (
+from tests.test_container_deploy_ownership_docker import (
     FakeDocker,
     prepare_deployment_env,
     execute_deploy,
 )
 
-ASSETS = pathlib.Path(__file__).resolve().parents[1] / "runtime_assets"
-
-
+@unittest.skipUnless(os.environ.get("NODE_PLANE_TEST_DOCKER") == "1", "requires the Docker suite")
 class AwgDeployRollbackTests(unittest.TestCase):
     def test_failed_new_container_restores_old_config_and_container(self):
         with tempfile.TemporaryDirectory() as directory:
