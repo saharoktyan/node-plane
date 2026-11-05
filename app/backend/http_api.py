@@ -19,6 +19,7 @@ from .authorization import (
     ADMIN_PERMISSIONS, require_permission, resolve_actor,
 )
 from .credentials import CredentialService
+from . import relay_policy
 from .announcements import AnnouncementService
 from .alerts import AlertService
 from .identity import IdentityService
@@ -1080,6 +1081,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         started = perf_counter()
         handler_ms = 0.0
         request.state.request_id = str(uuid4())
+        if relay_policy.through_relay(request.headers):
+            try:
+                kind = credentials.authenticate(request.headers.get('Authorization')).kind.value
+            except AccessDenied:
+                kind = None
+            refused = relay_policy.refusal(request.url.path, request.headers, kind)
+            if refused:
+                response = error(request, refused, 403)
+                response.headers['X-Request-ID'] = request.state.request_id
+                response.headers['Cache-Control'] = 'no-store'
+                return response
         content_length = request.headers.get('content-length')
         if content_length is not None:
             try:
