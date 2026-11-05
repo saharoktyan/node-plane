@@ -56,6 +56,8 @@ CLEAR = (
     # Rebuilt from the restored nodes.
     "backend_agent_installations",
     "backend_service_instances",
+    # Rebuilt from the restored VPN profiles.
+    "backend_service_profiles",
     "backend_renewal_requests",
     "backend_agent_ssh_installs",
     "backend_agent_enrollments",
@@ -814,6 +816,8 @@ class BackupService:
             backfill(conn)
             from .service_instances import sync_all
             sync_all(conn)
+            from .service_profiles import rebuild
+            rebuild(conn)
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
             )

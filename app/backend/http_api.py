@@ -1319,9 +1319,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if 'nodes.manage' in permissions:
             from .onboarding import progress
             progress(db, current)
-        from .profiles import ProfileRepository
+        from .service_profiles import services as account_services
         with db.connect() as conn:
-            services = ['vpn'] if ProfileRepository.has_vpn_profile(conn, current.account.id) else []
+            services = account_services(conn, current.account.id)
         from .authorization import effective_roles
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         roles=sorted(effective_roles(current.account)),

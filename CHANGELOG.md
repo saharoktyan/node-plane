@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Accounts hold service profiles (migration r0036): every VPN profile is
+  the `vpn` service profile of its account, with the same id. The services
+  in `GET /api/v1/me` come from them. Backups need no new format: the
+  records are rebuilt from the restored VPN profiles.
 - Each service type on nodes has a permission (`services.xray.manage`,
   `services.awg.manage`), held by owners, administrators and operators and
   listed by `GET /api/v1/me`. Editing node settings and queueing their

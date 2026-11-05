@@ -71,14 +71,15 @@ class ProfileRepository:
             (id, runtime_name, display_name, owner_account_id, created_at)
             VALUES (?, ?, ?, ?, ?)''', (profile_id, 'account_' + profile_id.replace('-', ''),
                                       name, account_id, datetime.now(timezone.utc).isoformat()))
+        from .service_profiles import record
+        record(conn, profile_id, account_id)
         return profile_id
 
     @staticmethod
     def has_vpn_profile(conn, account_id):
         """Whether the account owns a VPN profile that is not being deleted."""
-        return conn.execute("""SELECT 1 FROM backend_profiles p WHERE p.owner_account_id = ?
-            AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)""",
-            (account_id,)).fetchone() is not None
+        from .service_profiles import services
+        return 'vpn' in services(conn, account_id)
 
     def initialize_schema(self):
         from .alerts import AlertService
@@ -131,6 +132,8 @@ class ProfileRepository:
             create_vpn_policy_schema(conn)
             from db.migration_revisions.r0011_account_deletions import create_schema
             create_schema(conn)
+            from .service_profiles import create_schema
+            create_schema(conn)
         from .node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).initialize_schema()
         from .node_operations import NodeOperations
@@ -172,6 +175,8 @@ class ProfileRepository:
                 VALUES (?, ?, ?, ?, ?)''',
                 (profile_id, runtime_name, display_name, owner_account_id,
                  datetime.now(timezone.utc).isoformat()))
+            from .service_profiles import record
+            record(conn, profile_id, owner_account_id)
         return profile_id
 
     @staticmethod

@@ -124,6 +124,8 @@ class ProfileCommands:
                     VALUES (?, ?, ?, ?, ?, ?)''',
                     (profile_id, 'p_' + uuid4().hex, display_name.strip(), owner,
                      datetime.now(timezone.utc).isoformat(), expires_at))
+                from .service_profiles import record
+                record(conn, profile_id, owner)
                 for node_key, protocol in sorted(grants):
                     conn.execute('INSERT INTO backend_grants(profile_id, node_key, protocol) VALUES (?, ?, ?)',
                                  (profile_id, node_key, protocol))

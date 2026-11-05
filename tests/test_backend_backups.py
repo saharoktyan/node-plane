@@ -137,6 +137,8 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual(self.service.get(actor, job['id'])['phase'], 'restored')
         self.assertEqual(self.identities.find_telegram_account(101).id, new_id)
         self.assertEqual(ProfileRepository(self.db).get(profile_id)['owner_account_id'], new_id)
+        self.assertEqual([tuple(row) for row in self.db.connection.execute(
+            'SELECT id, account_id, service FROM backend_service_profiles').fetchall()], [(profile_id, new_id, 'vpn')])
         self.assertIsNone(self.db.connection.execute('SELECT id FROM backend_accounts WHERE id=?', (self.admin.id,)).fetchone())
 
     def test_http_import_and_export_validate_authentication_and_return_original_snapshot(self):
