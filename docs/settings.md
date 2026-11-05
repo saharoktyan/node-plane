@@ -24,6 +24,6 @@ Set the displayed bot name in installation settings → Telegram; like the bot's
 
 ## Announcements
 
-Choose recipients, write the message and preview it before sending. Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
+Choose recipients, write the message and preview it before sending. The preview shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
 
 For backups, alerts, audits and cleanup, see [Maintenance](maintenance.md).

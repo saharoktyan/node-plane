@@ -9527,3 +9527,24 @@ fn the_command_prompt_copies_until_done() {
     assert!(matches!(rx.recv().unwrap(), Answer::Confirm(true)));
     assert!(app.prompt.is_none() && app.prompt_notice.is_empty());
 }
+
+#[test]
+fn announcement_screens_count_recipients_reached_only_in_the_inbox() {
+    use super::screens::{delivery_counts, preview_recipients};
+    use serde_json::json;
+    assert_eq!(
+        preview_recipients(&json!({"recipients":5,"telegram":3})),
+        "5 recipients (3 in Telegram, 2 only in the Inbox)"
+    );
+    assert_eq!(
+        preview_recipients(&json!({"recipients":5,"telegram":5})),
+        "5 recipients"
+    );
+    assert_eq!(preview_recipients(&json!({"recipients":2})), "2 recipients");
+    let counts = json!({"sent":1,"failed":0,"unknown":0,"skipped":0,"inbox_only":2});
+    assert_eq!(
+        delivery_counts(&counts),
+        "Sent: 1 · Failed: 0 · Unknown: 0 · Skipped: 0 · Inbox only: 2"
+    );
+    assert!(!delivery_counts(&json!({"sent":1,"inbox_only":0})).contains("Inbox"));
+}

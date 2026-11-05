@@ -185,9 +185,6 @@ fn entry() -> Result<()> {
         "Specify a command and controller hostname when the full-screen interface is disabled."
     );
     if request.action == Action::Install {
-        if request.admin_ids.is_empty() {
-            request.admin_ids = read_line("Telegram administrator ID(s): ")?;
-        }
         request.bot_token = match std::env::var("NODE_PLANE_BOT_TOKEN") {
             Ok(value) => Zeroizing::new(value),
             Err(_) => {
@@ -195,9 +192,14 @@ fn entry() -> Result<()> {
                     io::stdin().is_terminal(),
                     "Set NODE_PLANE_BOT_TOKEN for noninteractive installation; never pass a token in command arguments."
                 );
-                Zeroizing::new(rpassword::prompt_password("BotFather token (hidden): ")?)
+                Zeroizing::new(rpassword::prompt_password(
+                    "BotFather token (hidden, empty for no bot): ",
+                )?)
             }
         };
+        if !request.bot_token.is_empty() && request.admin_ids.is_empty() {
+            request.admin_ids = read_line("Telegram administrator ID(s): ")?;
+        }
     }
     request.validate()?;
     if request.action == Action::Install && io::stdin().is_terminal() {

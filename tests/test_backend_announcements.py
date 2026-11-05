@@ -55,7 +55,8 @@ class AnnouncementTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_account_channels SET enabled=0 WHERE account_id=?",
                                    (self.member['id'],))
         self.db.connection.commit()
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 1)
+        preview = self.service.preview(self.actor, 'Hello')
+        self.assertEqual((preview['recipients'], preview['telegram']), (1, 0))
         self.service.queue(self.actor, 'Hello', str(uuid4()))
         self.assertEqual(self.inbox_deliveries(), [(None, 'inbox_only')])
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
@@ -192,7 +193,7 @@ class AnnouncementTests(unittest.TestCase):
         self.identities.resolve_telegram(104)
         self.identities.create_account()
         preview = self.service.preview(self.actor, " Hello ")
-        self.assertEqual(preview, {"text": "Hello", "recipients": 1})
+        self.assertEqual(preview, {"text": "Hello", "recipients": 1, "telegram": 1})
         job = self.service.queue(self.actor, "Hello", str(uuid4()))
         self.assertEqual(job["total"], 1)
         self.assertEqual(job["counts"]["queued"], 1)

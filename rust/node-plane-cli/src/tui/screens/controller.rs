@@ -692,12 +692,9 @@ pub(in crate::tui) fn draw_controller(
     } else if let Some(job) = &state.announcement_job {
         let counts = &job["counts"];
         text = format!(
-            "Announcement delivery · {}\nSent: {} · Failed: {} · Unknown: {} · Skipped: {}\nQueued: {} · Sending: {}",
+            "Announcement delivery · {}\n{}\nQueued: {} · Sending: {}",
             job["status"].as_str().unwrap_or("unknown"),
-            counts["sent"],
-            counts["failed"],
-            counts["unknown"],
-            counts["skipped"],
+            delivery_counts(counts),
             counts["queued"],
             counts["claimed"]
         );
@@ -716,8 +713,8 @@ pub(in crate::tui) fn draw_controller(
         ]);
     } else if let Some(preview) = &state.announcement_preview {
         text = format!(
-            "Announcement preview · {} recipients\n\n{}",
-            preview["recipients"],
+            "Announcement preview · {}\n\n{}",
+            preview_recipients(preview),
             preview["text"].as_str().unwrap_or("")
         );
         controls.extend([
@@ -739,12 +736,9 @@ pub(in crate::tui) fn draw_controller(
         if let Some(last) = overview.get("last_job").filter(|v| v.is_object()) {
             let counts = &last["counts"];
             text = format!(
-                "Last announcement · {}\nSent: {} · Failed: {} · Unknown: {} · Skipped: {}",
+                "Last announcement · {}\n{}",
                 last["status"].as_str().unwrap_or("unknown"),
-                counts["sent"],
-                counts["failed"],
-                counts["unknown"],
-                counts["skipped"]
+                delivery_counts(counts)
             );
             if last["status"] == "running"
                 && let Some(id) = last["id"]
@@ -2061,4 +2055,28 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
                 }
             })
     })
+}
+
+/// Announcement recipients, split by channel when some are reached only in the Inbox.
+pub(in crate::tui) fn preview_recipients(preview: &serde_json::Value) -> String {
+    let total = preview["recipients"].as_u64().unwrap_or(0);
+    match preview["telegram"].as_u64() {
+        Some(telegram) if telegram < total => format!(
+            "{total} recipients ({telegram} in Telegram, {} only in the Inbox)",
+            total - telegram
+        ),
+        _ => format!("{total} recipients"),
+    }
+}
+
+/// Delivery counts of an announcement; the Inbox-only count appears when there is one.
+pub(in crate::tui) fn delivery_counts(counts: &serde_json::Value) -> String {
+    let mut text = format!(
+        "Sent: {} · Failed: {} · Unknown: {} · Skipped: {}",
+        counts["sent"], counts["failed"], counts["unknown"], counts["skipped"]
+    );
+    if counts["inbox_only"].as_u64().unwrap_or(0) > 0 {
+        text.push_str(&format!(" · Inbox only: {}", counts["inbox_only"]));
+    }
+    text
 }

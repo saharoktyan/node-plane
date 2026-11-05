@@ -96,9 +96,11 @@ class AnnouncementService:
     def preview(self, actor, text):
         require_permission(actor, "settings.manage")
         text = self.validate_text(text)
+        from .account_channels import telegram_chat
         with self.db.connect() as conn:
             recipients = self._recipients(conn, actor.account.id)
-        return {"text": text, "recipients": len(recipients)}
+            telegram = sum(1 for row in recipients if telegram_chat(conn, row))
+        return {"text": text, "recipients": len(recipients), "telegram": telegram}
 
     @staticmethod
     def _recipients(conn, sender):

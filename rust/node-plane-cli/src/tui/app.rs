@@ -224,7 +224,12 @@ impl App {
             Action::Install => (
                 "Install Node Plane?",
                 format!(
-                    "Install {release} on {host}.\n\nPrepare PostgreSQL, controller services, the Telegram bot and driver.\nSSH user: {}",
+                    "Install {release} on {host}.\n\nPrepare PostgreSQL, controller services, {}driver.\nSSH user: {}",
+                    if self.form.fields[6].trim().is_empty() {
+                        ""
+                    } else {
+                        "the Telegram bot and "
+                    },
                     self.form.fields[2]
                 ),
             ),

@@ -319,7 +319,11 @@ NODE_PLANE_CHANNEL
     );
     stage("Starting installation");
     checked(session, &command, None, journal, true, tx).await?;
-    stage("Verifying services, Telegram startup and backend readiness");
+    stage(if request.bot_token.is_empty() {
+        "Verifying services and backend readiness"
+    } else {
+        "Verifying services, Telegram startup and backend readiness"
+    });
     checked(session, VERIFY, None, journal, false, tx).await.with_context(||
         "Controller installation has completed, but final verification failed. Correct the reported problem and run Check installation; do not install the controller again.")?;
     stage("Registering this workstation key with the controller administrator");
@@ -338,7 +342,14 @@ NODE_PLANE_CHANNEL
             )
         })?;
     crate::backend::revoke(session, session_id).await?;
-    Ok("Node Plane is installed. Open your Telegram bot and send /start.\nThe workstation public key is saved on the server; future connections do not need a password.".into())
+    Ok(format!(
+        "Node Plane is installed. {}\nThe workstation public key is saved on the server; future connections do not need a password.",
+        if request.bot_token.is_empty() {
+            "Manage it from this workstation; the Telegram bot can be turned on later in Controller settings."
+        } else {
+            "Open your Telegram bot and send /start."
+        }
+    ))
 }
 
 async fn checked(

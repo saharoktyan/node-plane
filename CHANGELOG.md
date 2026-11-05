@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Announcements show who is reached only in the Inbox: the preview counts
+  recipients in Telegram (`telegram` in `POST /api/v1/announcements/preview`)
+  and delivery results show **Inbox only**. Workstation's installer no longer
+  mentions the bot when it is installed without one, and the command-line
+  install asks for administrator IDs only when a bot token is given.
 - While the Telegram bot is off, Workstation's request settings keep only
   the access-request switch (the bot's notifications and messages are
   hidden); the access-request policy reports `telegram`. Account cards show

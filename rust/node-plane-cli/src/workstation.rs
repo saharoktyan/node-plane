@@ -838,7 +838,7 @@ async fn update(
     };
     if !record.dispatch_started {
         let description = format!(
-            "Update the entire stack on {} to {} ({})?\n\nBackend, worker, driver and Telegram client are updated together, followed by node agents and runtimes. A server whose VPN container image changes restarts that container, and its current VPN connections drop. The backend manages rollback if a controller component fails.\n\nOperation: {}",
+            "Update the entire stack on {} to {} ({})?\n\nBackend, worker, driver and the Telegram bot (when it is on) are updated together, followed by node agents and runtimes. A server whose VPN container image changes restarts that container, and its current VPN connections drop. The backend manages rollback if a controller component fails.\n\nOperation: {}",
             request.host, record.intent.target_ref, record.intent.branch, record.id
         );
         let description = if !request.tag.trim().is_empty() {
