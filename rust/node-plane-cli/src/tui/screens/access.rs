@@ -609,13 +609,16 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 ])
                 .split(rows[0]);
                 frame.render_widget(
-                    Paragraph::new("Enter a Telegram ID or a known @username."),
+                    Paragraph::new(
+                        "Enter a Telegram ID or a known @username, or a name for a person without Telegram.",
+                    )
+                    .wrap(Wrap { trim: false }),
                     content[0],
                 );
                 draw_field(
                     frame,
                     content[1],
-                    "Telegram ID / @username",
+                    "Telegram ID / @username / name",
                     &draft.identity,
                     app.access.selected == 0,
                 );

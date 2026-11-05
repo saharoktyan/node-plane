@@ -153,7 +153,7 @@ impl App {
             Control::AccessProvisionNext => {
                 if let Some(draft) = &mut self.access.provision {
                     if draft.identity.trim().is_empty() {
-                        self.error = "Enter a Telegram ID or @username.".into();
+                        self.error = "Enter a Telegram ID, @username or name.".into();
                     } else {
                         draft.confirm = true;
                         self.error.clear();

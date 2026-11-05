@@ -76,7 +76,7 @@ impl Command {
             Self::Provision { identity, key } => (
                 hyper::Method::POST,
                 "/api/v1/accounts".into(),
-                Some(json!({"identity":identity})),
+                Some(provision_body(identity)),
                 Some(*key),
             ),
             Self::EditContext { .. } => (
@@ -1012,31 +1012,42 @@ pub fn label(tab: Tab, item: &Value) -> String {
                 "Active"
             }
         ),
-        _ => format!(
-            "{}{} · {}",
-            item["display_name"]
+        _ => {
+            // The account's name, its Telegram identity when it has one, then its role.
+            let username = item["username"]
                 .as_str()
                 .filter(|name| !name.is_empty())
-                .filter(|name| item["username"]
-                    .as_str()
-                    .map(|u| format!("@{u}"))
-                    .as_deref()
-                    != Some(*name))
-                .map(|name| format!("{name} · "))
-                .unwrap_or_default()
-                + &text(&item["telegram_user_id"]),
-            item["username"]
+                .map(|name| format!("@{}", name.trim_start_matches('@')));
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(name) = item["display_name"]
                 .as_str()
-                .map(|name| format!(" · @{name}"))
-                .unwrap_or_default(),
-            text(
+                .filter(|name| !name.is_empty() && Some(*name) != username.as_deref())
+            {
+                parts.push(name.to_owned());
+            }
+            if !item["telegram_user_id"].is_null() || parts.is_empty() {
+                parts.push(text(&item["telegram_user_id"]));
+            }
+            parts.extend(username);
+            parts.push(text(
                 &item[if tab == Tab::Accounts {
                     "role"
                 } else {
                     "status"
-                }]
-            )
-        ),
+                }],
+            ));
+            parts.join(" · ")
+        }
+    }
+}
+
+/// A Telegram ID or @username names a Telegram user; anything else is the
+/// name of a person without Telegram.
+pub fn provision_body(identity: &str) -> Value {
+    if identity.starts_with('@') || identity.bytes().all(|b| b.is_ascii_digit()) {
+        json!({"identity": identity})
+    } else {
+        json!({"display_name": identity})
     }
 }
 
@@ -1044,7 +1055,7 @@ pub fn provision_error(error: &str) -> String {
     let cause = if error.contains("telegram_id_required") {
         "this username is not known. Use the user's Telegram ID."
     } else if error.contains("invalid_telegram_identity") {
-        "enter a positive Telegram ID or a valid @username."
+        "enter a positive Telegram ID, a valid @username, or a name."
     } else if error.contains("account_disabled") {
         "this profile is blocked. Open the existing profile to manage it."
     } else if error.contains("permission_denied") {
@@ -1073,6 +1084,34 @@ pub fn role_error(error: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn people_without_telegram_are_created_and_shown_by_name() {
+        use super::{Tab, label, provision_body};
+        assert_eq!(provision_body("102"), json!({"identity":"102"}));
+        assert_eq!(provision_body("@ann"), json!({"identity":"@ann"}));
+        assert_eq!(provision_body("Ann Lee"), json!({"display_name":"Ann Lee"}));
+        assert_eq!(
+            label(
+                Tab::Accounts,
+                &json!({"display_name":"Ann Lee","telegram_user_id":null,"role":"member"})
+            ),
+            "Ann Lee · member"
+        );
+        assert_eq!(
+            label(
+                Tab::Accounts,
+                &json!({"display_name":"Ann Lee","telegram_user_id":101,"username":"ann","role":"admin"})
+            ),
+            "Ann Lee · 101 · @ann · admin"
+        );
+        assert_eq!(
+            label(
+                Tab::Accounts,
+                &json!({"display_name":"@ann","telegram_user_id":101,"username":"ann","role":"admin"})
+            ),
+            "101 · @ann · admin"
+        );
+    }
     #[test]
     fn profiles_exclude_pending_and_deleted_accounts_and_keep_blocked() {
         let mut profiles = json!({"items":[

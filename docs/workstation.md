@@ -172,7 +172,7 @@ Open **Settings → Documentation** to select a named guide with a short descrip
 
 Notes, announcements and manual AWG parameters support multiline input, automatic wrapping, a visible cursor and a scrollbar. Use arrows to move the cursor, Page Up/Down or the mouse wheel to scroll, and Tab to move to the dialog buttons. Backspace deletes text inside input fields and acts as Back/Cancel elsewhere.
 
-**Access → Profiles → New profile** asks for a Telegram ID or a known @username and creates an account together with its default VPN profile. Open the resulting profile to configure access. An existing account reuses its profile. Only its owner can rename an administrator profile.
+**Access → Profiles → New profile** asks for a Telegram ID or a known @username, or a name for a person without Telegram, and creates an account together with its default VPN profile. An account created by name has no Telegram login and gets its notifications in the Inbox. Open the resulting profile to configure access. An existing account reuses its profile. Only its owner can rename an administrator profile.
 
 Workstation Audit shows readable actions and profile identities, with **All / Errors** filters. Event details retain the API endpoint.
 

@@ -45,7 +45,7 @@ class ProfileRepository:
     @staticmethod
     def ensure_account_profile_in_transaction(conn, account_id):
         conn.execute('UPDATE backend_accounts SET revision = revision WHERE id = ?', (account_id,))
-        account = conn.execute('''SELECT a.role, i.subject, d.username
+        account = conn.execute('''SELECT a.role, a.display_name, i.subject, d.username
             FROM backend_accounts a LEFT JOIN backend_external_identities i
             ON i.account_id = a.id AND i.provider = 'telegram'
             LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
@@ -53,7 +53,7 @@ class ProfileRepository:
         if account is None:
             raise AccessDenied('resource_not_found', 404)
         fallback = f"{'Admin' if account['role'] == 'admin' else 'User'} {account['subject'] or account_id}"
-        name = account['username'] or fallback
+        name = account['username'] or (account['display_name'] if not account['subject'] else None) or fallback
         existing = conn.execute('''SELECT p.id, p.display_name FROM backend_profiles p
             WHERE p.owner_account_id = ?
             ORDER BY p.id LIMIT 1''',

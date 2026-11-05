@@ -34,6 +34,28 @@ class BackendAccountTests(unittest.TestCase):
         self.assertIsNone(self.client.post(path + '/claim', headers=self.headers).json()['delivery'])
         self.assertEqual(self.client.post(path + '/claim', headers=self.headers_for(101)).status_code, 422)
 
+    def test_person_without_telegram_is_provisioned_by_name(self):
+        from backend.workstation_cli import SCOPES
+        from backend.authorization import PrincipalKind
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
+        def post(body, key):
+            return self.client.post('/api/v1/accounts', json=body,
+                headers={'Authorization': 'Bearer ' + token, 'Idempotency-Key': key})
+        key = str(uuid4())
+        created = post({'display_name': ' Ann Lee '}, key)
+        self.assertEqual(created.status_code, 201, created.text)
+        value = created.json()
+        self.assertEqual((value['account']['display_name'], value['account']['telegram_user_id'],
+                          value['account']['status'], value['profile']['display_name'], value['created']),
+                         ('Ann Lee', None, 'approved', 'Ann Lee', True))
+        self.assertEqual(post({'display_name': 'Ann Lee'}, key).json()['account']['id'], value['account']['id'])
+        self.assertEqual(post({'display_name': 'Bo'}, key).status_code, 409)
+        self.assertIsNone(self.db.connection.execute('SELECT 1 FROM backend_account_channels WHERE account_id=?',
+                                                     (value['account']['id'],)).fetchone())
+        for body in ({}, {'identity': '102', 'display_name': 'Ann'}, {'display_name': 'a\nb'}):
+            with self.subTest(body=body):
+                self.assertEqual(post(body, str(uuid4())).status_code, 422)
+
     def test_admin_account_lifecycle_and_idempotency(self):
         guest = self.register(102).json()
         self.assertEqual(guest['status'], 'pending')

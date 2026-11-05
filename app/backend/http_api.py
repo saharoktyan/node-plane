@@ -112,7 +112,9 @@ class AccountPage(BaseModel):
 
 class AccountProvisionInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    identity: StrictStr = Field(min_length=1, max_length=64)
+    # A Telegram ID, or only a name for a person without Telegram.
+    identity: Annotated[StrictStr, Field(min_length=1, max_length=64)] | None = None
+    display_name: Annotated[StrictStr, Field(min_length=1, max_length=128)] | None = None
 
 
 class AccountEditInput(BaseModel):
@@ -2098,7 +2100,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/accounts', status_code=201)
     def provision_account(body: AccountProvisionInput, request: Request, current=Depends(actor)):
-        return accounts.provision_profile(current, body.identity, header(request, 'Idempotency-Key'))
+        return accounts.provision_profile(current, body.identity, header(request, 'Idempotency-Key'),
+                                          display_name=body.display_name)
 
     @app.get('/api/v1/accounts/{account_id}', response_model=AdminAccountOutput)
     def get_account(account_id: UUID, response: Response, current=Depends(actor)):

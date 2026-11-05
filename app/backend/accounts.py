@@ -92,17 +92,33 @@ class AccountService:
                 WHERE a.id > ? AND NOT EXISTS (SELECT 1 FROM backend_account_deletions x WHERE x.account_id=a.id) ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
         return _page([self.public(row) for row in rows], limit, 'accounts', 'id')
 
-    def provision_profile(self, actor, identity, command_key):
-        """Provision one account and its default VPN profile as one command."""
+    def provision_profile(self, actor, identity, command_key, *, display_name=None):
+        """Provision one account and its default VPN profile as one command.
+
+        The account is known by its Telegram ID, or only by name when the
+        person has no Telegram (Workstation-only or a future web cabinet).
+        """
         require_permission(actor, 'accounts.manage')
         require_permission(actor, 'profiles.manage')
         key = _key(command_key)
+        if (identity is None) == (display_name is None):
+            raise AccessDenied('invalid_input', 422)
+        if display_name is not None:
+            if (not isinstance(display_name, str) or not 0 < len(display_name.strip()) <= 128
+                    or any(c < ' ' for c in display_name)):
+                raise AccessDenied('invalid_input', 422)
+            display_name = display_name.strip()
+            input_json = json.dumps({'action': 'provision_profile', 'display_name': display_name}, sort_keys=True)
+            return self._provision(actor, key, input_json, display_name=display_name)
         if not isinstance(identity, str):
             raise AccessDenied('invalid_telegram_identity', 422)
         identity = identity.strip()
         if not re.fullmatch(r'[1-9][0-9]{0,15}|@[A-Za-z0-9_]{5,32}', identity):
             raise AccessDenied('invalid_telegram_identity', 422)
         input_json = json.dumps({'action': 'provision_profile', 'identity': identity.lower()}, sort_keys=True)
+        return self._provision(actor, key, input_json, identity=identity)
+
+    def _provision(self, actor, key, input_json, *, identity=None, display_name=None):
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
@@ -123,6 +139,17 @@ class AccountService:
             local = BoundDatabase()
             from .identity_repository import SQLIdentityRepository
             identities = SQLIdentityRepository(local)
+            if display_name is not None:
+                account = identities.create_account(status='approved')
+                conn.execute('UPDATE backend_accounts SET display_name=? WHERE id=?', (display_name, account.id))
+                from .profiles import ProfileRepository
+                profile_id = ProfileRepository.ensure_account_profile_in_transaction(conn, account.id)
+                profile = conn.execute('SELECT * FROM backend_profiles WHERE id=?', (profile_id,)).fetchone()
+                result = {'account': self.public(self._read(conn, account.id)),
+                          'profile': ProfileRepository.public(profile), 'created': True}
+                conn.execute('INSERT INTO backend_account_commands VALUES (?,?,?,?,?)',
+                             (actor.account.id, key, account.id, input_json, json.dumps(result, sort_keys=True)))
+                return result
             if identity.startswith('@'):
                 raise AccessDenied('telegram_id_required', 422)
             else:

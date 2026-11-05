@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add people without Telegram: Workstation's **New profile** (and
+  `POST /api/v1/accounts` with `display_name`) creates an account by name
+  with its VPN profile. Workstation's account list shows the account's
+  name and leaves out the Telegram ID when there is none.
 - Turn the Telegram bot off or on later: in Workstation (controller settings
   → Telegram → **Turn bot off** / **Turn bot on**) or with `admin_cli
   telegram-bot --disable | --enable-with-token-file FILE`. Off stops and
