@@ -269,6 +269,8 @@ class NodeSettingsExecutor:
         conn.execute('UPDATE backend_account_guard SET revision=revision+1 WHERE id=1')
         conn.execute("UPDATE backend_node_settings_tasks SET status = 'succeeded', result_json = ? WHERE id = ?",
                      (result, row['id']))
+        from .agent_installations import record
+        record(conn, row['node_key'], 'task')
         persist_selected_port(conn, row['node_key'], row['revision'], intent, json.loads(result))
         conn.execute('''UPDATE backend_nodes SET applied_revision = ?,
             enabled = CASE WHEN desired_revision = ? THEN 1 ELSE enabled END

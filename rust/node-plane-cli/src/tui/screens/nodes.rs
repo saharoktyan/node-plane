@@ -993,7 +993,7 @@ pub(in crate::tui) fn draw_nodes(frame: &mut Frame, app: &App, area: Rect, hits:
                     .add_modifier(Modifier::BOLD),
             ),
             Line::from(format!("Code: {} · {}", node.key, node.state_label())),
-            Line::from(format!("Agent: {}", node.agent.label())),
+            Line::from(format!("Agent: {}", node.agent_line())),
             Line::from(format!(
                 "Connection: {}{}",
                 node.transport.as_deref().unwrap_or("Not configured"),

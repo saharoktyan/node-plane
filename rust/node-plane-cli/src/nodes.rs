@@ -42,6 +42,9 @@ pub struct Node {
     pub services: Option<Value>,
     #[serde(skip)]
     pub agent: AgentState,
+    /// How the agent was installed and what it last reported (backend record).
+    #[serde(default, rename = "agent")]
+    pub installation: Option<Value>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AgentState {
@@ -66,6 +69,26 @@ impl AgentState {
     }
 }
 impl Node {
+    /// The agent line of the node card: live state, then the installation record.
+    pub fn agent_line(&self) -> String {
+        let mut parts = vec![self.agent.label().to_owned()];
+        if let Some(record) = self.installation.as_ref().filter(|v| v.is_object()) {
+            if let Some(version) = record["version"].as_str() {
+                parts.push(format!("version {version}"));
+            }
+            parts.push(
+                match record["method"].as_str().unwrap_or("") {
+                    "token" => "installed with a token",
+                    "ssh" => "installed over SSH",
+                    "local" => "on the controller host",
+                    "rollout" => "installed by the controller",
+                    _ => "installed",
+                }
+                .to_owned(),
+            );
+        }
+        parts.join(" · ")
+    }
     pub fn installed_agent(&self) -> bool {
         self.agent_installed.unwrap_or(self.applied_revision > 0)
     }
@@ -1781,6 +1804,23 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn node_card_agent_line_shows_the_installation_record() {
+        let mut node: Node =
+            serde_json::from_value(json!({"key":"lv1","title":"Riga","region":"EU",
+            "flag":"","enabled":true,"protocols":[],"xray_transports":[],"desired_revision":1,
+            "applied_revision":0,"transport":null,"ssh_target":null,"overview":null,
+            "agent":{"method":"token","version":"0.5.0","installed_at":"t","checked_at":"t"}}))
+            .unwrap();
+        node.agent = AgentState::Ready;
+        assert_eq!(
+            node.agent_line(),
+            "Ready · version 0.5.0 · installed with a token"
+        );
+        node.installation = None;
+        assert_eq!(node.agent_line(), "Ready");
+    }
+
     #[test]
     fn port_check_result_is_visible_and_scoped_to_node() {
         let value = json!({"id":Uuid::new_v4(),"node_key":"lv1","action":"check_ports","status":"succeeded","result":{"ports":[{"port":443,"protocol":"udp","status":"open"}],"firewall":"unmanaged"}});

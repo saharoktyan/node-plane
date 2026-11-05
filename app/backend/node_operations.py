@@ -151,6 +151,9 @@ class NodeOperations:
                     json.loads(row['intent_json']), result['result'])
             conn.execute("UPDATE backend_node_jobs SET status = 'succeeded', result_json = ? WHERE id = ?",
                          (json.dumps(result['result']), row['id']))
+            if row['action'] in {'bootstrap', 'reinstall_keep', 'reinstall_clean', 'cleanup_runtime'}:
+                from .agent_installations import record
+                record(conn, row['node_key'], 'task')
             if row['action'] == 'cleanup_runtime':
                 conn.execute('UPDATE backend_nodes SET applied_revision = 0, enabled = 0 WHERE key = ? AND desired_revision = ?',
                              (row['node_key'], row['revision']))

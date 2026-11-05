@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Each installed node agent has one record (migration r0032): how it was
+  installed (token, SSH, controller rollout, controller host or an earlier
+  setup) and the version it last reported in a probe. Nodes in the API carry
+  it as `agent`, and Workstation's node card shows it on the Agent line.
+  Whether a node has an agent is read from this record instead of being
+  inferred from finished jobs each time.
 - Access requests name the service they ask for (`service`, `vpn` for now;
   migration r0031), so other services can get their own requests later.
 - The bot builds its menu from the account's services: `GET /api/v1/me`

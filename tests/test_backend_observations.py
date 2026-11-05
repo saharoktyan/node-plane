@@ -26,12 +26,20 @@ class ObservationTests(TestCase):
             conn.execute("UPDATE backend_nodes SET applied_revision=0,protocols_json='[]',xray_transports_json='[]' WHERE key='lv1'")
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'lv1',?,?,'{}','succeeded')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
+            from backend.agent_installations import record
+            record(conn, 'lv1', 'rollout')
         driver = SimpleNamespace(inspect_node_services=Mock(return_value={'agent_version': 'test'}))
         with TestClient(create_app(self.db, node_driver=driver)) as client:
             node = client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()
             self.assertTrue(node['agent_installed'])
             self.assertEqual(node['applied_revision'], 0)
+            self.assertEqual(node['agent']['method'], 'rollout')
+            self.assertIsNone(node['agent']['version'])
             self.assertEqual(client.get('/api/v1/nodes/lv1/probe', headers=self.admin_headers()).status_code, 200)
+            # The probe keeps what the agent reported about itself.
+            agent = client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['agent']
+            self.assertEqual(agent['version'], 'test')
+            self.assertIsNotNone(agent['checked_at'])
             for fails in (False, True, False):
                 driver.inspect_node_services.side_effect = TimeoutError('PRIVATE') if fails else None
                 response = client.get('/api/v1/system/recovery/fleet', headers=self.admin_headers())

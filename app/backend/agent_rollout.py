@@ -307,4 +307,7 @@ class AgentRolloutService:
             conn.execute('''UPDATE backend_agent_rollouts SET status = ?
                 WHERE id = ? AND status = 'running' ''',
                 ('succeeded' if succeeded else 'blocked', row['id']))
+            if succeeded:
+                from .agent_installations import record
+                record(conn, row['node_key'], 'rollout')
         return True

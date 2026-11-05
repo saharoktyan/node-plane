@@ -302,4 +302,8 @@ class AgentEnrollmentService:
                 firewall=?, journal_archive=?, completed_at=? WHERE node_key=? AND token=?''',
                 (result['firewall'], result['journal_archive'] or None, now.isoformat(),
                  row['node_key'], row['token']))
+            from .agent_installations import record
+            over_ssh = conn.execute('SELECT 1 FROM backend_agent_ssh_installs WHERE node_key=?',
+                                    (row['node_key'],)).fetchone()
+            record(conn, row['node_key'], 'ssh' if over_ssh else 'token')
         return True

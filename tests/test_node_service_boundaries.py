@@ -98,6 +98,8 @@ class NodeServiceBoundariesTests(unittest.TestCase):
                 "INSERT INTO backend_agent_rollouts (id, node_key, actor_account_id, command_key, intent_json, status) VALUES (?, 'n1', ?, ?, '{}', 'succeeded')",
                 (str(uuid4()), self.admin.id, str(uuid4())),
             )
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
 
         node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
         self.assertTrue(node['agent_installed'])
@@ -138,6 +140,8 @@ class NodeServiceBoundariesTests(unittest.TestCase):
                 "INSERT INTO backend_agent_rollouts (id, node_key, actor_account_id, command_key, intent_json, status) VALUES (?, 'n1', ?, ?, '{}', 'succeeded')",
                 (str(uuid4()), self.admin.id, str(uuid4())),
             )
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
 
         # Ephemeral driver connection failure does not alter durable agent_installed state
         failing_driver = SimpleNamespace(
@@ -178,6 +182,8 @@ class NodeServiceBoundariesTests(unittest.TestCase):
                 "INSERT INTO backend_agent_rollouts (id, node_key, actor_account_id, command_key, intent_json, status) VALUES (?, 'n1', ?, ?, '{}', 'succeeded')",
                 (str(uuid4()), self.admin.id, str(uuid4())),
             )
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
 
         # 1. Add AWG protocol to agent-only node
         add_patch = self.client.patch(
@@ -248,6 +254,8 @@ class NodeServiceBoundariesTests(unittest.TestCase):
                 "INSERT INTO backend_agent_rollouts (id, node_key, actor_account_id, command_key, intent_json, status) VALUES (?, 'n1', ?, ?, '{}', 'succeeded')",
                 (str(uuid4()), self.admin.id, str(uuid4())),
             )
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
 
         for action in ('sync_xray', 'regenerate_entropy', 'reinstall_clean', 'reinstall_keep',
                        'sync_runtime', 'sync_env', 'check_ports', 'open_ports', 'cleanup_runtime', 'reconcile_access'):

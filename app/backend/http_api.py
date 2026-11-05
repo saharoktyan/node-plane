@@ -553,6 +553,8 @@ class AdminNodeOutput(BaseModel):
     policy_eligible: bool = False
     setup_attempted: bool = True
     agent_installed: bool = False
+    # How the agent was installed and what it last reported; None before.
+    agent: dict | None = None
     settings_apply_pending: bool = False
     protocols: list[str]
     xray_transports: list[str]
@@ -1857,12 +1859,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from .node_probe import probe
         try:
             if node_driver is not None:
-                return probe(node, node_driver)
-            from .driver_transport import GrpcIntentDriver, local_channel
-            with local_channel('127.0.0.1:50051') as channel:
-                return probe(node, GrpcIntentDriver(channel, timeout=15))
+                result = probe(node, node_driver)
+            else:
+                from .driver_transport import GrpcIntentDriver, local_channel
+                with local_channel('127.0.0.1:50051') as channel:
+                    result = probe(node, GrpcIntentDriver(channel, timeout=15))
         except Exception as failure:
             raise inspection_error(node_key, failure, fallback='node_agent_unavailable') from None
+        from .agent_installations import observe
+        with db.transaction() as conn:
+            observe(conn, node_key, result)
+        return result
 
     @app.post('/api/v1/nodes/{node_key}/bootstrap', status_code=202)
     def bootstrap_node(node_key: str, body: NodeActionInput,

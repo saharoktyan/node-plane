@@ -332,6 +332,8 @@ def act(db, actor, driver, kind, identity, action, *, confirmation=None):
                 bound = connection is not None and (connection['transport'], connection['ssh_target']) == (intent.get('transport'), intent.get('ssh_target'))
                 if current and bound:
                     conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=? AND status='blocked'", (identity,))
+                    from .agent_installations import record
+                    record(conn, row['node_key'], 'rollout')
         elif kind == 'bootstrap':
             if action == 'cancel':
                 # Protocol cancellation first fences/recovers the old command;

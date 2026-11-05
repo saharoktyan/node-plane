@@ -22,12 +22,10 @@ _SETTINGS = frozenset({'public_host', 'xray_host', 'xray_sni', 'xray_tcp_port',
                        'xray_fingerprint', 'awg_interface', 'awg_i1_preset', 'awg_port_mode', 'awg_parameters', 'ipv6_outbound'})
 _PORTS = frozenset({'xray_tcp_port', 'xray_xhttp_port', 'awg_port'})
 _SSH_TARGET = re.compile(r'(?:[A-Za-z_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])\Z')
+# The agent's installation record; an applied VPN configuration also means
+# an agent applied it.
 AGENT_INSTALLED_SQL = """(n.applied_revision>0 OR EXISTS (
-    SELECT 1 FROM backend_agent_rollouts a WHERE a.node_key=n.key AND a.status='succeeded')
-    OR EXISTS (SELECT 1 FROM backend_node_settings_tasks s WHERE s.node_key=n.key AND s.status='succeeded')
-    OR EXISTS (SELECT 1 FROM backend_node_jobs j WHERE j.node_key=n.key AND j.status='succeeded'
-        AND j.action IN ('bootstrap','reinstall_keep','reinstall_clean','cleanup_runtime'))
-    OR EXISTS (SELECT 1 FROM backend_agent_enrollments e WHERE e.node_key=n.key AND e.status='enrolled'))"""
+    SELECT 1 FROM backend_agent_installations ai WHERE ai.node_key=n.key))"""
 
 
 def protocol_defaults(settings, protocols):
@@ -199,6 +197,8 @@ class NodeService:
         from .node_removal import NodeRemovalService
         NodeRemovalService(self.db).initialize_schema()
         with self.db.transaction() as conn:
+            from .agent_installations import create_schema
+            create_schema(conn)
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,
@@ -220,6 +220,9 @@ class NodeService:
                 'policy_eligible': bool(row['policy_eligible']),
                 'setup_attempted': bool(row['setup_attempted']),
                 'agent_installed': bool(row['agent_installed']),
+                'agent': ({'method': row['agent_method'], 'installed_at': row['agent_installed_at'],
+                           'version': row['agent_version'], 'checked_at': row['agent_checked_at']}
+                          if row['agent_method'] else None),
                 'settings_apply_pending': settings_apply_pending(row),
                 'protocols': json.loads(row['protocols_json']),
                 'xray_transports': json.loads(row['xray_transports_json']),
@@ -230,6 +233,8 @@ class NodeService:
     @staticmethod
     def _select():
         return f'''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
+            ai.method AS agent_method, ai.installed_at AS agent_installed_at,
+            ai.agent_version AS agent_version, ai.checked_at AS agent_checked_at,
             (SELECT history.intent_json FROM (
                 SELECT s.node_key,s.revision,s.intent_json FROM backend_node_settings_tasks s WHERE s.status='succeeded'
                 UNION ALL
@@ -249,7 +254,8 @@ class NodeService:
                 THEN 1 ELSE 0 END AS policy_eligible FROM backend_nodes n
             LEFT JOIN backend_node_connections c ON c.node_key = n.key
             LEFT JOIN backend_node_notes m ON m.node_key = n.key
-            LEFT JOIN backend_node_regions r ON r.node_key = n.key'''
+            LEFT JOIN backend_node_regions r ON r.node_key = n.key
+            LEFT JOIN backend_agent_installations ai ON ai.node_key = n.key'''
 
     def list(self, actor, *, limit=25, cursor=None, search=None, order="key"):
         require_permission(actor, 'nodes.manage')

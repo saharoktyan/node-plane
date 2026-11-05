@@ -20,6 +20,8 @@ class BackendNodeSettingsTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
         for _ in range(2):
             node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
             self.assertTrue(node['agent_installed'])
@@ -98,6 +100,8 @@ class BackendNodeSettingsTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'n1',?,?,'{}','succeeded')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
+            from backend.agent_installations import record
+            record(conn, 'n1', 'rollout')
         response = self.client.patch('/api/v1/nodes/n1',
             headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
             json={'protocols': ['awg']})

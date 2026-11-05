@@ -44,6 +44,8 @@ class AlertTests(unittest.TestCase):
             conn.execute("UPDATE backend_nodes SET protocols_json='[]',applied_revision=0,enabled=0 WHERE key='test'")
             conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','succeeded')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
+            from backend.agent_installations import record
+            record(conn, 'test', 'rollout')
         self.driver.inspect_node_services.return_value = {**HEALTHY, 'host_metrics': {**HEALTHY['host_metrics'], 'disk_free_percent': 3}}
         self.scan()
         active = self.service.overview(self.actor)['active']
@@ -62,6 +64,8 @@ class AlertTests(unittest.TestCase):
             conn.execute("UPDATE backend_nodes SET protocols_json='[]',applied_revision=0,enabled=0 WHERE key='test'")
             conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','succeeded')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
+            from backend.agent_installations import record
+            record(conn, 'test', 'rollout')
             upgrade = str(uuid4())
             conn.execute("INSERT INTO backend_agent_rollouts(id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'test',?,?,'{}','running')",
                          (upgrade, self.admin.id, str(uuid4())))

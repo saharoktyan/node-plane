@@ -52,6 +52,8 @@ ADDITIVE_COLUMNS = {
 CLEAR = (
     # Rebuilt from the restored Telegram logins.
     "backend_account_channels",
+    # Rebuilt from the restored nodes.
+    "backend_agent_installations",
     "backend_renewal_requests",
     "backend_agent_ssh_installs",
     "backend_agent_enrollments",
@@ -781,6 +783,8 @@ class BackupService:
             from db.migration_revisions.r0028_account_details import backfill
             backfill(conn)
             from db.migration_revisions.r0029_account_channels import backfill
+            backfill(conn)
+            from db.migration_revisions.r0032_agent_installations import backfill
             backfill(conn)
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
