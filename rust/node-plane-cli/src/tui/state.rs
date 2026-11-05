@@ -147,6 +147,7 @@ pub(super) enum Control {
     ControllerBotTitleEdit,
     ControllerTelegram,
     ControllerTelegramToken,
+    ControllerTelegramSwitch,
     ControllerTelegramAdminAdd,
     ControllerTelegramAdminRemove(usize),
     ControllerSshKey,

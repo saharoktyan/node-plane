@@ -51,6 +51,8 @@ pub enum Command {
     BotTitleSave(String),
     TelegramSettings,
     TelegramToken(zeroize::Zeroizing<String>),
+    /// Turn the bot on with this token, or off with none.
+    TelegramSwitch(Option<zeroize::Zeroizing<String>>),
     TelegramAdmin(bool, u64, Uuid),
     SshKey,
     PolicySave(&'static str, Value),
@@ -139,6 +141,7 @@ impl Command {
             | Self::Presence
             | Self::TelegramSettings
             | Self::TelegramToken(_)
+            | Self::TelegramSwitch(_)
             | Self::TelegramAdmin(..) => {
                 anyhow::bail!("Installation detection uses the SSH connection")
             }
@@ -602,7 +605,7 @@ impl Browser {
                     .into(),
                 );
             }
-            Command::TelegramSettings | Command::TelegramToken(_) => {
+            Command::TelegramSettings | Command::TelegramToken(_) | Command::TelegramSwitch(_) => {
                 self.telegram_settings = Some(value);
                 self.defaults_input = None;
             }

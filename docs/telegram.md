@@ -4,6 +4,8 @@
 
 The bot provides user configuration delivery and administrator controls for the same Node Plane installation managed by Workstation.
 
+The bot is optional. Turn it off or on in Workstation (controller settings → Telegram → **Turn bot off** / **Turn bot on**) or on the controller with `admin_cli telegram-bot --disable` or `--enable-with-token-file FILE`. Turning it off stops and removes its service and revokes its access; accounts and their Telegram logins are kept and notifications stay in the Inbox. Turning it on verifies the token, gives the bot new access and starts it.
+
 ## First start
 
 Open your installed bot and send `/start`. The Telegram IDs supplied during installation receive administrator access. For other users, `/start` and language selection record visitor presentation metadata only without allocating an account. Pending is a request state, not a new VPN profile. Approval or explicit administrator provisioning creates the account and default VPN profile atomically; rejection or deleted-account menu refresh does not create an account. After account deletion, submitting a new request alone does not recreate an account until approved. Other users can request access according to the installation's request policy.

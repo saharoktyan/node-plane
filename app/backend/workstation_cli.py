@@ -63,12 +63,12 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'revoke-access', 'restore-access', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'revoke-access', 'restore-access', 'telegram-settings', 'telegram-token', 'telegram-enable', 'telegram-disable', 'telegram-admin-add', 'telegram-admin-remove'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
         raise WorkstationError('invalid_request')
-    if action == 'telegram-token':
+    if action in {'telegram-token', 'telegram-enable'}:
         allowed.add('token')
         if not isinstance(request.get('token'), str) or not re.fullmatch(r'[1-9][0-9]{0,19}:[A-Za-z0-9_-]{20,100}', request['token']):
             raise WorkstationError('invalid_bot_token')
@@ -357,7 +357,7 @@ class WorkstationService:
                 return {'version': VERSION, 'ok': True, 'session_id': session_id, 'revoked': revoked}
             if previous is not None and previous.get('revoked'):
                 raise WorkstationError('session_revoked')
-            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
+            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'telegram-settings', 'telegram-token', 'telegram-enable', 'telegram-disable', 'telegram-admin-add', 'telegram-admin-remove'}:
                 if previous is None:
                     raise WorkstationError('session_not_found')
                 try:
@@ -376,6 +376,11 @@ class WorkstationService:
                     try:
                         if request['action'] == 'telegram-settings':
                             value = telegram_configuration.overview(self.db, actor, path)
+                        elif request['action'] in {'telegram-enable', 'telegram-disable'}:
+                            value = telegram_configuration.switch(self.db, actor, path, request)
+                            context = self.audit.context(principal.id)
+                            if context:
+                                self.audit.record(context, 'Telegram bot ' + request['action'].removeprefix('telegram-') + 'd', 'completed')
                         else:
                             value = telegram_configuration.change(self.db, actor, self.identities, path, request)
                             context = self.audit.context(principal.id)

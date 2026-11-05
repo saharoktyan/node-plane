@@ -20,7 +20,7 @@ Traffic collection is controlled by an administrator. Enable it to collect suppo
 
 ## Bot name and SSH key
 
-Set the displayed bot name in installation settings. The controller public SSH key is needed only for the bot's **Install over SSH**: add it to the server's `authorized_keys` yourself. Copy it or use the bot's separate public-key message action. Keep private keys private.
+Set the displayed bot name in installation settings → Telegram; like the bot's other settings, it is hidden while the bot is off. The controller public SSH key is needed only for the bot's **Install over SSH**: add it to the server's `authorized_keys` yourself. Copy it or use the bot's separate public-key message action. Keep private keys private.
 
 ## Announcements
 

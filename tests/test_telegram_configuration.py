@@ -103,3 +103,87 @@ class TelegramConfigurationTests(unittest.TestCase):
                 change(self.db, actor, self.identities, path,
                     {'action': 'telegram-admin-add', 'telegram_id': 103, 'command_id': str(uuid4())}, restart=lambda: True)
         self.assertEqual(self.identities.get_account(existing.id).role, 'member')
+
+
+class TelegramBotSwitchTests(unittest.TestCase):
+    """Turning the bot off and on again; the host side is a fake."""
+    setUp = BackendHTTPTests.setUp
+    fixture = TelegramConfigurationTests.fixture
+
+    def system(self, works=True):
+        return Mock(install=Mock(return_value=works), remove=Mock(return_value=works))
+
+    def adapter_tokens(self):
+        return self.db.connection.execute("""SELECT COUNT(*) FROM backend_credentials
+            WHERE kind='adapter' AND revoked_at IS NULL""").fetchone()[0]
+
+    def test_disable_then_enable_keeps_accounts_and_replaces_the_bot_credential(self):
+        from backend.telegram_configuration import switch
+        actor, path = self.fixture()
+        token_file = path.parent / 'data/telegram-adapter.token'
+        token_file.parent.mkdir()
+        token_file.write_text('old\n')
+        self.assertGreater(self.adapter_tokens(), 0)
+        system = self.system()
+        value = switch(self.db, actor, path, {'action': 'telegram-disable'}, system=system)
+        system.remove.assert_called_once()
+        self.assertFalse(value['enabled'])
+        self.assertFalse(value['restart_pending'])
+        self.assertEqual(self.adapter_tokens(), 0)
+        self.assertFalse(token_file.exists())
+        self.assertIn('BOT_TOKEN=\n', path.read_text())
+        self.assertIn('OTHER=value', path.read_text())
+        self.assertIsNotNone(self.identities.find_telegram_account(101))
+        with self.assertRaises(AccessDenied) as refused:
+            change(self.db, actor, self.identities, path, {'action': 'telegram-token',
+                   'token': '123456:new_secret_value_0123456789'}, verify=lambda _: None, restart=lambda: True)
+        self.assertEqual(refused.exception.code, 'telegram_disabled')
+
+        token = '123456:new_secret_value_0123456789'
+        value = switch(self.db, actor, path, {'action': 'telegram-enable', 'token': token},
+                       verify=lambda value: self.assertEqual(value, token), system=system)
+        system.install.assert_called_once()
+        self.assertTrue(value['enabled'])
+        self.assertNotIn(token, str(value))
+        self.assertIn('BOT_TOKEN=' + token, path.read_text())
+        self.assertIn('NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE=' + str(token_file), path.read_text())
+        self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.adapter_tokens(), 1)
+        secret = token_file.read_text().strip()
+        self.assertEqual(self.credentials.authenticate('Bearer ' + secret).kind, PrincipalKind.ADAPTER)
+
+    def test_service_that_does_not_start_is_reported(self):
+        from backend.telegram_configuration import switch
+        actor, path = self.fixture()
+        value = switch(self.db, actor, path, {'action': 'telegram-enable',
+                       'token': '123456:new_secret_value_0123456789'}, verify=lambda _: None,
+                       system=self.system(works=False))
+        self.assertTrue(value['enabled'])
+        self.assertTrue(value['restart_pending'])
+
+    def test_rejected_token_changes_nothing(self):
+        from backend.telegram_configuration import switch
+        actor, path = self.fixture()
+        switch(self.db, actor, path, {'action': 'telegram-disable'}, system=self.system())
+        original = path.read_text()
+        def reject(_):
+            raise AccessDenied('bot_token_verification_failed', 422)
+        system = self.system()
+        with self.assertRaises(AccessDenied):
+            switch(self.db, actor, path, {'action': 'telegram-enable', 'token': 'x'}, verify=reject, system=system)
+        system.install.assert_not_called()
+        self.assertEqual(path.read_text(), original)
+        self.assertFalse(overview(self.db, actor, path)['enabled'])
+
+
+class TelegramSwitchRequestTests(unittest.TestCase):
+    def test_enable_needs_a_token_and_disable_takes_nothing_else(self):
+        from backend.workstation_cli import WorkstationError, validate_request
+        base = {'version': 1, 'session_id': str(uuid4())}
+        validate_request({**base, 'action': 'telegram-enable', 'token': '123456:new_secret_value_0123456789'})
+        validate_request({**base, 'action': 'telegram-disable'})
+        for request in ({**base, 'action': 'telegram-enable'},
+                        {**base, 'action': 'telegram-enable', 'token': 'bad'},
+                        {**base, 'action': 'telegram-disable', 'token': '123456:new_secret_value_0123456789'}):
+            with self.subTest(request=request), self.assertRaises(WorkstationError):
+                validate_request(request)

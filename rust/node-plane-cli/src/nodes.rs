@@ -1141,13 +1141,22 @@ async fn execute_inner(
             let protocol_action = match &command { Command::ProtocolAction(_, action) => Some(*action), _ => None };
             match command {
                 Command::Controller(profile, command) => {
-                    if matches!(&command, crate::controller::Command::TelegramSettings | crate::controller::Command::TelegramToken(_) | crate::controller::Command::TelegramAdmin(..)) {
+                    if matches!(&command, crate::controller::Command::TelegramSettings | crate::controller::Command::TelegramToken(_) | crate::controller::Command::TelegramSwitch(_) | crate::controller::Command::TelegramAdmin(..)) {
                         let mut input = json!({"version":1,"session_id":id,"action":"telegram-settings"});
                         match &command {
                             crate::controller::Command::TelegramToken(token) => {
                                 ensure!(events::confirm(tx, "Change bot token?", "Verify and save the new token, then restart the Telegram bot.".into())?, "Token change cancelled");
                                 input["action"] = json!("telegram-token");
                                 input["token"] = json!(token.as_str());
+                            }
+                            crate::controller::Command::TelegramSwitch(Some(token)) => {
+                                ensure!(events::confirm(tx, "Turn the bot on?", "Verify the token, then install and start the Telegram bot. Notifications go to Telegram again.".into())?, "Bot not turned on");
+                                input["action"] = json!("telegram-enable");
+                                input["token"] = json!(token.as_str());
+                            }
+                            crate::controller::Command::TelegramSwitch(None) => {
+                                ensure!(events::confirm(tx, "Turn the bot off?", "Stop and remove the Telegram bot and revoke its access. Accounts and their Telegram logins are kept; notifications stay in the Inbox.".into())?, "Bot not turned off");
+                                input["action"] = json!("telegram-disable");
                             }
                             crate::controller::Command::TelegramAdmin(add, telegram_id, key) => {
                                 ensure!(events::confirm(tx, if *add { "Add administrator?" } else { "Remove administrator?" },

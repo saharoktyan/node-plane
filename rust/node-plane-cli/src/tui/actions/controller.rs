@@ -326,6 +326,15 @@ impl App {
                 self.controller_command(crate::controller::Command::TelegramSettings);
                 None
             }
+            Control::ControllerTelegramSwitch => {
+                if self.controller.telegram_settings.as_ref()?["enabled"] == false {
+                    self.controller.defaults_input = Some(("telegram_enable", String::new()));
+                    self.controller.selected = 0;
+                } else {
+                    self.controller_command(crate::controller::Command::TelegramSwitch(None));
+                }
+                None
+            }
             Control::ControllerTelegramToken | Control::ControllerTelegramAdminAdd => {
                 self.controller.defaults_input = Some((
                     if control == Control::ControllerTelegramToken {
@@ -647,14 +656,17 @@ impl App {
                         ));
                         return None;
                     }
-                    if key == "telegram_token" {
+                    if key == "telegram_token" || key == "telegram_enable" {
                         if let Some((_, value)) = &mut self.controller.defaults_input {
                             zeroize::Zeroize::zeroize(value);
                         }
                         self.controller.defaults_input = None;
-                        self.controller_command(crate::controller::Command::TelegramToken(
-                            zeroize::Zeroizing::new(input),
-                        ));
+                        let token = zeroize::Zeroizing::new(input);
+                        self.controller_command(if key == "telegram_token" {
+                            crate::controller::Command::TelegramToken(token)
+                        } else {
+                            crate::controller::Command::TelegramSwitch(Some(token))
+                        });
                         return None;
                     }
                     if key == "telegram_admin" {
@@ -1334,7 +1346,7 @@ impl App {
                     return None;
                 }
                 if let Some((key, mut value)) = self.controller.defaults_input.take() {
-                    if key == "telegram_token" {
+                    if key == "telegram_token" || key == "telegram_enable" {
                         zeroize::Zeroize::zeroize(&mut value);
                     }
                     self.action_focus = Some(Control::ControllerDefaultsField(key));
@@ -1662,9 +1674,15 @@ impl App {
             return vec![Control::ControllerBotTitleEdit, Control::ControllerBack];
         }
         if let Some(value) = &state.telegram_settings {
+            if value["enabled"] == false {
+                return vec![Control::ControllerTelegramSwitch, Control::ControllerBack];
+            }
+            // Bot settings live here and are hidden while the bot is off.
             let mut controls = vec![
                 Control::ControllerTelegramToken,
+                Control::ControllerBotTitle,
                 Control::ControllerTelegramAdminAdd,
+                Control::ControllerTelegramSwitch,
             ];
             controls.extend(
                 (0..value["admins"].as_array().map_or(0, Vec::len))
@@ -1884,7 +1902,6 @@ impl App {
             ],
             Some(Installation) => vec![
                 ("Installation defaults".into(), Control::ControllerDefaults),
-                ("Bot name".into(), Control::ControllerBotTitle),
                 ("Telegram".into(), Control::ControllerTelegram),
                 ("SSH key".into(), Control::ControllerSshKey),
                 ("New installation".into(), Control::ControllerNew),

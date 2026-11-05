@@ -838,6 +838,7 @@ pub(in crate::tui) fn draw_controller(
             "welcome_message" => "Welcome message for users requesting access".into(),
             "bot_title" => "Bot name".into(),
             "telegram_token" => "New bot token from BotFather. The token is hidden; saving restarts the bot.".into(),
+            "telegram_enable" => "Bot token from BotFather. The token is hidden; saving installs and starts the bot.".into(),
             "telegram_admin" => "Telegram user ID of the administrator to add".into(),
             "backup_name" => "Optional name for this manual backup (up to 128 characters). Skip to create it without a name.".into(),
             "backup_import_path" => "Import backup · local JSON file path. Import adds it to the catalog; restore is a separate action.".into(),
@@ -894,6 +895,16 @@ pub(in crate::tui) fn draw_controller(
             text = format!("Requests settings\n\nStub message:\n{stub}");
             controls.push(("Stub message".into(), Control::ControllerGateMessage));
         }
+    } else if let Some(value) = state
+        .telegram_settings
+        .as_ref()
+        .filter(|v| v["enabled"] == false)
+    {
+        text = "Telegram bot: off\n\nAccounts and their Telegram logins are kept. Turn the bot on with a BotFather token; notifications then go to Telegram again.".into();
+        if value["restart_pending"] == true {
+            text.push_str("\nThe bot service could not be removed; check the controller.");
+        }
+        controls.push(("Turn bot on".into(), Control::ControllerTelegramSwitch));
     } else if let Some(value) = &state.telegram_settings {
         text = format!(
             "Bot token: {}",
@@ -908,10 +919,12 @@ pub(in crate::tui) fn draw_controller(
         }
         controls.extend([
             ("Change bot token".into(), Control::ControllerTelegramToken),
+            ("Bot name".into(), Control::ControllerBotTitle),
             (
                 "Add administrator".into(),
                 Control::ControllerTelegramAdminAdd,
             ),
+            ("Turn bot off".into(), Control::ControllerTelegramSwitch),
         ]);
         if let Some(admins) = value["admins"].as_array() {
             for (index, admin) in admins.iter().enumerate() {
@@ -1601,7 +1614,7 @@ pub(in crate::tui) fn draw_controller(
                 .unwrap_or(0);
             let rect = Rect::new(parts[0].x, parts[0].y + text_height, parts[0].width, 3);
             let hidden;
-            let value = if *key == "telegram_token" {
+            let value = if *key == "telegram_token" || *key == "telegram_enable" {
                 hidden = "•".repeat(input.chars().count());
                 hidden.as_str()
             } else {

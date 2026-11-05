@@ -96,6 +96,11 @@ def main():
     profile.add_argument('--owner-account-id')
     channels = commands.add_parser('channels', help='Show or change the channels this installation runs')
     channels.add_argument('--telegram', choices=['on', 'off'])
+    bot = commands.add_parser('telegram-bot',
+        help='Turn the Telegram bot on (token read from a private file) or off; accounts stay')
+    bot_action = bot.add_mutually_exclusive_group(required=True)
+    bot_action.add_argument('--enable-with-token-file', type=Path)
+    bot_action.add_argument('--disable', action='store_true')
     revoke = commands.add_parser('revoke-token')
     revoke.add_argument('--id', required=True)
     repair = commands.add_parser('resolve-blocked')
@@ -170,6 +175,22 @@ def main():
                     current = set_enabled(conn, current | {'telegram'} if args.telegram == 'on'
                                           else current - {'telegram'})
             print(json.dumps({'channels': sorted(current)}))
+        elif args.command == 'telegram-bot':
+            import config
+            from . import telegram_bot_setup
+            from .telegram_configuration import _env, _write, verify_token
+            path = Path(config.SHARED_ROOT) / '.env'
+            system = telegram_bot_setup.SystemdBot(config.INSTALL_ROOT, config.SHARED_ROOT)
+            if args.disable:
+                done = telegram_bot_setup.disable(db, path, read=_env, write=_write, system=system)
+                print('Telegram bot is off' if done else 'Telegram bot is off; its service could not be removed')
+            else:
+                token = args.enable_with_token_file.read_text().strip()
+                verify_token(token)
+                done = telegram_bot_setup.enable(db, path, token, read=_env, write=_write, system=system)
+                print('Telegram bot is on' if done else 'Telegram bot is configured; its service did not start')
+            if not done:
+                raise SystemExit(1)
         elif args.command == 'create-account':
             account = identities.create_account(status=args.status)
             ProfileRepository(db).ensure_account_profile(account.id)

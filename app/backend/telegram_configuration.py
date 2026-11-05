@@ -52,8 +52,10 @@ def overview(db, actor, path):
             JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
             LEFT JOIN backend_telegram_identity_details d ON d.subject=i.subject
             WHERE a.role='admin' AND a.status='approved' ORDER BY i.subject""").fetchall()
+        from .account_channels import enabled
+        telegram = 'telegram' in enabled(conn)
     return {'token_configured': bool(re.search(r'^BOT_TOKEN=\S+', content, re.MULTILINE)),
-            'admins': [dict(row) for row in rows]}
+            'enabled': telegram, 'admins': [dict(row) for row in rows]}
 
 
 def verify_token(token):
@@ -74,6 +76,8 @@ def change(db, actor, identities, path, request, *, verify=verify_token, restart
     action = request['action']
     patch = {}
     if action == 'telegram-token':
+        if not overview(db, actor, path)['enabled']:
+            raise AccessDenied('telegram_disabled', 409)
         verify(request['token'])
         patch['BOT_TOKEN'] = request['token']
     else:
@@ -152,3 +156,20 @@ def change(db, actor, identities, path, request, *, verify=verify_token, restart
     except (OSError, subprocess.TimeoutExpired):
         restarted = False
     return {**overview(db, actor, path), 'restart_pending': not restarted}
+
+
+def switch(db, actor, path, request, *, verify=verify_token, system=None):
+    """Turn the bot on (with a token) or off; accounts and their Telegram logins stay."""
+    require_permission(actor, 'settings.manage')
+    from . import telegram_bot_setup
+    if system is None:
+        import config
+        system = telegram_bot_setup.SystemdBot(config.INSTALL_ROOT, config.SHARED_ROOT)
+    _env(path)
+    if request['action'] == 'telegram-enable':
+        verify(request['token'])
+        started = telegram_bot_setup.enable(db, path, request['token'], read=_env, write=_write, system=system)
+        return {**overview(db, actor, path), 'restart_pending': not started}
+    removed = telegram_bot_setup.disable(db, path, read=_env, write=_write, system=system)
+    return {**overview(db, actor, path), 'restart_pending': not removed}
+

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Turn the Telegram bot off or on later: in Workstation (controller settings
+  → Telegram → **Turn bot off** / **Turn bot on**) or with `admin_cli
+  telegram-bot --disable | --enable-with-token-file FILE`. Off stops and
+  removes the bot's service, revokes its adapter credentials and turns the
+  Telegram channel off; accounts and their Telegram logins stay. On verifies
+  the token, issues a new adapter credential and starts the service.
+  Changing the token of a bot that is off is refused (`telegram_disabled`).
+  While the bot is off, its settings (token, bot name, administrators) are
+  hidden; **Bot name** moved into the Telegram section.
 - Install without the Telegram bot: leave the bot token empty (in the
   installer or Workstation's Install) and the controller is installed with
   no bot service; its first administrator is an account by name

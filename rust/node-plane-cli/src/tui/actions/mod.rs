@@ -361,6 +361,7 @@ impl App {
             | Control::ControllerBotTitleEdit
             | Control::ControllerTelegram
             | Control::ControllerTelegramToken
+            | Control::ControllerTelegramSwitch
             | Control::ControllerTelegramAdminAdd
             | Control::ControllerTelegramAdminRemove(_)
             | Control::ControllerSshKeyCopy

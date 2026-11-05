@@ -7158,6 +7158,64 @@ fn token_editor_masks_secret_and_cancel_discards_it() {
 }
 
 #[test]
+fn bot_that_is_off_offers_only_turning_it_on_with_a_hidden_token() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.telegram_settings = Some(
+        serde_json::json!({"admins":[{"telegram_user_id":"101"}],"token_configured":false,"enabled":false}),
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Telegram bot: off"));
+    assert!(text.contains("Turn bot on"));
+    assert!(!text.contains("Change bot token"));
+    assert!(!text.contains("Bot name"));
+    assert!(!text.contains("Remove"));
+    app.activate(Control::ControllerTelegramSwitch);
+    assert_eq!(
+        app.controller.defaults_input.as_ref().unwrap().0,
+        "telegram_enable"
+    );
+    app.controller.defaults_input.as_mut().unwrap().1 = "123456:private_token_test".into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!text.contains("private_token_test"));
+    assert!(text.contains('•'));
+
+    app.controller.defaults_input = None;
+    app.controller.telegram_settings =
+        Some(serde_json::json!({"admins":[],"token_configured":true,"enabled":true}));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    for control in [
+        Control::ControllerTelegramSwitch,
+        Control::ControllerBotTitle,
+        Control::ControllerTelegramToken,
+    ] {
+        assert!(app.hits.iter().any(|hit| hit.control == control));
+    }
+    app.controller.telegram_settings = None;
+    app.controller_section = Some(crate::tui::state::ControllerSection::Installation);
+    assert!(
+        !app.controller_root_controls(false)
+            .iter()
+            .any(|(_, control)| *control == Control::ControllerBotTitle)
+    );
+}
+
+#[test]
 fn notes_remain_editable_when_draft_actions_shrink_the_viewport() {
     for height in [18, 20, 24, 30] {
         let mut app = test_profile_app();

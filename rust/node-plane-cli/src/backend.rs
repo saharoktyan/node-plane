@@ -159,6 +159,8 @@ pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value>
                 | "audit-enrollment"
                 | "telegram-settings"
                 | "telegram-token"
+                | "telegram-enable"
+                | "telegram-disable"
                 | "telegram-admin-add"
                 | "telegram-admin-remove"
         )
