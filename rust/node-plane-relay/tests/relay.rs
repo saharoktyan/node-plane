@@ -207,6 +207,7 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
         .header("idempotency-key", "k1")
         .header("x-node-plane-via", "browser")
         .header("x-node-plane-telegram-user-id", "42")
+        .header("x-node-plane-client", "6.6.6.6")
         .header("cookie", "c=1")
         .body(Full::new(Bytes::from_static(b"{\"a\":1}")))
         .unwrap();
@@ -226,6 +227,8 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
         (&json!("relay"), &json!(1))
     );
     assert!(sent.get("x-node-plane-telegram-user-id").is_none());
+    // Without a known peer the link names no client, and a browser cannot.
+    assert!(sent.get("x-node-plane-client").is_none());
     assert!(sent.get("cookie").is_none());
     assert_eq!(headers["etag"], "\"7\"");
     assert!(headers.get("set-cookie").is_none() && headers.get("x-node-plane-secret").is_none());
@@ -541,7 +544,11 @@ async fn the_relay_serves_tls_from_files() {
     }
     let (status, body) = get("/api/v1/me").await;
     assert_eq!(
-        (status, &body["headers"]["x-node-plane-via"]),
-        (StatusCode::OK, &json!("relay"))
+        (
+            status,
+            &body["headers"]["x-node-plane-via"],
+            &body["headers"]["x-node-plane-client"]
+        ),
+        (StatusCode::OK, &json!("relay"), &json!("127.0.0.1"))
     );
 }

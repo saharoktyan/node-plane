@@ -10,6 +10,8 @@ pub mod headers {
     /// Set by the controller's relay link on every request it forwards.
     pub const VIA: &str = "x-node-plane-via";
     pub const VIA_RELAY: &str = "relay";
+    /// Set by the link with the client's address the relay saw.
+    pub const CLIENT: &str = "x-node-plane-client";
     /// An adapter acting for a Telegram identity.
     pub const DELEGATION: &str = "x-node-plane-telegram-user-id";
     pub const REQUEST_ID: &str = "x-request-id";

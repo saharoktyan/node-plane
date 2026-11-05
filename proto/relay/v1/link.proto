@@ -42,6 +42,9 @@ message Request {
   // Only the headers the relay passes on; never X-Node-Plane-*.
   repeated Header headers = 4;
   bytes body = 5;
+  // The client's address as the relay sees it; the link passes it on as
+  // X-Node-Plane-Client for the controller's sign-in limits.
+  string client = 6;
 }
 
 // Controller to relay.

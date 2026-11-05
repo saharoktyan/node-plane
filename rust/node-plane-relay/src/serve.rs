@@ -257,6 +257,32 @@ async fn not_found() -> Response {
     failure(StatusCode::NOT_FOUND, codes::NOT_FOUND)
 }
 
+/// The client's address: the peer, or behind a reverse proxy on this host the
+/// address the proxy appended to X-Forwarded-For.
+fn client(parts: &http::request::Parts) -> String {
+    let Some(peer) = parts
+        .extensions
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|info| info.0.ip())
+    else {
+        return String::new();
+    };
+    if peer.is_loopback()
+        && parts.extensions.get::<crate::tls::Direct>().is_none()
+        && let Some(forwarded) = parts
+            .headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .last()
+            .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+    {
+        return forwarded.to_string();
+    }
+    peer.to_string()
+}
+
 async fn forward(State(hub): State<Hub>, request: Request) -> Response {
     let Ok(_permit) = hub.0.permits.try_acquire() else {
         return failure(StatusCode::SERVICE_UNAVAILABLE, codes::RELAY_BUSY);
@@ -286,6 +312,7 @@ async fn forward(State(hub): State<Hub>, request: Request) -> Response {
                 .to_string(),
             headers: headers::pick(&parts.headers, headers::REQUEST),
             body: body.to_vec(),
+            client: client(&parts),
         })),
     };
     if connection.tx.send(Ok(message)).await.is_err() {

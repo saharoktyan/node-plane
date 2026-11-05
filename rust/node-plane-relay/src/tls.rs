@@ -37,12 +37,20 @@ pub enum Mode {
     },
 }
 
+/// Marks a connection the relay terminated TLS for itself: no proxy in front,
+/// so X-Forwarded-For means nothing.
+#[derive(Clone, Copy)]
+pub struct Direct;
+
 pub async fn serve(listener: TcpListener, router: Router, mode: Mode) -> Result<(), String> {
     let config = match mode {
         Mode::Proxy => {
-            return axum::serve(listener, router)
-                .await
-                .map_err(|e| e.to_string());
+            return axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .map_err(|e| e.to_string());
         }
         Mode::Files { certificate, key } => files(&certificate, &key)?,
         Mode::Acme {
@@ -54,7 +62,7 @@ pub async fn serve(listener: TcpListener, router: Router, mode: Mode) -> Result<
     };
     let acceptor = TlsAcceptor::from(Arc::new(config));
     loop {
-        let (stream, _) = match listener.accept().await {
+        let (stream, peer) = match listener.accept().await {
             Ok(accepted) => accepted,
             Err(error) => {
                 // Out of descriptors and the like: wait instead of spinning.
@@ -74,6 +82,10 @@ pub async fn serve(listener: TcpListener, router: Router, mode: Mode) -> Result<
                 // The handshake itself answered the validation.
                 return;
             }
+            // The client's address, as `axum::serve` gives it behind a proxy.
+            let router = router
+                .layer(axum::Extension(axum::extract::ConnectInfo(peer)))
+                .layer(axum::Extension(Direct));
             let service = TowerToHyperService::new(router);
             let _ = auto::Builder::new(TokioExecutor::new())
                 .serve_connection(TokioIo::new(stream), service)

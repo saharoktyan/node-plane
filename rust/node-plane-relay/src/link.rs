@@ -230,6 +230,9 @@ async fn forward(
         }
     }
     builder = builder.header(api_headers::VIA, api_headers::VIA_RELAY);
+    if let Ok(client) = request.client.parse::<std::net::IpAddr>() {
+        builder = builder.header(api_headers::CLIENT, client.to_string());
+    }
     let Ok(outgoing) = builder.body(Full::new(Bytes::from(request.body))) else {
         return fail(400, "bad_request");
     };
@@ -271,6 +274,7 @@ mod tests {
                 path_and_query: path.into(),
                 headers: vec![],
                 body: vec![],
+                client: String::new(),
             };
             // Nothing listens there: an attempt would fail with 502, not 404.
             let response = forward(&http, "http://127.0.0.1:9", request, Limits::default()).await;
