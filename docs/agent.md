@@ -69,6 +69,10 @@ The agent keeps `/etc/systemd/system/node-plane-agent.service.d/hardening.conf` 
 
 This limits mistakes, not a compromised agent. The agent needs the Docker socket, writes systemd units for temporary access and starts transient units; each of these is enough to leave any sandbox. A stricter sandbox (`ProtectSystem=strict`, fewer capabilities) would therefore not stop an attacker, but could break Docker, apt, ufw or speed limits. What limits a compromised controller is above: the agent's API, nothing executable delivered and signed agent releases.
 
+## Relay
+
+A node can run the web cabinet's relay. The agent starts it from its own binary (`node-plane-agent relay-serve`), so the relay updates with the agent and restarts into the new binary after an update. It runs as the `node-plane-relay` user in a sandbox: it may bind its port and reach the network, write only `/var/lib/node-plane-relay/`, and has no other privileges, because it faces the internet. Its key stays on the server; the controller pins the public half, and the relay pins the controller's link key, which comes with the relay settings. With an active ufw the agent opens the relay's port (not behind a reverse proxy). Removing the relay or the agent removes its unit, settings, keys and certificates.
+
 ## Agent updates
 
 **Updates** updates agents together with the controller. The controller names its release; the agent downloads it from GitHub itself and checks it:
@@ -104,5 +108,7 @@ The agent's own removal is not verified: the controller cannot look at the serve
 | `/etc/node-plane/node.env` | Node settings |
 | `/var/lib/node-plane-agent/` | Command journals, the controller installation ID, self-update state in `update/` |
 | `/opt/node-plane-runtime/` | Protocol runtime files and client configurations |
+| `/etc/systemd/system/node-plane-relay.service`, `/etc/node-plane/relay.env` | Relay service and settings, when the node runs the relay |
+| `/var/lib/node-plane-relay/` | Relay key, the controller's pinned key, link state, ACME certificates |
 
 Full node removal deletes the agent and its resources and verifies the host. See [Nodes](nodes.md#remove-a-node).

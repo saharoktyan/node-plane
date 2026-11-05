@@ -31,6 +31,7 @@ use crate::{
         link_server::{Link, LinkServer},
         relay_message,
     },
+    tls,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -338,4 +339,47 @@ fn failure(status: StatusCode, code: &str) -> Response {
         headers.insert("x-request-id", value);
     }
     response
+}
+
+fn setting(name: &str) -> Result<String, String> {
+    std::env::var(name).map_err(|_| format!("{name} is not set"))
+}
+
+/// `serve` as set up by the environment (see the binary's usage); runs
+/// until the listener fails.
+pub async fn from_env() -> Result<(), String> {
+    use std::env;
+    let listen =
+        env::var("NODE_PLANE_RELAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8443".to_string());
+    let state = PathBuf::from(
+        env::var("NODE_PLANE_RELAY_STATE_DIR")
+            .unwrap_or_else(|_| "/var/lib/node-plane-relay".to_string()),
+    );
+    let key = keys::load_or_create(&state.join("relay.key"))?;
+    let tls = match env::var("NODE_PLANE_RELAY_TLS").as_deref() {
+        Err(_) | Ok("proxy") => tls::Mode::Proxy,
+        Ok("files") => tls::Mode::Files {
+            certificate: setting("NODE_PLANE_RELAY_TLS_CERT")?.into(),
+            key: setting("NODE_PLANE_RELAY_TLS_KEY")?.into(),
+        },
+        Ok("acme") => tls::Mode::Acme {
+            domain: setting("NODE_PLANE_RELAY_DOMAIN")?,
+            contact: env::var("NODE_PLANE_RELAY_ACME_CONTACT")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            cache: state.join("acme"),
+            staging: env::var("NODE_PLANE_RELAY_ACME_STAGING").as_deref() == Ok("1"),
+        },
+        Ok(other) => return Err(format!("NODE_PLANE_RELAY_TLS: unknown mode {other}")),
+    };
+    let listener = tokio::net::TcpListener::bind(&listen)
+        .await
+        .map_err(|e| format!("{listen}: {e}"))?;
+    eprintln!("relay listening on {listen} ({tls:?})");
+    let router = router(Config {
+        key,
+        state_dir: state,
+        limits: Limits::default(),
+    });
+    tls::serve(listener, router, tls).await
 }

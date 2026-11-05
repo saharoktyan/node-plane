@@ -52,6 +52,33 @@ service NodeAgentService {
   rpc DeleteXrayUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
   rpc AddAwgUser(AddAwgUserRequest) returns (RuntimeCommandResponse);
   rpc DeleteAwgUser(DeleteProfileRequest) returns (RuntimeCommandResponse);
+  // The web cabinet's relay as a service of this node; see src/relay.
+  rpc ApplyRelay(ApplyRelayRequest) returns (RelayState);
+  rpc GetRelayState(AgentEmpty) returns (RelayState);
+  rpc RemoveRelay(AgentEmpty) returns (RelayState);
+}
+
+message ApplyRelayRequest {
+  // The cabinet's domain; the relay's certificate names it.
+  string domain = 1;
+  uint32 port = 2;
+  // "acme" (port 443), "files" or "proxy" (listens on 127.0.0.1 only).
+  string tls = 3;
+  string acme_contact = 4;
+  string certificate_path = 5;
+  string key_path = 6;
+  // The controller's link key, pinned by the relay.
+  bytes link_key = 7;
+}
+
+message RelayState {
+  bool installed = 1;
+  bool active = 2;
+  // The relay's public key, pinned by the controller.
+  bytes relay_key = 3;
+  // "connected" or "disconnected": whether the controller is attached.
+  string link = 4;
+  uint64 link_since = 5;
 }
 
 message BackendNodeActionRequest {

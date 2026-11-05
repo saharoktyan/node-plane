@@ -412,6 +412,45 @@ impl NodeAgentService for NodeAgentApi {
             self.state.delete_awg_user(request.into_inner())?,
         ))
     }
+
+    async fn apply_relay(
+        &self,
+        request: Request<agent::v1::ApplyRelayRequest>,
+    ) -> Result<Response<agent::v1::RelayState>, Status> {
+        let settings =
+            crate::relay::Settings::parse(request.into_inner()).map_err(crate::relay::status)?;
+        relay_blocking(move |host, paths| crate::relay::apply(host, paths, &settings)).await
+    }
+
+    async fn get_relay_state(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::RelayState>, Status> {
+        relay_blocking(|host, paths| Ok(crate::relay::state(host, paths))).await
+    }
+
+    async fn remove_relay(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::RelayState>, Status> {
+        relay_blocking(|host, paths| crate::relay::remove(host, paths)).await
+    }
+}
+
+/// The relay's host work waits on systemd; keep it off the async workers.
+async fn relay_blocking(
+    work: impl FnOnce(
+        &crate::relay::System,
+        &crate::relay::Paths,
+    ) -> Result<agent::v1::RelayState, String>
+    + Send
+    + 'static,
+) -> Result<Response<agent::v1::RelayState>, Status> {
+    tokio::task::spawn_blocking(move || work(&crate::relay::System, &crate::relay::Paths::host()))
+        .await
+        .map_err(|_| Status::internal("relay worker unavailable"))?
+        .map(Response::new)
+        .map_err(crate::relay::status)
 }
 
 #[cfg(test)]

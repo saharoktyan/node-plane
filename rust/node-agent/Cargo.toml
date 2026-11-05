@@ -11,6 +11,7 @@ tonic-build = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 libc = "0.2"
 miniz_oxide = "0.8"
+node-plane-relay = { path = "../node-plane-relay", default-features = false, features = ["serve"] }
 prost = "0.13"
 # Already in the tree through rustls; used for SHA-256.
 ring = "0.17"

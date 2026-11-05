@@ -1,6 +1,6 @@
-use std::{env, path::PathBuf, sync::Arc};
+use std::{env, sync::Arc};
 
-use node_plane_relay::{keys, link, serve, tls};
+use node_plane_relay::{keys, link, serve};
 
 const USAGE: &str = "usage: node-plane-relay serve | link | key PATH | --version
 
@@ -50,41 +50,9 @@ async fn main() {
 }
 
 async fn run_serve() -> Result<(), String> {
-    let listen =
-        env::var("NODE_PLANE_RELAY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8443".to_string());
-    let state = PathBuf::from(
-        env::var("NODE_PLANE_RELAY_STATE_DIR")
-            .unwrap_or_else(|_| "/var/lib/node-plane-relay".to_string()),
-    );
-    let key = keys::load_or_create(&state.join("relay.key"))?;
-    let tls = match env::var("NODE_PLANE_RELAY_TLS").as_deref() {
-        Err(_) | Ok("proxy") => tls::Mode::Proxy,
-        Ok("files") => tls::Mode::Files {
-            certificate: setting("NODE_PLANE_RELAY_TLS_CERT")?.into(),
-            key: setting("NODE_PLANE_RELAY_TLS_KEY")?.into(),
-        },
-        Ok("acme") => tls::Mode::Acme {
-            domain: setting("NODE_PLANE_RELAY_DOMAIN")?,
-            contact: env::var("NODE_PLANE_RELAY_ACME_CONTACT")
-                .ok()
-                .filter(|v| !v.is_empty()),
-            cache: state.join("acme"),
-            staging: env::var("NODE_PLANE_RELAY_ACME_STAGING").as_deref() == Ok("1"),
-        },
-        Ok(other) => return Err(format!("NODE_PLANE_RELAY_TLS: unknown mode {other}")),
-    };
-    let listener = tokio::net::TcpListener::bind(&listen)
-        .await
-        .map_err(|e| format!("{listen}: {e}"))?;
-    eprintln!("relay listening on {listen} ({tls:?})");
-    let router = serve::router(serve::Config {
-        key,
-        state_dir: state.clone(),
-        limits: serve::Limits::default(),
-    });
     // The link stream never ends by itself, so stop without draining it.
     tokio::select! {
-        result = tls::serve(listener, router, tls) => result,
+        result = serve::from_env() => result,
         _ = tokio::signal::ctrl_c() => Ok(()),
     }
 }

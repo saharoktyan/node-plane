@@ -58,6 +58,9 @@ impl AgentState {
         {
             return Err(Status::invalid_argument("invalid bot SSH public key"));
         }
+        // The relay runs from the agent's binary: it leaves first.
+        crate::relay::remove(&crate::relay::System, &crate::relay::Paths::host())
+            .map_err(crate::relay::status)?;
         let authorized_keys = if bot_public_key.is_some() {
             self.authorized_keys_path()?.to_string_lossy().into_owned()
         } else {

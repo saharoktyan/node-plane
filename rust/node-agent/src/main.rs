@@ -14,6 +14,7 @@ mod journal;
 mod lifecycle;
 mod profiles;
 mod protocols;
+mod relay;
 mod runtime;
 mod shaping;
 mod state;
@@ -51,6 +52,9 @@ fn print_startup(config: &AgentConfig) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = host::hardening::run(&args) {
+        std::process::exit(code);
+    }
+    if let Some(code) = relay::run(&args).await {
         std::process::exit(code);
     }
     if let Some(code) = update::run(&args) {
@@ -99,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(code);
     }
     let config = AgentConfig::load();
+    relay::follow_update(&relay::System, &relay::Paths::host());
     // Installed agents of earlier releases get the hardening on their next start.
     if let Err(err) = host::hardening::ensure() {
         eprintln!("agent service hardening not written: {err}");
