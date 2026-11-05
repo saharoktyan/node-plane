@@ -24,6 +24,12 @@
   in the API, the bot and Workstation (migration r0039; older controllers
   cannot use the upgraded database). The controller reaches remote nodes
   through their agents; SSH only installs an agent.
+- Driver setup during installation no longer stops on an administrator name
+  with spaces, prepares the agent CA even when the controller has no node of
+  its own (its first agent enrolls by token), and restarts the backend after
+  creating the driver token, so the API reaches the driver right after a
+  first install. The driver's relay links trust `NODE_PLANE_RELAY_CA_FILE`
+  for a relay with a certificate from a private CA.
 - The relay is set up in Workstation and in the bot, from system settings
   or from the node (its settings add it, its card opens it); Back and the
   breadcrumbs follow the way in.
