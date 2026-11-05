@@ -80,7 +80,7 @@ class TrafficPostgresTests(unittest.TestCase):
             conn.execute("INSERT INTO backend_devices(id,profile_id,display_name,runtime_name,status,created_at) VALUES ('device','owned','Phone','phone','active',?)", (now.isoformat(),))
             for protocol in ('xray','awg'):
                 target = {'key':('owned','node',protocol,'device'), 'account_id':'admin'}
-                observation = {'identity':protocol, 'epoch':'a'*64, 'uplink_bytes':1000, 'downlink_bytes':2000}
+                observation = {'identity':protocol, 'epoch':'a'*64, 'uplink_bytes':1000, 'downlink_bytes':2000, 'inbounds':{}}
                 self.service._record(conn,target,observation,now.isoformat())
                 observation.update(uplink_bytes=1100,downlink_bytes=2200)
                 from datetime import timedelta

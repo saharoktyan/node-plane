@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::api::cli::{valid_email, valid_uuid};
 use super::api::{DEFAULT_ADDRESS, InboundUser, XrayApi};
+use super::identity::{client_name, email, valid_tag};
 
 pub(crate) const VISION: &str = "xtls-rprx-vision";
 const DEPLOY: &str = "deploy-xray.sh";
@@ -67,13 +68,6 @@ pub(crate) struct Target {
     pub(crate) xhttp_tag: String,
 }
 
-fn client_name(client: &Value) -> Option<&str> {
-    client
-        .get("email")
-        .or_else(|| client.get("name"))
-        .and_then(Value::as_str)
-}
-
 fn clients<'a>(config: &'a mut Value, tag: &str) -> Result<&'a mut Vec<Value>, String> {
     config["inbounds"]
         .as_array_mut()
@@ -123,7 +117,7 @@ fn edit_config(
         clients.retain(|c| client_name(c) != Some(name));
         match action {
             Action::Add { uuid } => {
-                let mut client = json!({"id": uuid, "name": name, "email": name});
+                let mut client = json!({"id": uuid, "name": name, "email": email(name, tag)});
                 if tag == &target.tcp_tag {
                     client["flow"] = json!(VISION);
                 }
@@ -148,7 +142,7 @@ pub(crate) async fn sync(
     let tags = [target.tcp_tag.as_str(), target.xhttp_tag.as_str()];
     let mut live = BTreeMap::new();
     for tag in tags {
-        live.insert(tag, users.users(tag).await?.remove(name));
+        live.insert(tag, users.users(tag).await?.remove(&email(name, tag)));
     }
     // Persist first: before enabling access, so a retry can finish it; before
     // revoking, so a restarted Xray does not restore access from the file.
@@ -164,23 +158,23 @@ pub(crate) async fn sync(
                     continue;
                 }
                 if live[tag].is_some() {
-                    users.remove(tag, name).await?;
+                    users.remove(tag, &email(name, tag)).await?;
                 }
                 let user = InboundUser {
-                    email: name.to_string(),
+                    email: email(name, tag),
                     id: uuid.clone(),
                     flow: flow.to_string(),
                 };
                 users.add(tag, &user).await?;
-                if users.users(tag).await?.get(name) != Some(&desired) {
+                if users.users(tag).await?.get(&email(name, tag)) != Some(&desired) {
                     return Err(format!("Xray user mismatch after add on {tag}"));
                 }
             }
             Action::Delete => {
                 if live[tag].is_some() {
-                    users.remove(tag, name).await?;
+                    users.remove(tag, &email(name, tag)).await?;
                 }
-                if users.users(tag).await?.contains_key(name) {
+                if users.users(tag).await?.contains_key(&email(name, tag)) {
                     return Err(format!("Xray user still present on {tag}"));
                 }
             }
@@ -266,6 +260,9 @@ async fn execute(args: &[String]) -> Result<(), String> {
     };
     if !valid_email(name) {
         return Err("invalid profile name".into());
+    }
+    if !valid_tag(tcp_tag) || !valid_tag(xhttp_tag) {
+        return Err("invalid Xray inbound tag".into());
     }
     let target = Target {
         config: PathBuf::from(config),
@@ -386,14 +383,14 @@ mod tests {
         let file = saved(&target);
         assert_eq!(
             file["inbounds"][0]["settings"]["clients"][1],
-            json!({"id": UUID, "name": "alice", "email": "alice", "flow": VISION})
+            json!({"id": UUID, "name": "alice", "email": "alice.reality-tcp", "flow": VISION})
         );
         assert_eq!(
             file["inbounds"][1]["settings"]["clients"][0],
-            json!({"id": UUID, "name": "alice", "email": "alice"})
+            json!({"id": UUID, "name": "alice", "email": "alice.reality-xhttp"})
         );
         assert_eq!(
-            users.live.borrow()["reality-tcp"]["alice"],
+            users.live.borrow()["reality-tcp"]["alice.reality-tcp"],
             (UUID.to_string(), VISION.to_string())
         );
         // A second add changes nothing; a new UUID replaces the live user.
@@ -405,7 +402,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*users.removed.borrow(), ["reality-tcp", "reality-xhttp"]);
-        assert_eq!(users.live.borrow()["reality-xhttp"]["alice"].0, OTHER);
+        assert_eq!(
+            users.live.borrow()["reality-xhttp"]["alice.reality-xhttp"].0,
+            OTHER
+        );
     }
 
     #[tokio::test]
@@ -427,12 +427,12 @@ mod tests {
                 .live
                 .borrow()
                 .get("reality-xhttp")
-                .is_some_and(|u| u.contains_key("alice"))
+                .is_some_and(|u| u.contains_key("alice.reality-xhttp"))
         );
         sync(&users, &target, &mut config, "alice", &add(UUID))
             .await
             .unwrap();
-        assert!(users.live.borrow()["reality-xhttp"].contains_key("alice"));
+        assert!(users.live.borrow()["reality-xhttp"].contains_key("alice.reality-xhttp"));
     }
 
     #[tokio::test]
@@ -456,7 +456,7 @@ mod tests {
                 .live
                 .borrow()
                 .values()
-                .all(|tag| !tag.contains_key("alice"))
+                .all(|tag| tag.keys().all(|email| !email.starts_with("alice.")))
         );
         // Deleting an absent user succeeds without live calls.
         users.removed.borrow_mut().clear();
@@ -478,12 +478,15 @@ mod tests {
             .borrow_mut()
             .get_mut("reality-tcp")
             .unwrap()
-            .insert("alice".into(), (OTHER.into(), VISION.into()));
+            .insert("alice.reality-tcp".into(), (OTHER.into(), VISION.into()));
         sync(&users, &target, &mut config, "alice", &add(UUID))
             .await
             .unwrap();
         assert_eq!(*users.removed.borrow(), ["reality-tcp"]);
-        assert_eq!(users.live.borrow()["reality-tcp"]["alice"].0, UUID);
+        assert_eq!(
+            users.live.borrow()["reality-tcp"]["alice.reality-tcp"].0,
+            UUID
+        );
     }
 
     #[tokio::test]
@@ -503,11 +506,11 @@ mod tests {
             saved(&target)["inbounds"][1]["settings"]["clients"],
             json!([])
         );
-        assert!(users.live.borrow()["reality-xhttp"].contains_key("alice"));
+        assert!(users.live.borrow()["reality-xhttp"].contains_key("alice.reality-xhttp"));
         sync(&users, &target, &mut config, "alice", &Action::Delete)
             .await
             .unwrap();
-        assert!(!users.live.borrow()["reality-xhttp"].contains_key("alice"));
+        assert!(!users.live.borrow()["reality-xhttp"].contains_key("alice.reality-xhttp"));
     }
 
     #[test]

@@ -806,6 +806,34 @@ pub fn traffic_lines(overview: &Value) -> Vec<String> {
         format!("Traffic · {} (UTC)", clean(&traffic["month"])),
         parts.join(" · "),
     ];
+    // Xray counts each inbound separately.
+    let xray = traffic["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["protocol"] == "xray"));
+    if let Some(inbounds) = xray
+        .and_then(|item| item["inbounds"].as_object())
+        .filter(|inbounds| !inbounds.is_empty())
+    {
+        let status = xray
+            .and_then(|item| item["status"].as_str())
+            .unwrap_or("waiting");
+        let split: Vec<String> = inbounds
+            .iter()
+            .map(|(name, value)| {
+                let bytes = value["uplink_bytes"]
+                    .as_u64()
+                    .zip(value["downlink_bytes"].as_u64())
+                    .and_then(|(up, down)| up.checked_add(down));
+                let label = match name.as_str() {
+                    "vless-tcp" => "TCP".to_string(),
+                    "vless-xhttp" => "XHTTP".to_string(),
+                    other => clean(&Value::from(other)),
+                };
+                format!("{label}: {}", amount(bytes, status))
+            })
+            .collect();
+        lines.push(format!("VLESS by inbound · {}", split.join(" · ")));
+    }
     if status == "unknown" {
         lines.push("Some traffic totals may be incomplete.".into());
     }
@@ -1920,6 +1948,16 @@ mod tests {
             lines
                 .join("\n")
                 .contains("All: — · VLESS: ≈ 1.0 KiB · AWG: —")
+        );
+        let lines = traffic_lines(&json!({"traffic":{"month":"2026-10","status":"current",
+            "total_bytes":2048,"items":[{"protocol":"xray","status":"current",
+            "uplink_bytes":2048,"downlink_bytes":0,"inbounds":{
+                "vless-tcp":{"uplink_bytes":1024,"downlink_bytes":0},
+                "vless-xhttp":{"uplink_bytes":1024,"downlink_bytes":0}}}]}}));
+        assert!(
+            lines
+                .join("\n")
+                .contains("VLESS by inbound · TCP: 1.0 KiB · XHTTP: 1.0 KiB")
         );
     }
 

@@ -17,6 +17,27 @@ INTERVAL_MINUTES = 2
 MAX_COUNTER = 2**63 - 1
 
 
+def _added(stored, increments):
+    """`{inbound: [uplink, downlink]}` JSON with the increments added."""
+    totals = json.loads(stored) if stored else {}
+    for name, values in increments.items():
+        totals[name] = [a + b for a, b in zip(totals.get(name, [0, 0]), values)]
+    return json.dumps(totals, sort_keys=True)
+
+
+def _sum_inbounds(stored):
+    totals = None
+    for item in stored:
+        totals = _added(totals, json.loads(item or '{}'))
+    return totals
+
+
+def inbound_traffic(stored):
+    """Stored `{inbound: [uplink, downlink]}` as API items."""
+    return {name: {'uplink_bytes': up, 'downlink_bytes': down}
+            for name, (up, down) in sorted(json.loads(stored or '{}').items())}
+
+
 def setting(conn, key, default=None):
     row = conn.execute(
         "SELECT value FROM backend_system_settings WHERE key=?", (key,)
@@ -69,6 +90,8 @@ class TrafficService:
                 GROUP BY node_key,protocol,period_month
                 ON CONFLICT(node_key,protocol) DO NOTHING''',
                 (datetime.now(timezone.utc).strftime('%Y-%m'),))
+            from db.migration_revisions.r0037_traffic_inbounds import add_columns
+            add_columns(conn)
 
     @staticmethod
     def _enabled(conn):
@@ -254,7 +277,7 @@ class TrafficService:
         if (
             not isinstance(result, dict)
             or set(result)
-            != {*target["intent"], "epoch", "uplink_bytes", "downlink_bytes"}
+            != {*target["intent"], "epoch", "uplink_bytes", "downlink_bytes", "inbounds"}
             or any(result.get(k) != v for k, v in target["intent"].items())
         ):
             raise ValueError("invalid traffic identity")
@@ -265,6 +288,16 @@ class TrafficService:
         for key in ("uplink_bytes", "downlink_bytes"):
             if type(result[key]) is not int or not 0 <= result[key] <= MAX_COUNTER:
                 raise ValueError("invalid traffic counter")
+        inbounds = result["inbounds"]
+        if not isinstance(inbounds, dict) or any(
+                not isinstance(name, str) or not re.fullmatch(r"[a-z0-9-]{1,32}", name)
+                or not isinstance(value, dict) or set(value) != {"uplink_bytes", "downlink_bytes"}
+                or any(type(v) is not int or not 0 <= v <= MAX_COUNTER for v in value.values())
+                for name, value in inbounds.items()):
+            raise ValueError("invalid inbound traffic")
+        if inbounds and any(sum(value[key] for value in inbounds.values()) != result[key]
+                            for key in ("uplink_bytes", "downlink_bytes")):
+            raise ValueError("inbound traffic does not add up")
         return result
 
     @staticmethod
@@ -318,6 +351,17 @@ class TrafficService:
                     and value >= baseline[field]
                     else value
                 )
+        observed = {name: [value["uplink_bytes"], value["downlink_bytes"]]
+                    for name, value in observation["inbounds"].items()}
+        by_inbound = {}
+        if baseline and baseline["epoch"] is not None:
+            last = json.loads(baseline["last_inbounds_json"] or "{}")
+            same_run = (baseline["epoch"] == observation["epoch"]
+                        and baseline["identity"] == observation["identity"])
+            for name, values in observed.items():
+                before = last.get(name)
+                by_inbound[name] = [value - before[index] if same_run and before and value >= before[index]
+                                    else value for index, value in enumerate(values)]
         month = timestamp[:7]
         same_month = previous and previous['period_month'] == month
         up_total = (previous["uplink_bytes"] if same_month else 0) + increments[0]
@@ -332,6 +376,8 @@ class TrafficService:
             return
         from .quotas import accrue
         accrue(conn, key[0], *increments)
+        node_before = conn.execute('''SELECT period_month,inbounds_json FROM backend_node_traffic
+            WHERE node_key=? AND protocol=?''', (key[1], key[2])).fetchone()
         conn.execute('''INSERT INTO backend_node_traffic
             (node_key,protocol,period_month,uplink_bytes,downlink_bytes,tracked_since,last_sample_at)
             VALUES (?,?,?,?,?,?,?) ON CONFLICT(node_key,protocol) DO UPDATE SET
@@ -343,10 +389,15 @@ class TrafficService:
                     THEN backend_node_traffic.tracked_since ELSE excluded.tracked_since END,
                 period_month=excluded.period_month,last_sample_at=excluded.last_sample_at''',
             (key[1],key[2],month,*increments,timestamp,timestamp))
+        conn.execute('UPDATE backend_node_traffic SET inbounds_json=? WHERE node_key=? AND protocol=?',
+            (_added(node_before['inbounds_json'] if node_before and node_before['period_month'] == month else None,
+                    by_inbound), key[1], key[2]))
         peer_status = 'current'
         conn.execute('''UPDATE backend_traffic_peers SET epoch=?,identity=?,last_uplink=?,last_downlink=?,
-            last_sample_at=?,status='current' WHERE profile_id=? AND node_key=? AND protocol=? AND device_id=?''',
-            (observation['epoch'],observation['identity'],up,down,timestamp,*peer_key))
+            last_inbounds_json=?,last_sample_at=?,status='current'
+            WHERE profile_id=? AND node_key=? AND protocol=? AND device_id=?''',
+            (observation['epoch'],observation['identity'],up,down,json.dumps(observed, sort_keys=True),
+             timestamp,*peer_key))
         peers = conn.execute('''SELECT b.status,b.last_sample_at FROM backend_devices d
             LEFT JOIN backend_traffic_peers b ON b.device_id=d.id AND b.node_key=? AND b.protocol=?
             WHERE d.profile_id=? AND d.status='active' AND (?='awg' OR EXISTS (
@@ -356,13 +407,14 @@ class TrafficService:
         if any(p['status']!='current' or not p['last_sample_at'] or p['last_sample_at']<stale for p in peers):
             peer_status = 'unknown'
         conn.execute(
-            """UPDATE backend_traffic_usage SET uplink_bytes=?,downlink_bytes=?,
+            """UPDATE backend_traffic_usage SET uplink_bytes=?,downlink_bytes=?,inbounds_json=?,
             epoch=?,identity=?,last_uplink=?,last_downlink=?,
             tracked_since=?,last_sample_at=?,status=?,period_month=?
             WHERE profile_id=? AND node_key=? AND protocol=?""",
             (
                 up_total,
                 down_total,
+                _added(previous["inbounds_json"] if same_month else None, by_inbound),
                 observation["epoch"],
                 observation["identity"],
                 up,
@@ -489,7 +541,8 @@ class TrafficService:
                 status = 'unknown' if unknown else 'current' if row or unused else 'waiting'
                 items.append({'protocol': protocol, 'status': status,
                     'uplink_bytes': row['uplink_bytes'] if row else 0 if unused else None,
-                    'downlink_bytes': row['downlink_bytes'] if row else 0 if unused else None})
+                    'downlink_bytes': row['downlink_bytes'] if row else 0 if unused else None,
+                    'inbounds': inbound_traffic(row['inbounds_json'] if row else None)})
             known = all(item['uplink_bytes'] is not None for item in items)
             status = 'unknown' if any(i['status'] == 'unknown' for i in items) else 'current' if known else 'waiting'
             return {'month':month, 'status':status, 'items':items,
@@ -518,6 +571,7 @@ class TrafficService:
             for row in rows:
                 if row['period_month'] != month:
                     row['uplink_bytes'] = row['downlink_bytes'] = 0
+                    row['inbounds_json'] = '{}'
             items = []
             for protocol in ("awg", "xray"):
                 group = [
@@ -529,6 +583,7 @@ class TrafficService:
                             "protocol": protocol,
                             "uplink_bytes": sum(r["uplink_bytes"] for r in group),
                             "downlink_bytes": sum(r["downlink_bytes"] for r in group),
+                            "inbounds": inbound_traffic(_sum_inbounds(r["inbounds_json"] for r in group)),
                             "tracked_since": min(r["tracked_since"] for r in group),
                             "last_sample_at": min(r["last_sample_at"] for r in group),
                         }
@@ -548,6 +603,7 @@ class TrafficService:
                 "nodes": [{
                     'node_key': r['node_key'], 'protocol': r['protocol'],
                     'uplink_bytes': r['uplink_bytes'], 'downlink_bytes': r['downlink_bytes'],
+                    'inbounds': inbound_traffic(r['inbounds_json']),
                     'status': 'current' if r['status'] == 'current' and r['last_sample_at']
                         and datetime.fromisoformat(r['last_sample_at']) >= stale
                         and r['period_month'] == month else 'unknown',

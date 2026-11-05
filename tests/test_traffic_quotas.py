@@ -278,7 +278,8 @@ class QuotaServiceTests(unittest.TestCase):
         with self.db.transaction() as conn:
             for up, down, second in ((1000, 2000, 1), (1100, 2300, 2)):
                 TrafficService._record(conn, target, {'identity': 'key', 'epoch': 'a' * 64, 'uplink_bytes': up,
-                                                      'downlink_bytes': down}, f'2026-03-10T12:00:0{second}+00:00')
+                                                      'downlink_bytes': down, 'inbounds': {}},
+                                    f'2026-03-10T12:00:0{second}+00:00')
         # The first sample is the baseline; the second adds its difference.
         self.assertEqual((self.open_period()['uplink_bytes'], self.open_period()['downlink_bytes']), (100, 300))
 

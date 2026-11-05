@@ -70,7 +70,8 @@ class BackendProfileTests(unittest.TestCase):
         self.assertEqual(self.get('/api/v1/profiles').status_code, 403)
         self.assertEqual(self.get(f'/api/v1/profiles/{self.foreign}/grants').status_code, 404)
         self.assertEqual(self.get(f'/api/v1/profiles/{self.profile}/grants').json()['items'],
-                         [{'node_key': 'n1', 'protocol': 'awg'}])
+                         # Nodes written directly have no instance records.
+                         [{'node_key': 'n1', 'protocol': 'awg', 'service_instance_id': None}])
         self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
         approved_page = self.get('/api/v1/profiles').json()
         self.assertEqual({item['id'] for item in approved_page['items']},

@@ -283,8 +283,7 @@ pub(crate) fn prune_config(
                 let before = clients.len();
                 clients.retain(|client| {
                     !names.iter().any(|name| {
-                        client["email"].as_str() == Some(name)
-                            || client["name"].as_str() == Some(name)
+                        crate::protocols::xray::identity::client_name(client) == Some(name)
                     })
                 });
                 changed |= clients.len() != before;

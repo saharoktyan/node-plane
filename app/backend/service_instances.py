@@ -50,6 +50,17 @@ def sync_node(conn, node_key):
         conn.execute('DELETE FROM backend_service_instances WHERE node_key=? AND service=?', (node_key, service))
 
 
+# A grant (node, protocol) is access to the node's instance of that engine;
+# the pair is the instance's key and outlives the instance record.
+GRANT_INSTANCE_SQL = '''(SELECT s.id FROM backend_service_instances s
+    WHERE s.node_key = g.node_key AND s.service = g.protocol) AS service_instance_id'''
+
+
+def grant(row):
+    return {'node_key': row['node_key'], 'protocol': row['protocol'],
+            'service_instance_id': row['service_instance_id']}
+
+
 def require_manage(actor, services):
     """The actor may manage every one of these service types."""
     from .authorization import require_permission, service_permission

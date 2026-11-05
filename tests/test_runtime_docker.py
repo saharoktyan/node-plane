@@ -173,8 +173,8 @@ class DockerRuntimeTests(unittest.TestCase):
         self.wait_users(container)
         for tag in ('reality-tcp','reality-xhttp'):
             users = xray_users(tag)
-            self.assertIn('alice',users)
-            self.assertNotIn(intent['runtime_name'],users)
+            self.assertIn(f'alice.{tag}',users)
+            self.assertNotIn(f"{intent['runtime_name']}.{tag}",users)
         # The supervisor waits on its container and ends with it.
         docker('stop',container)
         _, errors = supervisor.communicate(timeout=60)
@@ -187,12 +187,12 @@ class DockerRuntimeTests(unittest.TestCase):
         identity, started = str(uuid4()), self.started(container)
         self.sync(path, container, 'add', identity)
         for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertEqual(xray_users(tag)['alice']['id'], identity)
+            self.assertEqual(xray_users(tag)[f'alice.{tag}']['id'], identity)
         self.assertEqual(self.started(container), started)
         docker('restart', container)
         self.wait_users(container)
         for tag in ('reality-tcp', 'reality-xhttp'):
-            self.assertEqual(xray_users(tag)['alice']['id'], identity)
+            self.assertEqual(xray_users(tag)[f'alice.{tag}']['id'], identity)
         started = self.started(container)
         self.sync(path, container, 'delete')
         self.assertEqual(self.started(container), started)
@@ -273,11 +273,11 @@ class DockerRuntimeTests(unittest.TestCase):
 
         first, second = str(uuid4()), str(uuid4())
         self.sync(path, container, 'add', first)
-        self.assertEqual(cli_users('reality-tcp')['alice']['id'], first)
-        self.assertEqual(cli_users('reality-tcp')['alice']['flow'], 'xtls-rprx-vision')
-        self.assertNotIn('flow', cli_users('reality-xhttp')['alice'])
+        self.assertEqual(cli_users('reality-tcp')['alice.reality-tcp']['id'], first)
+        self.assertEqual(cli_users('reality-tcp')['alice.reality-tcp']['flow'], 'xtls-rprx-vision')
+        self.assertNotIn('flow', cli_users('reality-xhttp')['alice.reality-xhttp'])
         self.sync(path, container, 'add', second)
-        self.assertEqual(cli_users('reality-xhttp')['alice']['id'], second)
+        self.assertEqual(cli_users('reality-xhttp')['alice.reality-xhttp']['id'], second)
         self.assertTrue(self.inspect(path, 'xray', 'alice', second)['identity_matches'])
         self.assertFalse(self.inspect(path, 'xray', 'alice', first)['identity_matches'])
         self.sync(path, container, 'delete')
@@ -286,12 +286,12 @@ class DockerRuntimeTests(unittest.TestCase):
         self.assertEqual(cli_users('reality-xhttp'), {})
 
         added = run('add-rule', '--rule-tag=np-evict-test', '--outbound=node-plane-blocked',
-                    '--user=alice', '--source=[2001:db8::7]/64')
+                    '--user=alice.reality-tcp', '--source=[2001:db8::7]/64')
         self.assertEqual(added.returncode, 0, added.stderr)
         listed = docker('exec', container, 'xray', 'api', 'lsrules', '--server=127.0.0.1:10085').stdout
         self.assertEqual([rule.get('ruleTag') for rule in json.loads(listed)['rules']], [None, 'np-evict-test'])
         self.assertEqual(run('add-rule', '--rule-tag=np-evict-test', '--outbound=node-plane-blocked',
-                             '--user=alice').returncode, 4)
+                             '--user=alice.reality-tcp').returncode, 4)
         for _ in range(2):
             self.assertEqual(run('remove-rule', '--rule-tag=np-evict-test').returncode, 0)
         self.assertEqual(json.loads(run('uptime').stdout)['uptime'] >= 0, True)
@@ -300,7 +300,7 @@ class DockerRuntimeTests(unittest.TestCase):
     def test_agent_closes_established_vless_connections_on_real_runtime(self):
         path, server, run = self.agent_xray('1080', '1081')
         identity = str(uuid4())
-        added = run('add-user', '--tag=reality-tcp', '--email=alice', f'--uuid={identity}')
+        added = run('add-user', '--tag=reality-tcp', '--email=alice.reality-tcp', f'--uuid={identity}')
         self.assertEqual(added.returncode, 0, added.stderr)
         # A VLESS client in the server's network namespace. Each SOCKS port,
         # published with the server, dials from its own loopback address, so
@@ -360,9 +360,9 @@ class DockerRuntimeTests(unittest.TestCase):
         stream = connect()
         self.assertFalse(closed(stream, 1))
         # Another source closes nothing.
-        other = run('close-connections', '--tag=reality-tcp', '--email=alice', '--source=203.0.113.7')
+        other = run('close-connections', '--tag=reality-tcp', '--email=alice.reality-tcp', '--source=203.0.113.7')
         self.assertEqual(json.loads(other.stdout), {'closed': 0}, other.stderr)
-        closing = run('close-connections', '--tag=reality-tcp', '--email=alice', '--source=127.0.0.2')
+        closing = run('close-connections', '--tag=reality-tcp', '--email=alice.reality-tcp', '--source=127.0.0.2')
         self.assertEqual(json.loads(closing.stdout), {'closed': 1}, closing.stderr)
         self.assertTrue(closed(stream))
 

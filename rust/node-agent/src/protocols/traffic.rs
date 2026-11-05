@@ -4,6 +4,7 @@
 //! Counters are never reset. Only the requested identity's counters and an
 //! opaque epoch leave the agent; the epoch changes when the protocol
 //! container restarts, and a restart during the read makes it unknown.
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -61,6 +62,29 @@ pub(crate) struct Snapshot {
     epoch: String,
     uplink_bytes: u64,
     downlink_bytes: u64,
+    /// The same bytes per inbound of the engine (Xray); empty for AWG.
+    inbounds: BTreeMap<String, InboundTraffic>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct InboundTraffic {
+    uplink_bytes: u64,
+    downlink_bytes: u64,
+}
+
+fn inbound_traffic(inbounds: ByInbound) -> BTreeMap<String, InboundTraffic> {
+    inbounds
+        .into_iter()
+        .map(|(inbound, counters)| {
+            (
+                inbound,
+                InboundTraffic {
+                    uplink_bytes: counters.uplink,
+                    downlink_bytes: counters.downlink,
+                },
+            )
+        })
+        .collect()
 }
 
 /// Bytes the client sent and received.
@@ -69,6 +93,9 @@ pub(crate) struct Counters {
     pub(crate) uplink: u64,
     pub(crate) downlink: u64,
 }
+
+/// A client's counters per inbound of its engine.
+pub(crate) type ByInbound = BTreeMap<String, Counters>;
 
 pub(crate) fn counter(value: u64) -> Result<u64, String> {
     (value <= MAX_COUNTER)
@@ -159,7 +186,7 @@ pub(crate) async fn read(setting: Setting<'_>, query: Query) -> Result<Snapshot,
         &awg.container
     };
     let epoch = checked_epoch(container)?;
-    let counters = if query.protocol == "xray" {
+    let (counters, inbounds) = if query.protocol == "xray" {
         xray::traffic::counters(&xray, &query.runtime_name, &query.identity).await?
     } else {
         let (node, name, identity) = (
@@ -167,9 +194,11 @@ pub(crate) async fn read(setting: Setting<'_>, query: Query) -> Result<Snapshot,
             query.runtime_name.clone(),
             query.identity.clone(),
         );
-        tokio::task::spawn_blocking(move || awg::traffic::counters(&node, &name, &identity))
-            .await
-            .map_err(|err| err.to_string())??
+        let counters =
+            tokio::task::spawn_blocking(move || awg::traffic::counters(&node, &name, &identity))
+                .await
+                .map_err(|err| err.to_string())??;
+        (counters, ByInbound::new())
     };
     if checked_epoch(container)? != epoch {
         return Err("protocol restarted during traffic observation".into());
@@ -182,6 +211,7 @@ pub(crate) async fn read(setting: Setting<'_>, query: Query) -> Result<Snapshot,
         epoch,
         uplink_bytes: counters.uplink,
         downlink_bytes: counters.downlink,
+        inbounds: inbound_traffic(inbounds),
     })
 }
 
@@ -235,12 +265,15 @@ pub(crate) async fn read_batch(
             tokio::task::spawn_blocking(move || awg::traffic::batch(&node, &pairs))
                 .await
                 .map_err(|err| err.to_string())?
+                .into_iter()
+                .map(|counters| counters.map(|counters| (counters, ByInbound::new())))
+                .collect()
         };
         if checked_epoch(container).ok().as_ref() != Some(&epoch) {
             continue;
         }
         for (query, counters) in selected.into_iter().zip(counters) {
-            if let Some(counters) = counters {
+            if let Some((counters, inbounds)) = counters {
                 items.push(Snapshot {
                     node_key: query.node_key.clone(),
                     runtime_name: query.runtime_name.clone(),
@@ -249,6 +282,7 @@ pub(crate) async fn read_batch(
                     epoch: epoch.clone(),
                     uplink_bytes: counters.uplink,
                     downlink_bytes: counters.downlink,
+                    inbounds: inbound_traffic(inbounds),
                 });
             }
         }

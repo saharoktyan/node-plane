@@ -35,7 +35,8 @@ def running(container):
 def xray_users(tag):
     # The container's Xray CLI: the guest needs no agent binary for this read.
     response=json.loads(run('docker','exec','xray','xray','api','inbounduser','--server=127.0.0.1:10085','-tag='+tag))
-    return {user['email']:user for user in response.get('users',[]) if user.get('email')}
+    # Keyed by client name: the email is NAME.TAG.
+    return {user['email'].split('.',1)[0]:user for user in response.get('users',[]) if user.get('email')}
 def issue(protocol,name,temporary=False):
     """A permanent profile through its entry point; a temporary one, with its
     lease and expiry units, through the agent. Returns the temporary intent."""

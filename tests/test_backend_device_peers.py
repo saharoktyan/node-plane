@@ -53,7 +53,7 @@ class PeerDriver:
         if intent['runtime_name'] in self.failures:
             raise ConnectionError('peer unavailable')
         up,down,epoch = self.counters[intent['runtime_name']]
-        return {**intent,'epoch':epoch,'uplink_bytes':up,'downlink_bytes':down}
+        return {**intent,'epoch':epoch,'uplink_bytes':up,'downlink_bytes':down,'inbounds':{}}
 
 
 class BackendDevicePeerTests(unittest.TestCase):

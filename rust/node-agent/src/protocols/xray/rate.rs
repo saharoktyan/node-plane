@@ -121,7 +121,8 @@ pub(crate) fn domain_strategy(config: &str) -> i32 {
     }
 }
 
-/// Brings rate outbounds and rules in line with `wanted` (tag -> email).
+/// Brings rate outbounds and rules in line with `wanted` (tag -> client
+/// name); a rule covers the client's email on every VLESS inbound.
 async fn routing(
     api: &XrayApi,
     wanted: &BTreeMap<String, String>,
@@ -136,6 +137,12 @@ async fn routing(
         .filter(|tag| tag.starts_with(TAG_PREFIX))
         .collect();
     let rules = api.list_rules().await?;
+    let inbounds: Vec<String> = api
+        .vless_inbound_tags()
+        .await?
+        .into_iter()
+        .filter(|tag| super::identity::valid_tag(tag))
+        .collect();
     let last_evict = rules
         .iter()
         .rposition(|(tag, _)| tag.starts_with(EVICT_PREFIX));
@@ -157,7 +164,7 @@ async fn routing(
             api.remove_outbound(tag).await?;
         }
     }
-    for (tag, email) in wanted {
+    for (tag, name) in wanted {
         if !outbounds.contains(tag) || fresh.contains(tag) || recreate {
             let minor = tag[TAG_PREFIX.len()..]
                 .parse::<u32>()
@@ -169,7 +176,7 @@ async fn routing(
             api.add_rule(&RouteRule {
                 rule_tag: tag.clone(),
                 outbound_tag: tag.clone(),
-                users: vec![email.clone()],
+                users: super::identity::emails(name, &inbounds),
                 sources: Vec::new(),
             })
             .await?;

@@ -26,9 +26,11 @@ CLIENTS = {2101: (ALICE, '127.0.0.2'), 2102: (ALICE, '127.0.0.3'), 2103: (BOB, '
 def server_config():
     reality = {'show': False, 'dest': 'www.example.com:443', 'xver': 0,
                'serverNames': ['www.example.com'], 'privateKey': 'unused', 'shortIds': ['']}
-    clients = [{'id': ALICE, 'email': 'alice'}, {'id': BOB, 'email': 'bob'}]
+    # Each client has its own email per inbound, as the agent writes them.
+    clients = lambda tag: [{'id': ALICE, 'name': 'alice', 'email': f'alice.{tag}'},
+                           {'id': BOB, 'name': 'bob', 'email': f'bob.{tag}'}]
     inbounds = [{'tag': tag, 'listen': '0.0.0.0', 'port': port, 'protocol': 'vless',
-                 'settings': {'decryption': 'none', 'clients': clients},
+                 'settings': {'decryption': 'none', 'clients': clients(tag)},
                  # Plain transport keeps the fixture keyless; routing is transport independent.
                  'streamSettings': {'network': network, 'realitySettings': reality,
                                     **({'xhttpSettings': {'path': '/assets'}} if network == 'xhttp' else {})}}

@@ -23,6 +23,7 @@ use tonic::Status;
 
 use super::api::cli::valid_email;
 use super::api::{RouteRule, SourceNet, XrayApi, XrayApiError};
+use super::identity::{email, emails, valid_tag};
 use crate::agent::v1::{
     AdmissionEvent, ApplyAdmissionPolicyRequest, ApplyAdmissionPolicyResponse,
     ObserveSessionsRequest, ObserveSessionsResponse, SessionObservation,
@@ -255,13 +256,35 @@ impl State {
     }
 }
 
-fn rule(rule_tag: &str, email: &str, source: &str) -> Result<RouteRule, XrayApiError> {
+/// Blocks the client's source on every VLESS inbound (`inbounds`).
+fn rule(
+    rule_tag: &str,
+    name: &str,
+    source: &str,
+    inbounds: &[String],
+) -> Result<RouteRule, XrayApiError> {
     Ok(RouteRule {
         rule_tag: rule_tag.to_string(),
         outbound_tag: BLOCKED_OUTBOUND.to_string(),
-        users: vec![email.to_string()],
+        users: emails(name, inbounds),
         sources: vec![SourceNet::parse(source)?],
     })
+}
+
+/// The client's sources on all inbounds, each with its latest connection.
+async fn online(
+    api: &XrayApi,
+    name: &str,
+    inbounds: &[String],
+) -> Result<BTreeMap<String, i64>, XrayApiError> {
+    let mut sources = BTreeMap::new();
+    for email in emails(name, inbounds) {
+        for (ip, seen) in api.online_ips(&email).await? {
+            let latest = sources.entry(ip).or_insert(seen);
+            *latest = (*latest).max(seen);
+        }
+    }
+    Ok(sources)
 }
 
 /// One pass over every limited client: observe, then apply rule changes.
@@ -276,33 +299,35 @@ pub(crate) async fn step(
     for rule_tag in state.retain_policies(policies) {
         api.remove_rule(&rule_tag).await?;
     }
+    let inbounds: Vec<String> = api
+        .vless_inbound_tags()
+        .await?
+        .into_iter()
+        .filter(|tag| valid_tag(tag))
+        .collect();
     if state.xray_restarted(api.uptime().await?) {
         let blocks: Vec<_> = state
             .blocks()
-            .map(|(email, source, block)| rule(&block.rule_tag, email, source))
+            .map(|(name, source, block)| rule(&block.rule_tag, name, source, &inbounds))
             .collect::<Result<_, _>>()?;
         for block in blocks {
             api.add_rule(&block).await?;
         }
     }
     let mut events = Vec::new();
-    let mut inbounds = None;
-    for (email, policy) in policies {
-        let online = api.online_ips(email).await?;
-        let changes = state.observe(email, policy, &online, now);
+    for (name, policy) in policies {
+        let online = online(api, name, &inbounds).await?;
+        let changes = state.observe(name, policy, &online, now);
         for rule_tag in &changes.remove {
             api.remove_rule(rule_tag).await?;
         }
-        for (rule_tag, email, source) in &changes.add {
-            let block = rule(rule_tag, email, source)?;
+        for (rule_tag, name, source) in &changes.add {
+            let block = rule(rule_tag, name, source, &inbounds)?;
             api.add_rule(&block).await?;
             // The rule comes first: a client reconnecting after the close
             // is refused at dispatch.
-            if inbounds.is_none() {
-                inbounds = Some(api.vless_inbound_tags().await?);
-            }
-            for tag in inbounds.iter().flatten() {
-                close_connections(api, tag, email, &block.sources[0]).await?;
+            for tag in &inbounds {
+                close_connections(api, tag, &email(name, tag), &block.sources[0]).await?;
             }
         }
         events.extend(changes.events);
@@ -1024,8 +1049,9 @@ mod tests {
 
     #[test]
     fn blocks_match_user_and_source_so_neighbours_are_untouched() {
-        let rule = rule("np-evict-0", "phone", "2001:db8:1:2::/64").unwrap();
-        assert_eq!(rule.users, vec!["phone".to_string()]);
+        let inbounds = ["reality-tcp".to_string(), "reality-xhttp".to_string()];
+        let rule = rule("np-evict-0", "phone", "2001:db8:1:2::/64", &inbounds).unwrap();
+        assert_eq!(rule.users, ["phone.reality-tcp", "phone.reality-xhttp"]);
         assert_eq!(rule.sources[0].to_string(), "2001:db8:1:2::/64");
         assert_eq!(rule.outbound_tag, BLOCKED_OUTBOUND);
     }

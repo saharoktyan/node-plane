@@ -71,7 +71,7 @@ class TariffTests(fixture.Fixture, unittest.TestCase):
         before = datetime.now(timezone.utc)
         response = self.assign(tariff['id'], expiry='start', apply_access=True)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['grants'], [{'node_key': 'second', 'protocol': 'xray'}])
+        self.assertEqual(response.json()['grants'], [{'node_key': 'second', 'protocol': 'xray', 'service_instance_id': None}])
         self.assertIsNotNone(response.json()['operation_id'])
         started = self.expiry()
         self.assertTrue(before + timedelta(days=30) <= started <= datetime.now(timezone.utc) + timedelta(days=30))
@@ -87,7 +87,7 @@ class TariffTests(fixture.Fixture, unittest.TestCase):
         self.assertEqual((summary['tariff']['title'], summary['tariff']['duration_days']), ('Basic', 30))
         # Keeping the term changes neither expiry nor nodes.
         kept = self.expiry()
-        self.assertEqual(self.assign(tariff['id']).json()['grants'], [{'node_key': 'second', 'protocol': 'xray'}])
+        self.assertEqual(self.assign(tariff['id']).json()['grants'], [{'node_key': 'second', 'protocol': 'xray', 'service_instance_id': None}])
         self.assertEqual(self.expiry(), kept)
 
     def test_assignment_refuses_what_the_tariff_does_not_define(self):

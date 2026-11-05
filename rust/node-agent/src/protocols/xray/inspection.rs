@@ -51,18 +51,15 @@ async fn compare(
             .ok_or("missing protocol inbound")?;
         let stored: Vec<&Value> = clients
             .iter()
-            .filter(|client| {
-                client
-                    .get("email")
-                    .or_else(|| client.get("name"))
-                    .and_then(Value::as_str)
-                    == Some(name)
-            })
+            .filter(|client| super::identity::client_name(client) == Some(name))
             .collect();
         if stored.len() > 1 {
             return Err("duplicate profile".into());
         }
-        let actual = users.users(tag).await?.remove(name);
+        let actual = users
+            .users(tag)
+            .await?
+            .remove(&super::identity::email(name, tag));
         let flow = if index == 0 { VISION } else { "" };
         matches &= stored.first().is_some_and(|client| {
             client["id"] == uuid && client.get("flow").and_then(Value::as_str).unwrap_or("") == flow
@@ -119,14 +116,21 @@ mod tests {
     }
 
     fn live(tcp_flow: &str, xhttp: bool) -> Tags {
-        let user = |flow: &str| {
-            BTreeMap::from([("p_test".to_string(), (UUID.to_string(), flow.to_string()))])
+        let user = |tag: &str, flow: &str| {
+            BTreeMap::from([(
+                format!("p_test.{tag}"),
+                (UUID.to_string(), flow.to_string()),
+            )])
         };
         BTreeMap::from([
-            ("tcp".to_string(), user(tcp_flow)),
+            ("tcp".to_string(), user("tcp", tcp_flow)),
             (
                 "xhttp".to_string(),
-                if xhttp { user("") } else { BTreeMap::new() },
+                if xhttp {
+                    user("xhttp", "")
+                } else {
+                    BTreeMap::new()
+                },
             ),
         ])
     }
@@ -135,8 +139,8 @@ mod tests {
     async fn both_inbounds_and_the_vision_flow_must_match_and_nothing_changes() {
         let path = crate::protocols::test_dir("xray-inspect-match").join("config.json");
         let config = json!({"inbounds": [
-            {"tag": "tcp", "settings": {"clients": [{"email": "p_test", "id": UUID, "flow": VISION}]}},
-            {"tag": "xhttp", "settings": {"clients": [{"email": "p_test", "id": UUID}]}},
+            {"tag": "tcp", "settings": {"clients": [{"name": "p_test", "email": "p_test.tcp", "id": UUID, "flow": VISION}]}},
+            {"tag": "xhttp", "settings": {"clients": [{"name": "p_test", "email": "p_test.xhttp", "id": UUID}]}},
         ]});
         fs::write(&path, config.to_string()).unwrap();
         let fake = Fake(Mutex::new(Ok(live(VISION, true))));
@@ -189,7 +193,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let duplicate = json!({"tag": "xhttp", "settings": {"clients": [{"email": "p_test"}, {"name": "p_test"}]}});
+        let duplicate = json!({"tag": "xhttp", "settings": {"clients": [{"email": "p_test.xhttp"}, {"name": "p_test"}]}});
         fs::write(
             &path,
             json!({"inbounds": [empty("tcp"), duplicate]}).to_string(),

@@ -237,10 +237,11 @@ class ProfileRepository:
         return matches
 
     def grants(self, profile_id):
+        from .service_instances import GRANT_INSTANCE_SQL, grant
         with self.db.connect() as conn:
-            rows = conn.execute('''SELECT node_key, protocol FROM backend_grants
-                WHERE profile_id = ? ORDER BY node_key, protocol''', (profile_id,)).fetchall()
-        return [{'node_key': row['node_key'], 'protocol': row['protocol']} for row in rows]
+            rows = conn.execute(f'''SELECT g.node_key, g.protocol, {GRANT_INSTANCE_SQL} FROM backend_grants g
+                WHERE g.profile_id = ? ORDER BY g.node_key, g.protocol''', (profile_id,)).fetchall()
+        return [grant(row) for row in rows]
 
     def summary(self, profile_id):
         with self.db.connect() as conn:

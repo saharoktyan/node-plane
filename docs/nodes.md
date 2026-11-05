@@ -38,7 +38,7 @@ Open the server settings to edit general information, protocols or advanced opti
 
 Installation defaults supply initial values for new deployments; server settings control that specific node. See [Protocols](protocols.md) for ports, SNI, fingerprint and AWG parameters. Runtime changes can require users to obtain updated configurations.
 
-Server cards include monthly traffic when available, with total, VLESS and AWG usage. See [Settings](settings.md) for the collection policy.
+Server cards include monthly traffic when available, with total, VLESS and AWG usage, and VLESS split by inbound (TCP and XHTTP). See [Settings](settings.md) for the collection policy.
 
 ## Diagnose and recover
 

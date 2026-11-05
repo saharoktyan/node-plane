@@ -122,6 +122,9 @@ fn flag(value: &str) -> Result<bool, Failure> {
     }
 }
 
+use super::super::identity::valid_email as inbound_email;
+
+/// A client name: also what an email is built from.
 pub(crate) fn valid_email(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -169,7 +172,7 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
                 flow: options.take_or("flow", ""),
             };
             options.finish()?;
-            if !valid_email(&user.email) || !valid_uuid(&user.id) {
+            if !inbound_email(&user.email) || !valid_uuid(&user.id) {
                 return Err(Failure::Usage("invalid email or uuid".into()));
             }
             if !matches!(user.flow.as_str(), "" | "xtls-rprx-vision") {
@@ -186,7 +189,7 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
             let email = options.take("email")?;
             let close = flag(&options.take_or("close-connections", "false"))?;
             options.finish()?;
-            if !valid_email(&email) {
+            if !inbound_email(&email) {
                 return Err(Failure::Usage("invalid email".into()));
             }
             XrayApi::connect(&server)
@@ -200,7 +203,7 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
             let email = options.take("email")?;
             let source = options.take_or("source", "");
             options.finish()?;
-            if !valid_email(&email) {
+            if !inbound_email(&email) {
                 return Err(Failure::Usage("invalid email".into()));
             }
             let source = match source.as_str() {
@@ -232,7 +235,7 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
         "online-ips" => {
             let email = options.take("email")?;
             options.finish()?;
-            if !valid_email(&email) {
+            if !inbound_email(&email) {
                 return Err(Failure::Usage("invalid email".into()));
             }
             let ips = XrayApi::connect(&server).await?.online_ips(&email).await?;
@@ -255,7 +258,7 @@ async fn execute(args: &[String]) -> Result<String, Failure> {
                 },
             };
             options.finish()?;
-            if !rule.rule_tag.starts_with("np-") || !valid_email(&rule.users[0]) {
+            if !rule.rule_tag.starts_with("np-") || !inbound_email(&rule.users[0]) {
                 return Err(Failure::Usage(
                     "rule tags start with np-; user must be a profile identity".into(),
                 ));

@@ -61,3 +61,14 @@ class ServicePermissionTests(unittest.TestCase):
         from backend.authorization import account_permissions, service_permission
         self.assertNotIn('services.xray.manage', self.actor.principal.scopes)
         self.assertIn(service_permission('xray'), account_permissions(self.actor.account))
+
+    def test_a_grant_names_the_instance_of_its_engine(self):
+        from backend.profiles import ProfileRepository
+        repository = ProfileRepository(self.db)
+        profile = repository.create_profile(runtime_name='granted', display_name='Granted')
+        self.db.connection.execute("INSERT INTO backend_grants(profile_id,node_key,protocol) VALUES (?,'n1','awg')",
+                                   (profile,))
+        instance = self.db.connection.execute(
+            "SELECT id FROM backend_service_instances WHERE node_key='n1' AND service='awg'").fetchone()[0]
+        self.assertEqual(repository.grants(profile),
+                         [{'node_key': 'n1', 'protocol': 'awg', 'service_instance_id': instance}])

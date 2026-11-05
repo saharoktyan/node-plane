@@ -286,10 +286,17 @@ class MemberProfileNode(BaseModel):
     protocols: list[Literal['awg', 'xray']]
 
 
+class InboundTraffic(BaseModel):
+    uplink_bytes: int
+    downlink_bytes: int
+
+
 class ProfileTrafficItem(BaseModel):
     protocol: Literal['awg', 'xray']
     uplink_bytes: int
     downlink_bytes: int
+    # This month's bytes per inbound of the engine (`vless-tcp`, `vless-xhttp`).
+    inbounds: dict[str, InboundTraffic] = {}
     tracked_since: str
     last_sample_at: str
 
@@ -299,6 +306,7 @@ class ProfileNodeTrafficItem(BaseModel):
     protocol: Literal['awg', 'xray']
     uplink_bytes: int
     downlink_bytes: int
+    inbounds: dict[str, InboundTraffic] = {}
     status: Literal['current', 'unknown']
 
 
@@ -458,8 +466,15 @@ class BackupCommandInput(BaseModel):
     checksum: StrictStr | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
 
 
+class GrantOutput(BaseModel):
+    node_key: str
+    protocol: str
+    # The node's instance of the engine; the pair (node, protocol) is its key.
+    service_instance_id: str | None = None
+
+
 class GrantPage(BaseModel):
-    items: list['GrantInput']
+    items: list[GrantOutput]
 
 
 class AvailableProtocol(BaseModel):
@@ -586,6 +601,7 @@ class NodeTrafficItem(BaseModel):
     status: Literal['current', 'waiting', 'unknown']
     uplink_bytes: int | None
     downlink_bytes: int | None
+    inbounds: dict[str, InboundTraffic] = {}
 
 
 class NodeTrafficSummary(BaseModel):
@@ -882,7 +898,7 @@ class GrantsInput(BaseModel):
 
 class ProfileCommandOutput(BaseModel):
     profile: ProfileOutput
-    grants: list[GrantInput]
+    grants: list[GrantOutput]
     runtime_status: str
     operation_id: UUID
 

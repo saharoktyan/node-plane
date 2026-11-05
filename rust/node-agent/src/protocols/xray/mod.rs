@@ -2,6 +2,7 @@
 pub(crate) mod admission;
 pub(crate) mod api;
 pub(crate) mod deploy;
+pub(crate) mod identity;
 pub(crate) mod inspection;
 pub(crate) mod rate;
 pub(crate) mod revocation;
@@ -19,6 +20,11 @@ use serde_json::Value;
 
 use crate::agent::v1::RemoteProfileRecord;
 use crate::state::AgentState;
+
+/// The inbounds' ids in traffic reports, in the order of `Node::tags`:
+/// protocol and transport, as the controller lists the inbounds of the
+/// `xray` service instance.
+pub(crate) const INBOUNDS: [&str; 2] = ["vless-tcp", "vless-xhttp"];
 
 /// The Xray runtime of this node, from node.env.
 #[derive(Debug, Clone)]
@@ -88,10 +94,7 @@ impl AgentState {
                 continue;
             };
             for client in clients {
-                let profile_name = client
-                    .get("email")
-                    .and_then(Value::as_str)
-                    .or_else(|| client.get("name").and_then(Value::as_str))
+                let profile_name = identity::client_name(client)
                     .unwrap_or("")
                     .trim()
                     .to_string();

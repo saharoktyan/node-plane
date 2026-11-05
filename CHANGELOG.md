@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Traffic is counted per inbound of an engine: each Xray client has its own
+  email on every inbound (`NAME.TAG`), so VLESS traffic splits into TCP and
+  XHTTP (`inbounds` in profile and node traffic, migration r0037; shown on
+  Workstation server cards), and a later Xray protocol gets its own
+  counters. Connection and speed limits cover all of a client's emails.
+  Agents and controllers of this release must be updated together.
+- Grants name the service instance they give access to
+  (`service_instance_id`); the pair (node, protocol) stays the instance's key.
 - Accounts hold service profiles (migration r0036): every VPN profile is
   the `vpn` service profile of its account, with the same id. The services
   in `GET /api/v1/me` come from them. Backups need no new format: the

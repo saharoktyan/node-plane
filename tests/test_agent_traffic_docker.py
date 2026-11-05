@@ -64,7 +64,11 @@ class AgentTrafficDockerTests(unittest.TestCase):
         self.assertEqual(found[('xray', 'alice')]['identity'], alice)
         # Users without traffic have no Xray counters yet: zero.
         self.assertEqual((found[('xray', 'bob')]['uplink_bytes'], found[('xray', 'bob')]['downlink_bytes']), (0, 0))
+        # Xray counts each inbound separately; AWG has one.
+        self.assertEqual(found[('xray', 'bob')]['inbounds'], {
+            inbound: {'uplink_bytes': 0, 'downlink_bytes': 0} for inbound in ('vless-tcp', 'vless-xhttp')})
         carol = found[('awg', 'carol')]
+        self.assertEqual(carol['inbounds'], {})
         self.assertGreater(carol['uplink_bytes'], 0)
         self.assertGreater(carol['downlink_bytes'], 0)
         self.assertRegex(carol['epoch'], r'^[0-9a-f]{64}$')

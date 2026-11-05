@@ -41,6 +41,9 @@ class Driver:
             "epoch": self.epoch,
             "uplink_bytes": self.up,
             "downlink_bytes": self.down,
+            # Xray splits the bytes by inbound; AWG has one.
+            "inbounds": {"vless-tcp": {"uplink_bytes": self.up, "downlink_bytes": self.down}}
+            if intent["protocol"] == "xray" else {},
         }
 
 
@@ -172,6 +175,33 @@ class TrafficTests(unittest.TestCase):
         self.settings.update_traffic_policy(self.actor, False)
         self.assertIsNone(self.client.get(endpoint, headers={**self.headers,
             'X-Node-Plane-Telegram-User-ID': '101'}).json()['traffic'])
+
+    def test_traffic_is_split_by_inbound_and_must_add_up(self):
+        split = {}
+
+        def snapshot(intent):
+            return {**intent, "epoch": "a" * 64,
+                    "uplink_bytes": sum(up for up, _ in split.values()),
+                    "downlink_bytes": sum(down for _, down in split.values()),
+                    "inbounds": {name: {"uplink_bytes": up, "downlink_bytes": down}
+                                 for name, (up, down) in split.items()}}
+
+        self.driver.traffic_snapshot = snapshot
+        split.update({"vless-tcp": (100, 200), "vless-xhttp": (10, 20)})
+        self.collect()
+        split.update({"vless-tcp": (150, 260), "vless-xhttp": (40, 20)})
+        self.collect()
+        self.assertEqual((self.row()["uplink_bytes"], self.row()["downlink_bytes"]), (80, 60))
+        expected = {"vless-tcp": {"uplink_bytes": 50, "downlink_bytes": 60},
+                    "vless-xhttp": {"uplink_bytes": 30, "downlink_bytes": 0}}
+        nodes = self.service.summary(self.row()["account_id"], self.profile_id)["nodes"]
+        self.assertEqual(nodes[0]["inbounds"], expected)
+        xray = next(item for item in self.service.node_summary("n1")["items"] if item["protocol"] == "xray")
+        self.assertEqual(xray["inbounds"], expected)
+        # Inbound bytes that do not add up to the totals are not trusted.
+        self.driver.traffic_snapshot = lambda intent: {**snapshot(intent), "uplink_bytes": 1}
+        self.collect()
+        self.assertEqual(self.row()["status"], "unknown")
 
     def test_first_sample_excludes_previous_traffic_and_repeated_counters_do_not_double_count(
         self,
@@ -375,6 +405,7 @@ class TrafficTests(unittest.TestCase):
                     "epoch": "a" * 64,
                     "uplink_bytes": 1,
                     "downlink_bytes": 2,
+                    "inbounds": {},
                     field: value,
                 },
             ):
@@ -446,7 +477,7 @@ class TrafficTests(unittest.TestCase):
             # An identity the agent could not read is left out of the reply.
             return {"node_key": node_key, "items": [
                 {"node_key": node_key, **item, "epoch": "a" * 64,
-                 "uplink_bytes": 10, "downlink_bytes": 20} for item in known]}
+                 "uplink_bytes": 10, "downlink_bytes": 20, "inbounds": {}} for item in known]}
 
         self.driver.traffic_batch = traffic_batch
         self.collect()

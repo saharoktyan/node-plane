@@ -31,9 +31,10 @@ class ProfileCommands:
         row = conn.execute('''SELECT p.*, CASE WHEN d.profile_id IS NULL THEN 0 ELSE 1 END AS deleting
             FROM backend_profiles p LEFT JOIN backend_profile_deletions d ON d.profile_id = p.id
             WHERE p.id = ?''', (profile_id,)).fetchone()
-        grants = conn.execute('SELECT node_key, protocol FROM backend_grants WHERE profile_id = ? ORDER BY node_key, protocol', (profile_id,)).fetchall()
-        return {'profile': ProfileRepository.public(row),
-                'grants': [{'node_key': r['node_key'], 'protocol': r['protocol']} for r in grants]}
+        from .service_instances import GRANT_INSTANCE_SQL, grant
+        grants = conn.execute(f'''SELECT g.node_key, g.protocol, {GRANT_INSTANCE_SQL} FROM backend_grants g
+            WHERE g.profile_id = ? ORDER BY g.node_key, g.protocol''', (profile_id,)).fetchall()
+        return {'profile': ProfileRepository.public(row), 'grants': [grant(r) for r in grants]}
 
     @staticmethod
     def validate_grants(conn, grants):

@@ -36,7 +36,7 @@ class CounterDriver:
     def traffic_snapshot(self, intent):
         self.calls.append(intent)
         result = {**intent, 'epoch': self.epoch,
-                  'uplink_bytes': self.up, 'downlink_bytes': self.down}
+                  'uplink_bytes': self.up, 'downlink_bytes': self.down, 'inbounds': {}}
         if self.pause:
             self.entered.set()
             if not self.release.wait(timeout=5):
