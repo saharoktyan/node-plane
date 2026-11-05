@@ -8,7 +8,7 @@ The bot is optional. Turn it off or on in Workstation (controller settings → T
 
 ## First start
 
-Open your installed bot and send `/start`. The Telegram IDs supplied during installation receive administrator access. For other users, `/start` and language selection record visitor presentation metadata only without allocating an account. Pending is a request state, not a new VPN profile. Approval or explicit administrator provisioning creates the account and default VPN profile atomically; rejection or deleted-account menu refresh does not create an account. After account deletion, submitting a new request alone does not recreate an account until approved. Other users can request access according to the installation's request policy.
+Open your installed bot and send `/start`. The Telegram IDs supplied during installation receive administrator access. For other users, `/start` and language selection record visitor presentation metadata only without allocating an account. Pending is a request state, not a new VPN profile. Approval or explicit administrator provisioning creates the account and default VPN profile atomically; rejection or deleted-account menu refresh does not create an account. After account deletion, submitting a new request alone does not recreate an account until approved. Other users can request access according to the installation's request policy. A member whose last VPN profile was deleted keeps the account: the menu keeps their account page, settings and Inbox and offers to request VPN access again.
 
 The navigation line at the top shows your location. Click a parent item to return to that screen. Long paths are shortened to fit the interface. **Back** returns one level; a confirmation protects unsaved server/profile drafts.
 

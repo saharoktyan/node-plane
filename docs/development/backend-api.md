@@ -53,7 +53,7 @@ Revision 14 introduces pre-approval visitors and schema invariants (nullable req
 
 ## API groups
 
-- `/me`: identity, preferences and administrator-announcement notifications.
+- `/me`: identity, preferences, the account's `services` (`vpn` while it owns a VPN profile) and administrator-announcement notifications.
 - `/accounts`, `/profiles`, `/access-requests`: account/profile access management.
 - `/nodes`: inventory, settings, setup, diagnostics and lifecycle operations.
 - `/system`: controller settings, updates, cleanup, backups, attention/audit and temporary configurations.

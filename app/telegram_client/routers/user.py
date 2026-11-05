@@ -226,6 +226,13 @@ async def home_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                         state, query.message.message_id, cached_navigation=True)
 
 
+def has_vpn(account: dict) -> bool:
+    """Whether the home menu shows the VPN section: an active account with a
+    VPN profile, or an administrator, who manages profiles anyway."""
+    return account['status'] == 'approved' and (
+        account['role'] == 'admin' or 'vpn' in account.get('services', ('vpn',)))
+
+
 async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient,
                     state: FSMContext, message_id: int | None = None, *,
                     account: dict | None = None, cached_navigation: bool = False,
@@ -238,7 +245,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
     # Every destination/action still makes its own authenticated backend calls.
     if (cached_navigation and account is None and presentation and
             presentation.get('user_id') == user_id and
-            presentation['account']['status'] == 'approved'):
+            has_vpn(presentation['account'])):
         account = presentation['account']
         async with asyncio.timeout(ONBOARDING_TIMEOUT):
             title, notifications = await asyncio.gather(
@@ -254,21 +261,28 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
                 else:
                     title, notifications = await asyncio.gather(
                         backend.bot_title(user_id), backend.notifications(user_id, limit=1))
-                if account['status'] != 'approved':
+                if not has_vpn(account):
                     policy, requests = await asyncio.gather(backend.access_request_policy(user_id),
                         backend.request('GET', '/api/v1/me/access-requests?limit=25', telegram_user_id=user_id))
         except TimeoutError:
             raise BackendError('backend_unavailable', 503) from None
         await state.update_data(home_presentation={'user_id': user_id,
-            'account': {'status': account['status'], 'role': account['role'], 'onboarding_completed': account.get('onboarding_completed', False)},
+            'account': {'status': account['status'], 'role': account['role'], 'services': account.get('services', ['vpn']),
+                        'onboarding_completed': account.get('onboarding_completed', False)},
             'title': title, 'notifications_count': notifications.get('total', 0)})
     bot_title = title['title']
     rows: list[list[InlineKeyboardButton]] = []
-    if account['status'] != 'approved':
+    vpn = has_vpn(account)
+    if not vpn:
         pending = any(item['status'] == 'pending' for item in requests['items'])
         if policy['enabled'] and not pending:
             rows.append([button(user_id, tr(locale, 'home.request_access'), 'request_access')
                          .model_copy(update={'style': 'primary'})])
+        if account['status'] == 'approved':
+            # An account without services keeps its own pages.
+            rows.append([button(user_id, tr(locale, 'home.account'), 'account_info')])
+            if notifications.get('total', 0):
+                rows.append([button(user_id, tr(locale, 'announce.inbox'), 'notification_inbox')])
         if pending:
             lines = (tr(locale, 'home.waiting'),)
         elif policy['enabled']:
@@ -291,19 +305,19 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
                         lines = (tr(locale, 'home.admin_quick_start'),)
             except Exception:
                 pass
-    if account['status'] == 'approved':
+    if vpn:
         rows[-1].append(button(user_id, tr(locale, 'devices.title'), 'device_profiles'))
     else:
         rows.append([button(user_id, tr(locale, 'home.settings'), 'member_settings')])
-    if account['role'] == 'admin' and account['status'] == 'approved':
+    if vpn and account['role'] == 'admin':
         rows.append([button(user_id, tr(locale, 'home.admin'), 'admin_menu')])
         if not account.get('onboarding_completed', False):
             rows.append([button(user_id, tr(locale, 'quick_start.title'), 'quick_start')])
-    if account['status'] == 'approved':
+    if vpn:
         rows.insert(2, [button(user_id, tr(locale, 'home.settings'), 'member_settings')])
         if notifications.get('total', 0):
             rows.insert(3, [button(user_id, tr(locale, 'announce.inbox'), 'notification_inbox')])
-    if account['status'] != 'approved':
+    if not vpn:
         request_rows = tuple(tuple(row) for row in rows[:-1])
         await render(bot, chat_id, Screen(bot_title,
             sections=(Section(tr(locale, 'home.access_title'), lines, rows=request_rows),),

@@ -89,6 +89,8 @@ class MeOutput(AccountOutput):
     language_code: str | None = None
     locale: str | None = None
     locale_selected: bool = False
+    # Services the account has access to (`vpn` while it owns a VPN profile).
+    services: list[str] = []
 
 
 class AdminAccountOutput(AccountOutput):
@@ -1300,8 +1302,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         if 'nodes.manage' in permissions:
             from .onboarding import progress
             progress(db, current)
+        from .profiles import ProfileRepository
+        with db.connect() as conn:
+            services = ['vpn'] if ProfileRepository.has_vpn_profile(conn, current.account.id) else []
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
-                        permissions=permissions,
+                        permissions=permissions, services=services,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),
                         **identities.account_details(current.account.id))

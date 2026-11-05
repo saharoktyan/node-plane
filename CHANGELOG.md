@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The bot builds its menu from the account's services: `GET /api/v1/me`
+  lists `services` (`vpn` while the account owns a VPN profile). A member
+  without one keeps the account page, settings and Inbox, and can request VPN
+  access again.
 - Accounts are active or disabled; access to services belongs to profiles.
   Deleting a member's last VPN profile keeps the account (it may ask for VPN
   access again), and the bot no longer recreates a VPN profile for an

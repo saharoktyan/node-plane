@@ -74,6 +74,16 @@ class BackendHTTPTests(unittest.TestCase):
             operation = self.client.get('/api/v1/profiles/' + profile['id'] + '/operation', headers=headers)
             self.assertEqual(operation.status_code, 200, operation.text)
 
+    def test_me_lists_the_services_of_the_account(self):
+        def services(user_id):
+            return self.client.get('/api/v1/me', headers={**self.headers,
+                'X-Node-Plane-Telegram-User-ID': str(user_id)}).json().get('services')
+        self.assertEqual(services(101), [])
+        self.provision(102)
+        self.assertEqual(services(102), ['vpn'])
+        self.register(103)
+        self.assertEqual(services(103), [])
+
     def test_api_routes_are_unique_and_manual_release_cleanup_is_removed(self):
         pairs = [(method, route.path) for route in self.client.app.routes
                  for method in getattr(route, 'methods', ())]

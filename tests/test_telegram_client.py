@@ -237,6 +237,23 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertIn(user.tr('en', 'home.waiting'), draw.call_args.args[2].sections[0].lines)
         self.assertEqual(draw.call_args.args[2].sections[0].rows, ())
 
+    async def test_account_without_vpn_profile_can_request_vpn_and_keeps_its_pages(self):
+        backend = SimpleNamespace(notifications=AsyncMock(return_value={'total': 2, 'items': []}),
+            me=AsyncMock(return_value={'role': 'member', 'status': 'approved', 'services': []}),
+            bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+            access_request_policy=AsyncMock(return_value={'enabled': True}),
+            request=AsyncMock(return_value={'items': [{'status': 'rejected'}]}))
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_home(123, 123, self.bot, backend, self.state, 77)
+        texts = [b.text for row in draw.call_args.args[2].sections[0].rows for b in row]
+        self.assertEqual(texts, [user.tr('en', 'home.request_access'), user.tr('en', 'home.account'),
+                                 user.tr('en', 'announce.inbox')])
+        self.assertEqual([b.text for row in draw.call_args.args[3] for b in row], [user.tr('en', 'home.settings')])
+        self.assertFalse(user.has_vpn({'role': 'member', 'status': 'approved', 'services': []}))
+        self.assertTrue(user.has_vpn({'role': 'member', 'status': 'approved', 'services': ['vpn']}))
+        self.assertTrue(user.has_vpn({'role': 'admin', 'status': 'approved', 'services': []}))
+        self.assertFalse(user.has_vpn({'role': 'member', 'status': 'pending'}))
+
     async def test_opening_empty_requests_has_an_explicit_screen(self):
         backend = SimpleNamespace(pending_access_requests=AsyncMock(return_value={'items': [], 'next_cursor': None}))
         with patch.object(admin_requests, 'render', new_callable=AsyncMock) as draw:
