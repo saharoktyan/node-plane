@@ -105,13 +105,22 @@ class NodeSettingsService:
                 UNIQUE(actor_account_id, command_key)
             )''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_backend_node_settings_work ON backend_node_settings_tasks(status, node_key)')
+            from db.migration_revisions.r0034_task_services import add_columns
+            add_columns(conn)
 
     @staticmethod
     def public(row):
         from .installation_progress import read_progress
         result = json.loads(row['result_json']) if row['result_json'] else {}
+        from .service_instances import TYPES
+        services = row['services_json'] if 'services_json' in row.keys() else None
         return {'id': row['id'], 'node_key': row['node_key'], 'revision': row['revision'],
                 'status': row['status'], 'progress': read_progress(row),
+                # The engines this change touches; every engine for older tasks.
+                'services': json.loads(services) if services else sorted(
+                    (set(json.loads(row['intent_json']).get('protocols') or [])
+                     | set(json.loads(row['intent_json']).get('protocol_plan', {}).get('remove_protocols') or []))
+                    & set(TYPES)),
                 **({'error_code': result['error_code']} if 'error_code' in result else {})}
 
     def get(self, actor, task_id):
@@ -171,14 +180,18 @@ class NodeSettingsService:
             if conn.execute('''SELECT 1 FROM backend_node_settings_tasks WHERE node_key = ?
                 AND status IN ('awaiting_executor', 'running', 'blocked')''', (node_key,)).fetchone():
                 raise AccessDenied('node_settings_operation_pending', 409)
+            from .service_instances import TYPES, changed_engines
+            raw = observed['last_runtime_intent_json']
+            services = sorted(changed_engines(json.loads(raw) if raw else None, intent['protocols'], intent['settings'])
+                              or (set(intent['protocols']) | set(removed)) & set(TYPES))
             task_id = str(uuid4())
             conn.execute('''INSERT INTO backend_node_settings_tasks
-                (id, node_key, actor_account_id, command_key, revision, intent_json, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'awaiting_executor')''',
+                (id, node_key, actor_account_id, command_key, revision, intent_json, status, services_json)
+                VALUES (?, ?, ?, ?, ?, ?, 'awaiting_executor', ?)''',
                 (task_id, node_key, actor.account.id, key, revision,
-                 json.dumps(intent, sort_keys=True, separators=(',', ':'))))
+                 json.dumps(intent, sort_keys=True, separators=(',', ':')), json.dumps(services)))
             return {'id': task_id, 'node_key': node_key, 'revision': revision,
-                    'status': 'awaiting_executor'}
+                    'status': 'awaiting_executor', 'services': services}
 
 
 class NodeSettingsExecutor:

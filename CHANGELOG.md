@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Work on a node names the service instances it touches: settings tasks
+  record the engines a change affects (`services`, migration r0034) and node
+  jobs list the engines they install or clean up. A change pending on one
+  engine no longer marks the other as pending: changing an AmneziaWG setting
+  leaves Xray `active`, a shared setting such as the public host touches
+  both. Xray's `inbounds` list both inbounds the agent runs (VLESS Reality
+  over TCP and XHTTP) with their ports and whether configurations for them are
+  `offered`. Removing every VPN engine leaves the node and its agent.
 - Services on a node have their own records (migration r0033), one per VPN
   engine: `xray` and `awg`. An instance exists while the node has that
   protocol, and until the removal of the protocol is applied on the server.

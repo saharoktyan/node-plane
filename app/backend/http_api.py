@@ -691,6 +691,8 @@ class NodeSettingsTaskOutput(BaseModel):
     node_key: str
     revision: int
     status: str
+    # The service instances (engines) the change touches.
+    services: list[str] = []
     error_code: str | None = None
     progress: InstallationProgressOutput | None = None
 

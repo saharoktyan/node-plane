@@ -43,7 +43,7 @@ class ForceUpdateAdmissionTests(TestCase):
         # Queued settings task behind the blocked node
         settings_task_id = str(uuid4())
         self.db.connection.execute(
-            "INSERT INTO backend_node_settings_tasks VALUES (?,'lv1',?,?,2,'{}','awaiting_executor',NULL)",
+            "INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status,result_json) VALUES (?,'lv1',?,?,2,'{}','awaiting_executor',NULL)",
             (settings_task_id, self.admin.id, str(uuid4()))
         )
 
@@ -100,7 +100,7 @@ class ForceUpdateAdmissionTests(TestCase):
                     )
                 elif table == 'backend_node_settings_tasks':
                     self.db.connection.execute(
-                        "INSERT INTO backend_node_settings_tasks VALUES (?,'lv1',?,?,2,'{}','running',NULL)",
+                        "INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status,result_json) VALUES (?,'lv1',?,?,2,'{}','running',NULL)",
                         (task_id, self.admin.id, str(uuid4()))
                     )
                 elif table == 'backend_agent_rollouts':
@@ -168,7 +168,7 @@ class ForceUpdateAdmissionTests(TestCase):
         # Queued settings task
         settings_task_id = str(uuid4())
         self.db.connection.execute(
-            "INSERT INTO backend_node_settings_tasks VALUES (?, 'lv1', ?, ?, 2, '{}', 'awaiting_executor', NULL)",
+            "INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status,result_json) VALUES (?, 'lv1', ?, ?, 2, '{}', 'awaiting_executor', NULL)",
             (settings_task_id, self.admin.id, str(uuid4()))
         )
 
@@ -239,7 +239,7 @@ class ForceUpdateAdmissionTests(TestCase):
         settings_task_id = str(uuid4())
         intent = {'protocols': ['awg'], 'settings': settings, 'node_key': 'lv1', 'revision': 2}
         self.db.connection.execute(
-            "INSERT INTO backend_node_settings_tasks VALUES (?, 'lv1', ?, ?, 2, ?, 'blocked', NULL)",
+            "INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status,result_json) VALUES (?, 'lv1', ?, ?, 2, ?, 'blocked', NULL)",
             (settings_task_id, self.admin.id, str(uuid4()), json.dumps(intent))
         )
 

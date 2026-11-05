@@ -42,9 +42,13 @@ class NodeOperations:
 
     @staticmethod
     def public(row):
+        from .service_instances import TYPES
+        intent = json.loads(row['intent_json']) if row['intent_json'] else {}
         return {key: row[key] for key in ('id', 'node_key', 'action', 'revision', 'status')} | {
             'result': json.loads(row['result_json']) if row['result_json'] else None,
-            'progress': read_progress(row)}
+            'progress': read_progress(row),
+            # Install, reinstall and cleanup work on every engine of the node.
+            'services': sorted(set(intent.get('protocols') or []) & set(TYPES))}
 
     def get(self, actor, job_id):
         require_permission(actor, 'nodes.manage')

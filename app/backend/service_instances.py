@@ -3,11 +3,13 @@
 The built-in types are the VPN engines `xray` and `awg`, one instance per
 engine on a node. An instance exists while the node has that protocol, and
 until the removal of the protocol is applied on the server. Xray's protocols
-are the inbounds of its instance (VLESS over each configured transport);
+are the inbounds of its instance (VLESS Reality over TCP and XHTTP today);
 a new Xray protocol is a new kind of inbound, not a new service.
 
 The engines' configuration and revisions are the node's VPN columns
-(`backend_nodes`) for now, shared by both instances.
+(`backend_nodes`) for now. The agent applies the node's configuration as a
+whole; a change is pending, and a settings task works, only for the engines
+it touches.
 """
 from datetime import datetime, timezone
 import json
@@ -53,19 +55,61 @@ def sync_all(conn):
         sync_node(conn, row['key'])
 
 
-def inbounds(service, xray_transports):
-    """What the instance serves: Xray's protocols, each over its transport."""
-    if service == 'xray':
-        return [{'protocol': 'vless', 'transport': transport} for transport in xray_transports]
-    return []
+# Settings owned by one engine; any other setting is shared by the node.
+ENGINE_PREFIX = {'xray': 'xray_', 'awg': 'awg_'}
+
+
+def changed_engines(previous, protocols, settings, *, keys=None):
+    """The engines a configuration change touches: added or removed ones, and
+    those whose own settings differ; a changed shared setting touches all.
+    `previous` is the applied intent (None when unknown); `keys` limits the
+    settings compared."""
+    now = set(protocols) & set(TYPES)
+    if previous is None:
+        return now
+    before = set(previous.get('protocols') or []) & set(TYPES)
+    changed = before ^ now
+    old = previous.get('settings') or {}
+    for key in set(old) | set(settings):
+        if (keys is None or key in keys) and old.get(key) != settings.get(key):
+            owner = next((engine for engine, prefix in ENGINE_PREFIX.items() if key.startswith(prefix)), None)
+            changed |= {owner} if owner else before | now
+    return changed
+
+
+def pending_engines(row):
+    """Engines of a node row whose desired configuration is not applied yet."""
+    from .nodes import _SETTINGS, protocol_defaults, settings_apply_pending
+    if not settings_apply_pending(row):
+        return set()
+    protocols = json.loads(row['protocols_json'])
+    raw = row['last_runtime_intent_json']
+    previous = json.loads(raw) if raw else None
+    settings = protocol_defaults(json.loads(row['settings_json']), protocols)
+    # VPN policy values are resolved only when the change is queued; a
+    # pending change that touches none of the node's own settings is
+    # pending for all of its engines.
+    return changed_engines(previous, protocols, settings, keys=_SETTINGS) or set(protocols) & set(TYPES)
+
+
+def inbounds(service, row):
+    """What the instance serves. The agent runs both Xray inbounds (VLESS
+    Reality over TCP and over XHTTP); `offered` is whether configurations for
+    it are issued to people."""
+    if service != 'xray':
+        return []
+    from .nodes import protocol_defaults
+    protocols = json.loads(row['protocols_json'])
+    settings = protocol_defaults(json.loads(row['settings_json']), protocols)
+    offered = set(json.loads(row['xray_transports_json']))
+    return [{'protocol': 'vless', 'transport': transport, 'port': settings.get(f'xray_{transport}_port'),
+             'offered': transport in offered} for transport in ('tcp', 'xhttp')]
 
 
 def public(row, installed):
     """The instances of a node row from `NodeService._select`."""
-    from .nodes import settings_apply_pending
     protocols = json.loads(row['protocols_json'])
-    transports = json.loads(row['xray_transports_json'])
-    pending = settings_apply_pending(row)
+    pending = pending_engines(row) if installed else set()
     result = []
     for service in TYPES:
         identity = row[f'{service}_instance_id']
@@ -75,11 +119,11 @@ def public(row, installed):
             state = 'planned'
         elif service not in protocols:
             state = 'removing'
-        elif pending:
+        elif service in pending:
             state = 'changes_pending'
         else:
             state = 'active'
         result.append({'id': identity, 'service': service, 'state': state,
-                       'inbounds': inbounds(service, transports if service in protocols else []),
+                       'inbounds': inbounds(service, row) if service in protocols else [],
                        'desired_revision': row['desired_revision'], 'applied_revision': row['applied_revision']})
     return result
