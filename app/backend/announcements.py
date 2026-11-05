@@ -20,7 +20,8 @@ RECIPIENT_PROFILE = """EXISTS (SELECT 1 FROM backend_profiles p
 
 from .service_notifications import SYSTEM_ACTOR
 
-# Delivery states visible in the Inbox; `inbox_only` was muted by the recipient.
+# Delivery states visible in the Inbox; `inbox_only` was not sent to Telegram:
+# muted by the recipient, or the recipient has no Telegram channel.
 INBOX_STATUSES = "('sent','inbox_only')"
 
 
@@ -36,7 +37,7 @@ class AnnouncementService:
                 UNIQUE(actor_id,command_key))""")
             conn.execute("""CREATE TABLE IF NOT EXISTS backend_announcement_deliveries (
                 id TEXT PRIMARY KEY, announcement_id TEXT NOT NULL REFERENCES backend_announcements(id),
-                account_id TEXT NOT NULL, telegram_subject TEXT NOT NULL,
+                account_id TEXT NOT NULL, telegram_subject TEXT,
                 status TEXT NOT NULL, claim_id TEXT, adapter_id TEXT, claimed_until TEXT,
                 UNIQUE(announcement_id,telegram_subject))""")
             from app.db.migration_revisions.r0006_announcement_inbox import upgrade
@@ -64,8 +65,7 @@ class AnnouncementService:
         rows = conn.execute("""SELECT p.id,p.expires_at FROM backend_profiles p
             JOIN backend_accounts a ON a.id=p.owner_account_id
             WHERE a.status='approved'
-            AND EXISTS (SELECT 1 FROM backend_account_channels i WHERE i.account_id=a.id AND i.channel='telegram' AND i.enabled=1)
-            AND p.expires_at IS NOT NULL AND p.expires_at<=?
+                        AND p.expires_at IS NOT NULL AND p.expires_at<=?
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
             AND NOT EXISTS (SELECT 1 FROM backend_system_notifications s
                 WHERE s.kind='access_expired' AND s.profile_id=p.id AND s.expires_at=p.expires_at)
@@ -104,7 +104,7 @@ class AnnouncementService:
     def _recipients(conn, sender):
         return conn.execute(
             f"""SELECT a.id,i.address AS subject FROM backend_accounts a
-            JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
+            LEFT JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             WHERE a.status='approved' AND a.id<>? AND {RECIPIENT_PROFILE}
             ORDER BY a.id,i.address""",
             (sender,),
@@ -153,15 +153,17 @@ class AnnouncementService:
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
+                from .account_channels import telegram_chat
                 for recipient in self._recipients(conn, actor.account.id):
+                    chat = telegram_chat(conn, recipient)
                     conn.execute(
                         "INSERT INTO backend_announcement_deliveries (id,announcement_id,account_id,telegram_subject,status) VALUES (?,?,?,?,?)",
                         (
                             str(uuid4()),
                             announcement_id,
                             recipient["id"],
-                            recipient["subject"],
-                            "queued",
+                            chat,
+                            "queued" if chat else "inbox_only",
                         ),
                     )
         return self.get(actor, announcement_id)

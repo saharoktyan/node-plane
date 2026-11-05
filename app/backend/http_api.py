@@ -1170,7 +1170,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     bearer = HTTPBearer(auto_error=False)
 
     def authenticate(request: Request, security: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)]) -> Principal:
-        return credentials.authenticate(header(request, 'Authorization'))
+        principal = credentials.authenticate(header(request, 'Authorization'))
+        if principal.kind == PrincipalKind.ADAPTER and 'delegate.telegram' in principal.scopes:
+            from .account_channels import enabled
+            with db.connect() as conn:
+                if 'telegram' not in enabled(conn):
+                    raise AccessDenied('channel_disabled', 409)
+        return principal
 
     def actor(request: Request, principal: Annotated[Principal, Depends(authenticate)],
               delegated_user: Annotated[str | None, Header(alias="X-Node-Plane-Telegram-User-ID")] = None):

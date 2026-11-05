@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep announcements and service notifications in the Inbox for accounts
+  without a Telegram channel instead of skipping them. The installation now
+  records which channels it runs (`channels.enabled`, Telegram by default
+  for existing installations); with Telegram off, the bot's adapter is
+  refused with `channel_disabled`, queued Telegram messages stay in the
+  Inbox, and node alerts are recorded without Telegram deliveries.
 - Reach accounts through their channels instead of their sign-in identity.
   Each account's Telegram login becomes its Telegram channel on upgrade;
   announcements, service notifications, alerts and access-request messages

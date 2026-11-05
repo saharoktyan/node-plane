@@ -98,6 +98,15 @@ class AlertTests(unittest.TestCase):
         self.db.connection.commit()
         self.service.preferences(self.actor, {"enabled": True})
 
+
+    def test_alerts_are_not_queued_while_telegram_is_off(self):
+        from backend.account_channels import set_enabled
+        with self.db.transaction() as conn:
+            set_enabled(conn, set())
+            AlertService._event(conn, {'key': 'test', 'title': 'Test'}, 'node_unreachable', {}, False,
+                                datetime.now(timezone.utc).isoformat())
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_alert_events').fetchone()[0], 1)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_alert_deliveries').fetchone()[0], 0)
     def scan(self):
         self.db.connection.execute(
             "DELETE FROM backend_system_settings WHERE key='alert_last_scan'"

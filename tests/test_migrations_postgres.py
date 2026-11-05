@@ -355,6 +355,11 @@ class MigrationsPostgresTests(unittest.TestCase):
             channels = conn.execute('SELECT account_id,channel,address,enabled FROM backend_account_channels').fetchall()
         self.assertEqual([tuple(row.values()) for row in rows], [('a1','Ann','ru',1), ('a2',None,None,0)])
         self.assertEqual([tuple(row.values()) for row in channels], [('a1','telegram','101',1)])
+        # r0030: an Inbox entry needs no Telegram chat.
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_announcements VALUES ('n1','a1','k1','Hello','2026-11-05')")
+            conn.execute("""INSERT INTO backend_announcement_deliveries(id,announcement_id,account_id,telegram_subject,status)
+                VALUES ('d1','n1','a2',NULL,'inbox_only')""")
 
     def test_pre_device_columns_are_upgraded_without_changing_command_payloads(self):
         migrate(self.db,revisions=REVISIONS[:1])

@@ -354,6 +354,10 @@ class AlertService:
                 timestamp,
             ),
         )
+        from .account_channels import enabled
+        if 'telegram' not in enabled(conn):
+            # Alerts are Telegram messages; the event itself is kept.
+            return
         for admin in conn.execute("""SELECT a.id,i.address AS subject FROM backend_accounts a
             JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             WHERE a.role='admin' AND a.status='approved' """).fetchall():

@@ -38,17 +38,55 @@ class AnnouncementTests(unittest.TestCase):
             "SELECT channel,address,enabled FROM backend_account_channels WHERE account_id=?",
             (self.member['id'],)).fetchone()
         self.assertEqual(tuple(channel), ('telegram', '102', 1))
-        self.db.connection.execute("UPDATE backend_account_channels SET enabled=0 WHERE account_id=?",
-                                   (self.member['id'],))
-        self.db.connection.commit()
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 0)
-        self.db.connection.execute("UPDATE backend_account_channels SET enabled=1, address='555' WHERE account_id=?",
+        self.db.connection.execute("UPDATE backend_account_channels SET address='555' WHERE account_id=?",
                                    (self.member['id'],))
         self.db.connection.commit()
         self.service.queue(self.actor, 'Hello', str(uuid4()))
-        self.assertEqual(self.db.connection.execute(
-            "SELECT telegram_subject FROM backend_announcement_deliveries WHERE account_id=?",
-            (self.member['id'],)).fetchone()[0], '555')
+        self.assertEqual(tuple(self.db.connection.execute(
+            "SELECT telegram_subject,status FROM backend_announcement_deliveries WHERE account_id=?",
+            (self.member['id'],)).fetchone()), ('555', 'queued'))
+
+    def inbox_deliveries(self):
+        return [tuple(row) for row in self.db.connection.execute(
+            "SELECT telegram_subject,status FROM backend_announcement_deliveries WHERE account_id=?",
+            (self.member['id'],)).fetchall()]
+
+    def test_account_without_telegram_channel_gets_announcements_in_the_inbox(self):
+        self.db.connection.execute("UPDATE backend_account_channels SET enabled=0 WHERE account_id=?",
+                                   (self.member['id'],))
+        self.db.connection.commit()
+        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 1)
+        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.assertEqual(self.inbox_deliveries(), [(None, 'inbox_only')])
+        self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
+        from backend.authorization import resolve_actor
+        member = resolve_actor(self.transport, self.identities, telegram_user_id=102)
+        self.assertEqual(self.service.inbox(member)['items'][0]['text'], 'Hello')
+
+    def test_expiry_notice_reaches_the_inbox_of_an_account_without_telegram(self):
+        self.db.connection.execute("DELETE FROM backend_account_channels WHERE account_id=?", (self.member['id'],))
+        self.db.connection.commit()
+        self.expire_profile()
+        self.assertEqual(self.inbox_deliveries(), [(None, 'inbox_only')])
+
+    def test_turning_telegram_off_keeps_queued_announcements_in_the_inbox(self):
+        from backend.account_channels import enabled, set_enabled
+        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        with self.db.transaction() as conn:
+            self.assertEqual(enabled(conn), {'telegram'})
+            set_enabled(conn, set())
+        self.assertEqual(self.inbox_deliveries(), [('102', 'inbox_only')])
+        self.service.queue(self.actor, 'Again', str(uuid4()))
+        self.assertIn((None, 'inbox_only'), self.inbox_deliveries())
+        response = self.client.post("/api/v1/integrations/telegram/announcements/claim",
+                                    headers={**self.headers, 'Idempotency-Key': str(uuid4())})
+        self.assertEqual((response.status_code, response.json()['error']['code']), (409, 'channel_disabled'))
+        with self.db.transaction() as conn:
+            set_enabled(conn, {'telegram'})
+        self.assertNotEqual(self.client.post("/api/v1/integrations/telegram/announcements/claim",
+            headers={**self.headers, 'Idempotency-Key': str(uuid4())}).status_code, 409)
+        with self.assertRaises(ValueError), self.db.transaction() as conn:
+            set_enabled(conn, {'matrix'})
 
     def test_approved_orphan_account_is_not_a_recipient(self):
         resp = fixture.BackendHTTPTests.provision(self, 103)

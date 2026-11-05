@@ -93,7 +93,7 @@ def queue(conn, *, kind, profile_id, dedup_key, timestamp, payload=None, device_
         return None
     recipients = conn.execute("""SELECT a.id AS account_id,i.address AS subject FROM backend_profiles p
         JOIN backend_accounts a ON a.id=p.owner_account_id
-        JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
+        LEFT JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
         WHERE p.id=? AND a.status='approved'
         AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
         ORDER BY i.address""", (profile_id,)).fetchall()
@@ -108,10 +108,12 @@ def queue(conn, *, kind, profile_id, dedup_key, timestamp, payload=None, device_
         (announcement_id,kind,profile_id,expires_at,service_title,dedup_key,device_id,payload_json)
         VALUES (?,?,?,?,?,?,?,?)''', (identity, kind, profile_id, expires_at, title, dedup_key, device_id,
                                       json.dumps(payload, sort_keys=True)))
+    from .account_channels import telegram_chat
     for recipient in recipients:
+        chat = telegram_chat(conn, recipient)
         conn.execute('''INSERT INTO backend_announcement_deliveries
-            (id,announcement_id,account_id,telegram_subject,status) VALUES (?,?,?,?,'queued')''',
-            (str(uuid4()), identity, recipient['account_id'], recipient['subject']))
+            (id,announcement_id,account_id,telegram_subject,status) VALUES (?,?,?,?,?)''',
+            (str(uuid4()), identity, recipient['account_id'], chat, 'queued' if chat else 'inbox_only'))
     return identity
 
 
