@@ -251,6 +251,8 @@ pub(super) enum Control {
     AccessProfileAction(bool),
     AccessProfileConfirm,
     AccessAccountAction(bool),
+    /// None opens the role choice; a role (or "member") is then chosen.
+    AccessRole(Option<&'static str>),
     AccessAccountConfirm,
     AccessDeviceItem(usize),
     AccessDeviceNew,

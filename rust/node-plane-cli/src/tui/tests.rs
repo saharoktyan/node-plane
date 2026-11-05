@@ -8415,7 +8415,7 @@ fn access_screen_admin_profile_footer_gap_and_deleting_profile_actions() {
         .unwrap();
 
     // For admin profile, visible actions are:
-    // Back, Refresh, Make member (AccessAccountAction(true)), Edit
+    // Back, Refresh, Role (AccessRole(None)), Edit
     // Total 4 buttons: exactly 2 rows (height 6). No extra gap (no 3rd or 4th row).
     assert!(app.hits.iter().any(|h| h.control == Control::AccessBack));
     let back_hit = app
@@ -8434,7 +8434,7 @@ fn access_screen_admin_profile_footer_gap_and_deleting_profile_actions() {
     assert!(
         app.hits
             .iter()
-            .any(|h| h.control == Control::AccessAccountAction(true))
+            .any(|h| h.control == Control::AccessRole(None))
     );
     assert!(app.hits.iter().any(|h| h.control == Control::AccessEdit));
     // No member-only actions for admin:
@@ -8480,7 +8480,7 @@ fn access_screen_admin_profile_footer_gap_and_deleting_profile_actions() {
     assert!(
         app.hits
             .iter()
-            .any(|h| h.control == Control::AccessAccountAction(true))
+            .any(|h| h.control == Control::AccessRole(None))
     );
     assert!(
         app.hits
@@ -9547,4 +9547,34 @@ fn announcement_screens_count_recipients_reached_only_in_the_inbox() {
         "Sent: 1 · Failed: 0 · Unknown: 0 · Skipped: 0 · Inbox only: 2"
     );
     assert!(!delivery_counts(&json!({"sent":1,"inbox_only":0})).contains("Inbox"));
+}
+
+#[test]
+fn role_picker_promotes_with_role_and_assigns_presets_with_roles() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Accounts;
+    app.access.card = Some(
+        serde_json::json!({"id":"account", "role":"member", "status":"approved", "revision":7}),
+    );
+    app.activate(Control::AccessRole(None));
+    assert!(app.access.role_picker);
+    app.activate(Control::AccessRole(Some("admin")));
+    assert!(!app.access.role_picker);
+    assert_eq!(
+        app.access.account_action.as_ref().unwrap().0,
+        serde_json::json!({"role":"admin"})
+    );
+    app.activate(Control::AccessRole(Some("operator")));
+    assert_eq!(
+        app.access.account_action.as_ref().unwrap().0,
+        serde_json::json!({"roles":["operator"]})
+    );
+    app.activate(Control::AccessAccountConfirm);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(
+            crate::access::Command::AccountMutate { revision: 7, .. }
+        ))
+    ));
 }

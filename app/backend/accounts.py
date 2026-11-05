@@ -191,11 +191,19 @@ class AccountService:
             conn.execute('INSERT INTO backend_account_commands VALUES (?,?,?,?,?)', (actor.account.id, key, account.id, input_json, json.dumps(result, sort_keys=True)))
             return result
 
-    def update(self, actor, account_id, *, role=None, status=None, revision, command_key):
+    def update(self, actor, account_id, *, role=None, status=None, roles=None, revision, command_key):
+        """Change an account's role or status, or (`roles`) assign its roles exactly."""
         require_permission(actor, 'accounts.manage')
         key = _key(command_key)
-        if role is None and status is None:
+        if role is None and status is None and roles is None:
             raise AccessDenied('invalid_input', 422)
+        if roles is not None:
+            require_permission(actor, 'roles.manage')
+            from .authorization import STAFF_ROLES
+            if role is not None or not isinstance(roles, list) or set(roles) - STAFF_ROLES or len(set(roles)) != len(roles):
+                raise AccessDenied('invalid_input', 422)
+            roles = sorted(roles)
+            role = 'admin' if roles else 'member'
         if role is not None and role not in {'member', 'admin'}:
             raise AccessDenied('invalid_input', 422)
         if status is not None and status not in {'approved', 'disabled'}:
@@ -203,7 +211,7 @@ class AccountService:
         if type(revision) is not int or revision < 1:
             raise AccessDenied('invalid_revision', 422)
         input_json = json.dumps({'target': account_id, 'role': role, 'status': status,
-                                 'revision': revision}, sort_keys=True)
+                                 'revision': revision, **({'roles': roles} if roles is not None else {})}, sort_keys=True)
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
@@ -229,8 +237,21 @@ class AccountService:
                 raise AccessDenied('revision_conflict', 412)
             next_role = role if role is not None else row['role']
             next_status = status if status is not None else row['status']
+            current_roles = _roles(conn, row)
+            roles_changed = roles is not None and roles != current_roles
+            if roles_changed and 'owner' in current_roles and 'owner' not in roles:
+                from .roles import owners
+                if owners(conn) <= 1:
+                    raise AccessDenied('last_owner_required', 409)
             if row['role'] == 'admin' and next_status != 'approved':
                 raise AccessDenied('self_admin_revocation' if account_id == actor.account.id else 'admin_block_forbidden', 409)
+            if roles_changed and (next_role, next_status) == (row['role'], row['status']):
+                # Staff roles change; the account stays staff.
+                from .roles import assign
+                assign(conn, account_id, roles)
+                conn.execute('UPDATE backend_accounts SET revision = revision + 1 WHERE id = ?', (account_id,))
+                conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
+                    ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account_id, revision + 1))
             if (next_role, next_status) != (row['role'], row['status']):
                 if account_id == actor.account.id and (next_role, next_status) != ('admin', 'approved'):
                     raise AccessDenied('self_admin_revocation', 409)
@@ -254,7 +275,7 @@ class AccountService:
                 if next_role != row['role']:
                     # Promotion makes an administrator; demotion takes every role.
                     from .roles import assign
-                    assign(conn, account_id, {'admin'} if next_role == 'admin' else set())
+                    assign(conn, account_id, roles if roles is not None else {'admin'} if next_role == 'admin' else set())
                 conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
                     ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account_id, revision + 1))
             from .profiles import ProfileRepository

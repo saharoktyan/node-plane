@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Owners assign preset roles: `PATCH /api/v1/accounts/{id}` takes `roles`
+  (needs `roles.manage`), and Workstation's account card has **Role**, which
+  replaces **Make admin/member**.
 - Permissions come from roles (migration r0035). The roles are fixed presets
   for now: owner, administrator, operator and support; every active account
   also manages its own profiles. Existing and first administrators are

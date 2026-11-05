@@ -695,6 +695,8 @@ pub struct Browser {
     pub provision: Option<ProvisionDraft>,
     pub result: Option<String>,
     pub role_pending: Option<bool>,
+    /// The role choice of the open account is shown.
+    pub role_picker: bool,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -873,6 +875,10 @@ impl Browser {
                 }
             }
             Command::AccountMutate { body, .. } => {
+                if body["roles"].is_array() {
+                    self.role_pending = None;
+                    self.result = Some("Role changed.".into());
+                }
                 if let Some(role) = body["role"].as_str() {
                     self.role_pending = None;
                     self.result = Some(
@@ -1076,8 +1082,9 @@ pub fn provision_error(error: &str) -> String {
 pub fn role_error(error: &str) -> String {
     if error.contains("self_admin_revocation") {"You cannot revoke your own administrator rights."}
     else if error.contains("last_admin_required") {"At least one administrator must remain."}
+    else if error.contains("last_owner_required") {"At least one owner must remain. Make another account an owner first."}
     else if error.contains("revision_conflict") {"The account changed. Refresh it and try again."}
-    else if error.contains("permission_denied") || error.contains("invalid_token") {"You do not have permission to change administrator rights. Reconnect to refresh your session."}
+    else if error.contains("permission_denied") || error.contains("invalid_token") {"You do not have permission for this role change: only owners assign roles and change owners. Reconnect to refresh your session."}
     else if error.contains("request_pending") {"Review this account's pending access request before changing administrator rights."}
     else if error.contains("resource_not_found") {"The account was not found. Administrator rights were not changed."}
     else {"Administrator rights could not be updated. The result is unconfirmed; refresh the account before trying again."}.into()
@@ -1085,6 +1092,12 @@ pub fn role_error(error: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn role_errors_explain_owner_rules() {
+        assert!(super::role_error("last_owner_required").contains("owner must remain"));
+        assert!(super::role_error("permission_denied").contains("only owners assign roles"));
+    }
+
     #[test]
     fn people_without_telegram_are_created_and_shown_by_name() {
         use super::{Tab, label, provision_body};

@@ -125,6 +125,8 @@ class AccountEditInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     role: Literal['member', 'admin'] | None = None
     status: Literal['approved', 'disabled'] | None = None
+    # The account's exact roles; an empty list makes a member.
+    roles: list[Literal['owner', 'admin', 'operator', 'support']] | None = None
 
 
 class AccountPreferencesInput(BaseModel):
@@ -2142,7 +2144,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def update_account(account_id: UUID, body: AccountEditInput, request: Request, response: Response,
                        command_key: Annotated[str, Header(alias='Idempotency-Key')],
                        if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
-        result = accounts.update(current, str(account_id), role=body.role, status=body.status,
+        result = accounts.update(current, str(account_id), role=body.role, status=body.status, roles=body.roles,
                                  revision=revision_header(request), command_key=header(request, 'Idempotency-Key'))
         response.headers['ETag'] = '"' + str(result['revision']) + '"'
         return result

@@ -426,6 +426,30 @@ impl App {
                 }
                 None
             }
+            Control::AccessRole(None) => {
+                self.access.role_picker = true;
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessRole(Some(role)) => {
+                self.access.role_picker = false;
+                let staff = self
+                    .access
+                    .card
+                    .as_ref()
+                    .map(|card| card.get("_account").unwrap_or(card)["role"] == "admin")
+                    .unwrap_or(false);
+                // Promoting to administrator and demoting are open to every
+                // administrator; any other preset is an owner's choice.
+                let body = match role {
+                    "member" => serde_json::json!({ "role": "member" }),
+                    "admin" if !staff => serde_json::json!({ "role": "admin" }),
+                    _ => serde_json::json!({ "roles": [role] }),
+                };
+                self.access.account_action = Some((body, uuid::Uuid::new_v4()));
+                self.access.selected = 0;
+                None
+            }
             Control::AccessAccountConfirm => {
                 if let (Some(card), Some((body, key))) =
                     (&self.access.card, &self.access.account_action)
@@ -560,7 +584,8 @@ impl App {
                     self.access.notice.clear();
                     return None;
                 }
-                if self.access.editor.take().is_some()
+                if std::mem::take(&mut self.access.role_picker)
+                    || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
                     || self.access.traffic.take().is_some()
@@ -677,6 +702,7 @@ impl App {
                         | Control::AccessSave
                         | Control::AccessProfileAction(_)
                         | Control::AccessAccountAction(_)
+                        | Control::AccessRole(_)
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit

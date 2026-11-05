@@ -146,3 +146,28 @@ class BackendAccountTests(unittest.TestCase):
             self.assertEqual(self.patch_account(member['id'], member['revision'], {'status': status}).status_code, 422)
         self.assertEqual(self.patch_account(member['id'], member['revision'], {'status': 'disabled'}).status_code, 200)
 
+
+    def test_an_owner_assigns_exact_roles_and_keeps_one_owner(self):
+        member = self.provision(102).json()['account']
+        made = self.patch_account(member['id'], member['revision'], {'roles': ['operator', 'support']})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual((made.json()['role'], made.json()['roles']), ('admin', ['operator', 'support']))
+        me = self.client.get('/api/v1/me', headers=self.headers_for(102)).json()
+        self.assertIn('nodes.manage', me['permissions'])
+        self.assertIn('access_requests.manage', me['permissions'])
+        self.assertNotIn('accounts.manage', me['permissions'])
+        changed = self.patch_account(member['id'], made.json()['revision'], {'roles': ['support']})
+        self.assertEqual(changed.json()['roles'], ['support'])
+        self.assertNotIn('nodes.manage', self.client.get('/api/v1/me', headers=self.headers_for(102)).json()['permissions'])
+        # The only owner cannot give the role up; a second owner can take it away.
+        own = self.client.get(f'/api/v1/accounts/{self.admin.id}', headers=self.headers_for(101)).json()
+        self.assertEqual(own['roles'], ['owner'])
+        kept = self.patch_account(self.admin.id, own['revision'], {'roles': ['admin']})
+        self.assertEqual(kept.json()['error']['code'], 'last_owner_required')
+        self.patch_account(member['id'], changed.json()['revision'], {'roles': ['owner']})
+        self.assertEqual(self.patch_account(self.admin.id, own['revision'], {'roles': ['admin']}).json()['roles'], ['admin'])
+        # An administrator assigns no roles.
+        other = self.provision(103).json()['account']
+        refused = self.patch_account(other['id'], other['revision'], {'roles': ['operator']})
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertEqual(self.patch_account(other['id'], other['revision'], {'roles': ['root']}, telegram_id=102).status_code, 422)

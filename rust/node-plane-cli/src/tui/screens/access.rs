@@ -712,6 +712,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else if let Some((body, _)) = &app.access.account_action {
             (
                 match (body["role"].as_str(), body["status"].as_str()) {
+                    _ if body["roles"].is_array() => role_question(&body["roles"]),
                     (Some("admin"), _) => "Grant administrator rights?",
                     (Some(_), _) => "Remove administrator rights?",
                     (_, Some("disabled")) => {
@@ -1053,6 +1054,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             ("first_name", "First name"),
             ("last_name", "Last name"),
             ("role", "Role"),
+            ("roles", "Roles"),
             ("status", "Status"),
             ("owner_account_id", "Account"),
             ("expires_at", "Expires"),
@@ -1102,6 +1104,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else if let Some((body, _)) = &app.access.account_action {
             lines.push(Line::from(
                 match (body["role"].as_str(), body["status"].as_str()) {
+                    _ if body["roles"].is_array() => role_question(&body["roles"]),
                     (Some("admin"), _) => "Grant administrator access to this account?",
                     (Some(_), _) => "Remove administrator access from this account?",
                     (_, Some("disabled")) => "Block this account? Bot and API access will be disabled. VPN access is retained; use Freeze to suspend it.",
@@ -1111,6 +1114,16 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             ));
             buttons = vec![
                 ("Confirm", Control::AccessAccountConfirm),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else if app.access.role_picker {
+            lines.push(Line::from("Choose the role of this account:"));
+            buttons = vec![
+                ("Member", Control::AccessRole(Some("member"))),
+                ("Support", Control::AccessRole(Some("support"))),
+                ("Operator", Control::AccessRole(Some("operator"))),
+                ("Administrator", Control::AccessRole(Some("admin"))),
+                ("Owner", Control::AccessRole(Some("owner"))),
                 ("Cancel", Control::AccessBack),
             ];
         } else if let Some(delete) = app.access.profile_action {
@@ -1130,14 +1143,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 && (app.access.tab == Tab::Accounts || card.get("_account").is_some())
             {
                 let account = card.get("_account").unwrap_or(card);
-                buttons.push((
-                    if account["role"] == "admin" {
-                        "Make member"
-                    } else {
-                        "Make admin"
-                    },
-                    Control::AccessAccountAction(true),
-                ));
+                // The picker covers member and every staff preset; the
+                // backend lets only owners assign roles other than admin.
+                buttons.push(("Role", Control::AccessRole(None)));
                 if account["role"] != "admin" {
                     buttons.push((
                         if account["status"] == "approved" {
@@ -1381,5 +1389,25 @@ fn device_question(devices: Option<&crate::access::Devices>) -> &'static str {
             "Reissue this device's VLESS key? Its current VLESS links stop working; AWG configurations do not change."
         }
         _ => "Delete this device and revoke its access?",
+    }
+}
+
+/// The confirmation for assigning a preset role (`roles` of the change).
+pub(in crate::tui) fn role_question(roles: &serde_json::Value) -> &'static str {
+    match roles
+        .as_array()
+        .and_then(|roles| roles.first())
+        .and_then(|role| role.as_str())
+    {
+        None => "Make this account a member? All its roles are removed.",
+        Some("owner") => {
+            "Make this account an owner? Owners may change every role, including other owners."
+        }
+        Some("admin") => "Make this account an administrator?",
+        Some("operator") => "Make this account an operator? Operators manage servers only.",
+        Some("support") => {
+            "Make this account support? Support handles requests and people's profiles."
+        }
+        Some(_) => "Assign this role?",
     }
 }

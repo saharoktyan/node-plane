@@ -311,6 +311,7 @@ impl App {
             | Control::AccessExpiryPage(..)
             | Control::AccessExpiryBack
             | Control::AccessAccountAction(..)
+            | Control::AccessRole(..)
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)
             | Control::AccessProfileConfirm
