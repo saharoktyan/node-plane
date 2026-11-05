@@ -1047,6 +1047,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             )));
         }
         for (key, title) in [
+            ("display_name", "Name"),
             ("telegram_user_id", "Telegram ID"),
             ("username", "Username"),
             ("first_name", "First name"),

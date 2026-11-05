@@ -1694,7 +1694,13 @@ impl App {
         if state.ssh_key.is_some() {
             return vec![Control::ControllerSshKeyCopy, Control::ControllerBack];
         }
-        if state.policies.is_some() && self.requests_settings {
+        if let Some(value) = state.policies.as_ref().filter(|_| self.requests_settings) {
+            if value["requests"]["telegram"] == false {
+                return vec![
+                    Control::ControllerPolicyToggle("requests"),
+                    Control::ControllerBack,
+                ];
+            }
             return vec![
                 Control::ControllerPolicyToggle("requests"),
                 Control::ControllerPolicyToggle("notifications"),

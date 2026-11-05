@@ -70,6 +70,7 @@ class AccessRequestServiceTests(unittest.TestCase):
     def test_access_request_policy_is_public_read_and_admin_write(self):
         self.assertEqual(self.requests.policy(self.member_actor), {
             'enabled': True,
+            'telegram': True,
             'gate_message': 'Authorization is required to use this bot.',
             'notify_requests': None,
             'welcome_message': 'Request access to use this bot.',
@@ -78,12 +79,14 @@ class AccessRequestServiceTests(unittest.TestCase):
             gate_message='Contact the administrator.', notify_requests=False)
         self.assertEqual(updated, {
             'enabled': False,
+            'telegram': True,
             'gate_message': 'Contact the administrator.',
             'notify_requests': False,
             'welcome_message': 'Request access to use this bot.',
         })
         self.assertEqual(self.requests.policy(self.member_actor), {
             'enabled': False,
+            'telegram': True,
             'gate_message': 'Contact the administrator.',
             'notify_requests': None,
             'welcome_message': 'Request access to use this bot.',

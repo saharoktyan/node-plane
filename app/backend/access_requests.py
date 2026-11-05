@@ -60,8 +60,10 @@ class AccessRequestService:
     def _policy(conn):
         rows = {row['key']: row['value'] for row in conn.execute('''SELECT key, value
             FROM backend_system_settings WHERE key IN ('access_requests_enabled', 'access_gate_message', 'access_welcome_message')''')}
+        from .account_channels import enabled
         return {
             'enabled': rows.get('access_requests_enabled', '1') == '1',
+            'telegram': 'telegram' in enabled(conn),
             'gate_message': rows.get('access_gate_message', 'Authorization is required to use this bot.'),
             'welcome_message': rows.get('access_welcome_message', 'Request access to use this bot.'),
         }

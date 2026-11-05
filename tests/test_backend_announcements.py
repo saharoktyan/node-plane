@@ -81,8 +81,13 @@ class AnnouncementTests(unittest.TestCase):
         response = self.client.post("/api/v1/integrations/telegram/announcements/claim",
                                     headers={**self.headers, 'Idempotency-Key': str(uuid4())})
         self.assertEqual((response.status_code, response.json()['error']['code']), (409, 'channel_disabled'))
+        from backend.access_requests import AccessRequestService
+        from backend.authorization import resolve_actor
+        member = resolve_actor(self.transport, self.identities, telegram_user_id=102)
+        self.assertFalse(AccessRequestService(self.db).policy(member)['telegram'])
         with self.db.transaction() as conn:
             set_enabled(conn, {'telegram'})
+        self.assertTrue(AccessRequestService(self.db).policy(member)['telegram'])
         self.assertNotEqual(self.client.post("/api/v1/integrations/telegram/announcements/claim",
             headers={**self.headers, 'Idempotency-Key': str(uuid4())}).status_code, 409)
         with self.assertRaises(ValueError), self.db.transaction() as conn:

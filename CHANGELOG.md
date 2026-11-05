@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- While the Telegram bot is off, Workstation's request settings keep only
+  the access-request switch (the bot's notifications and messages are
+  hidden); the access-request policy reports `telegram`. Account cards show
+  the account's name.
 - Add people without Telegram: Workstation's **New profile** (and
   `POST /api/v1/accounts` with `display_name`) creates an account by name
   with its VPN profile. Workstation's account list shows the account's

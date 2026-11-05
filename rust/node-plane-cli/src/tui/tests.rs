@@ -7216,6 +7216,35 @@ fn bot_that_is_off_offers_only_turning_it_on_with_a_hidden_token() {
 }
 
 #[test]
+fn request_settings_keep_only_the_switch_while_the_bot_is_off() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.requests_settings = true;
+    app.controller.policies = Some(
+        serde_json::json!({"requests":{"enabled":true,"telegram":false,
+        "notify_requests":true,"welcome_message":"Hello","gate_message":"Stub"}}),
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(text.contains("Access requests: On"));
+    assert!(text.contains("The Telegram bot is off"));
+    assert!(!text.contains("Request notifications"));
+    assert!(!text.contains("Welcome message"));
+    assert!(
+        !app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerGateMessage)
+    );
+}
+
+#[test]
 fn notes_remain_editable_when_draft_actions_shrink_the_viewport() {
     for height in [18, 20, 24, 30] {
         let mut app = test_profile_app();

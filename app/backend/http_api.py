@@ -909,6 +909,8 @@ class AccessRequestPolicyInput(BaseModel):
 
 class AccessRequestPolicyOutput(BaseModel):
     enabled: bool
+    # Whether the Telegram bot, which shows these messages, is on.
+    telegram: bool = True
     gate_message: str
     welcome_message: str
     notify_requests: bool | None = None

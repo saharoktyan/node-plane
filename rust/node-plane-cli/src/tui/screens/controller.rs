@@ -877,7 +877,10 @@ pub(in crate::tui) fn draw_controller(
             format!("Access requests: {}", status(requests_enabled)),
             Control::ControllerPolicyToggle("requests"),
         ));
-        if requests_enabled {
+        // Notifications and messages are the bot's; without it only the switch remains.
+        if value["requests"]["telegram"] == false {
+            text = "Requests settings\n\nThe Telegram bot is off: requests are reviewed in Workstation.".into();
+        } else if requests_enabled {
             controls.push((
                 format!(
                     "Request notifications: {}",
