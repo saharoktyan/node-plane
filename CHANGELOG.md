@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The API contract is part of the repository: `api/openapi.json` (written by
+  `scripts/export_openapi.py`, checked by a test) with its own version, and
+  the shared rules for errors, idempotency, revisions and pagination in
+  `docs/development/backend-api.md`. New operations must declare their
+  response model.
 - The bot matches Workstation again: **Account permissions** offers every
   preset role (member, support, operator, administrator, owner) with the
   same rules, and server cards split VLESS traffic by inbound.

@@ -1,6 +1,21 @@
 # Backend API
 
-The HTTP application is `app/backend/http_api.py`. Pydantic request/response models and route implementations define field-level contracts. Inspect `/openapi.json` on a running backend for its machine-readable schema. Do not publish the administrative service directly without its authentication boundary.
+The HTTP application is `app/backend/http_api.py`. Pydantic request/response models and route implementations define field-level contracts. Do not publish the administrative service directly without its authentication boundary.
+
+## Contract
+
+Clients and SDKs (the bot, Workstation, the web cabinet) are built from one contract, not from each other. `api/openapi.json` is the schema of this release; `scripts/export_openapi.py` writes it from the application (`backend/api_contract.py`), and `tests/test_api_contract.py` fails while the committed file differs. Commit the regenerated schema with every API change. The contract has its own version (`info.version`, `api_contract.VERSION`): bump the major part for a breaking change. Routes stay under `/api/v1`.
+
+Every new operation declares its response model. The operations without one are listed in `api/untyped-operations.txt`; the list may only shrink (`scripts/export_openapi.py --untyped` records a shrink).
+
+Rules every client relies on:
+
+- **Authentication:** `Authorization: Bearer <token>`. The Telegram adapter acts for a person with `X-Node-Plane-Telegram-User-ID`.
+- **Errors:** a non-2xx response is `{"error": {"code", "message", "request_id", "details"}}`. `code` is a stable machine identifier (`revision_conflict`, `last_owner_required`, …); clients map it to their own wording. A 401 carries `WWW-Authenticate: Bearer`.
+- **Idempotency:** commands take `Idempotency-Key: <UUID>`. Retrying with the same key returns the first result; the same key with a different request is `idempotency_conflict` (409).
+- **Revisions:** changes to a versioned record send `If-Match: "<revision>"`; a stale revision is `revision_conflict` (412). Clients reread and let the person decide; they never rebase silently.
+- **Pagination:** lists take `limit` (1–100) and `cursor` and return `items` and `next_cursor` (`null` on the last page). A cursor belongs to its query; another query refuses it (`invalid_cursor`, 422).
+- **Durable work:** a response for queued work is acceptance, not completion; read the operation or task until it ends.
 
 ## Identity and permissions
 
