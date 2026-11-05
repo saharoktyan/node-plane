@@ -349,8 +349,12 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("""INSERT INTO backend_telegram_identity_details
                 (subject,username,first_name,last_name,language_code,locale,locale_selected,updated_at)
                 VALUES ('101','ann','Ann',NULL,'ru','ru',1,'2026-11-05')""")
+            conn.execute("""INSERT INTO backend_access_requests(id,account_id,create_key,status,created_at)
+                VALUES ('r1','a2','k1','pending','2026-11-05')""")
         self.assertEqual(migrate(self.db)['applied'], [r.number for r in REVISIONS if r.number >= 28])
         with self.db.connect() as conn:
+            # r0031: earlier requests ask for VPN access.
+            self.assertEqual(conn.execute("SELECT service FROM backend_access_requests WHERE id='r1'").fetchone()['service'], 'vpn')
             rows = conn.execute('SELECT id,display_name,locale,locale_selected FROM backend_accounts ORDER BY id').fetchall()
             channels = conn.execute('SELECT account_id,channel,address,enabled FROM backend_account_channels').fetchall()
         self.assertEqual([tuple(row.values()) for row in rows], [('a1','Ann','ru',1), ('a2',None,None,0)])

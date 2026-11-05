@@ -877,6 +877,8 @@ class ProfileCommandOutput(BaseModel):
 class AccessRequestOutput(BaseModel):
     id: UUID
     account_id: UUID | None
+    # The service the request asks for; `vpn` for now.
+    service: str = 'vpn'
     status: str
     created_at: str
     decided_at: str | None

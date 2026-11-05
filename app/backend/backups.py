@@ -46,7 +46,7 @@ TABLES = (
     "backend_access_requests",
 )
 ADDITIVE_COLUMNS = {
-    "backend_access_requests": ("telegram_subject",),
+    "backend_access_requests": ("telegram_subject", "service"),
     "backend_accounts": ("display_name", "locale", "locale_selected"),
 }
 CLEAR = (

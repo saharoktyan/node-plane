@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Access requests name the service they ask for (`service`, `vpn` for now;
+  migration r0031), so other services can get their own requests later.
 - The bot builds its menu from the account's services: `GET /api/v1/me`
   lists `services` (`vpn` while the account owns a VPN profile). A member
   without one keeps the account page, settings and Inbox, and can request VPN

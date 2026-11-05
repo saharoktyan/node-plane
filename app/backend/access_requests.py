@@ -50,6 +50,8 @@ class AccessRequestService:
                 ON backend_access_requests(telegram_subject,create_key) WHERE telegram_subject IS NOT NULL''')
             conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_backend_pending_guest_request
                 ON backend_access_requests(telegram_subject) WHERE status='pending' AND account_id IS NULL''')
+            from db.migration_revisions.r0031_request_services import add_columns
+            add_columns(conn)
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_telegram_menu_refresh (
                 subject TEXT PRIMARY KEY REFERENCES backend_telegram_identity_details(subject),
                 revision INTEGER NOT NULL)''')
@@ -120,7 +122,7 @@ class AccessRequestService:
 
     @staticmethod
     def public(row):
-        result = {key: row[key] for key in ('id', 'account_id', 'status', 'created_at', 'decided_at', 'decided_by')}
+        result = {key: row[key] for key in ('id', 'account_id', 'service', 'status', 'created_at', 'decided_at', 'decided_by')}
         for key in ('display_name', 'telegram_user_id', 'username', 'first_name', 'last_name', 'language_code', 'locale'):
             if key in row.keys():
                 result[key] = row[key]
@@ -312,7 +314,7 @@ class AccessRequestService:
                 conn.execute('UPDATE backend_accounts SET revision=revision+1 WHERE id=?', (account_id,))
                 revision = conn.execute('SELECT revision FROM backend_accounts WHERE id=?', (account_id,)).fetchone()['revision']
                 conn.execute('INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?) ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision', (account_id, revision))
-                if decision == 'approve':
+                if decision == 'approve' and row['service'] == 'vpn':
                     from .profiles import ProfileRepository
                     ProfileRepository.ensure_account_profile_in_transaction(conn, account_id)
                     if subject:
