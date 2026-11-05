@@ -2,10 +2,8 @@
 //! requests that come over it against the local API.
 use std::{sync::Arc, time::Duration};
 
-use axum::{
-    body::Bytes,
-    http::{HeaderValue, Method, Uri},
-};
+use bytes::Bytes;
+use http::{HeaderValue, Method, Uri};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
@@ -19,12 +17,11 @@ use tonic::transport::{Certificate, ClientTlsConfig, Endpoint};
 use uuid::Uuid;
 
 use crate::{
-    headers, keys,
+    LINK_KEY, LINK_NONCE, headers, keys,
     proto::{
         self, Hello, LinkMessage, RelayMessage, link_client::LinkClient, link_message,
         relay_message,
     },
-    serve::{LINK_KEY, LINK_NONCE},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -194,7 +191,7 @@ async fn forward(
     ) else {
         return fail(400, "bad_request");
     };
-    let mut builder = axum::http::Request::builder().method(method).uri(uri);
+    let mut builder = http::Request::builder().method(method).uri(uri);
     for header in &request.headers {
         if headers::allowed(&header.name, headers::REQUEST)
             && let Ok(value) = HeaderValue::from_bytes(&header.value)

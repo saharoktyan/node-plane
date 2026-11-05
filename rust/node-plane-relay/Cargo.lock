@@ -853,6 +853,8 @@ name = "node-plane-relay"
 version = "1.0.0-beta.1"
 dependencies = [
  "axum",
+ "bytes",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",

@@ -5,24 +5,37 @@ edition = "2024"
 rust-version = "1.89"
 license = "Apache-2.0"
 
+# The agent runs `serve` on the relay's node; the driver runs `link` on the
+# controller. Each takes only its side.
+[features]
+default = ["serve", "link"]
+serve = ["dep:axum", "dep:hyper", "hyper-util/server", "hyper-util/server-auto", "hyper-util/service", "hyper-util/http2", "dep:rustls-acme", "dep:rustls-pemfile", "dep:tokio-rustls"]
+link = ["hyper-util/client-legacy", "hyper-util/http1", "tonic/tls", "tonic/tls-webpki-roots"]
+
+[[bin]]
+name = "node-plane-relay"
+required-features = ["serve", "link"]
+
 [dependencies]
 # tonic 0.12 routes through axum 0.7, so both share one port.
-axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"], optional = true }
+bytes = "1"
+http = "1"
 http-body-util = "0.1"
-hyper = "1"
-hyper-util = { version = "0.1", features = ["client-legacy", "http1", "http2", "server", "server-auto", "service", "tokio"] }
+hyper = { version = "1", optional = true }
+hyper-util = { version = "0.1", features = ["tokio"] }
 node-plane-api = { path = "../node-plane-api" }
 prost = "0.13"
-# ring instead of the default aws-lc-rs: one crypto provider in the tree.
-rustls-acme = { version = "0.15", default-features = false, features = ["ring", "tls12", "tokio", "webpki-roots"] }
-rustls-pemfile = "2"
 # Already in the tree through rustls; Ed25519 keys of both sides.
 ring = "0.17"
+# ring instead of the default aws-lc-rs: one crypto provider in the tree.
+rustls-acme = { version = "0.15", default-features = false, features = ["ring", "tls12", "tokio", "webpki-roots"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
 serde_json = "1.0"
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "process"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "process", "fs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 tokio-stream = "0.1"
-tonic = { version = "0.12", features = ["transport", "tls", "tls-webpki-roots"] }
+tonic = { version = "0.12", features = ["transport"] }
 uuid = { version = "1.18", features = ["v4"] }
 
 [dev-dependencies]

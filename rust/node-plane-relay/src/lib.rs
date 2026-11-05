@@ -7,9 +7,16 @@
 //! the controller's API checks every request (see `relay-design.md`).
 pub mod headers;
 pub mod keys;
+#[cfg(feature = "link")]
 pub mod link;
+#[cfg(feature = "serve")]
 pub mod serve;
+#[cfg(feature = "serve")]
 pub mod tls;
+
+/// Attach metadata: the controller's key and its challenge to the relay.
+pub const LINK_KEY: &str = "x-node-plane-link-key";
+pub const LINK_NONCE: &str = "x-node-plane-link-nonce";
 
 pub mod proto {
     tonic::include_proto!("nodeplane.relay.v1");

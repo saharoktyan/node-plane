@@ -1,6 +1,6 @@
 //! The headers that cross the relay. Everything else is dropped, Node Plane
 //! headers above all: the controller's link sets the via mark itself.
-use axum::http::HeaderMap;
+use http::HeaderMap;
 
 use crate::proto::Header;
 

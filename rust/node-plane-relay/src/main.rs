@@ -79,7 +79,7 @@ async fn run_serve() -> Result<(), String> {
     eprintln!("relay listening on {listen} ({tls:?})");
     let router = serve::router(serve::Config {
         key,
-        link_key_path: state.join("link.pub"),
+        state_dir: state.clone(),
         limits: serve::Limits::default(),
     });
     // The link stream never ends by itself, so stop without draining it.

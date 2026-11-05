@@ -104,7 +104,7 @@ fn fake_api() -> Router {
 async fn relay(pair: &Pair, limits: serve::Limits) -> SocketAddr {
     listen(serve::router(serve::Config {
         key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
-        link_key_path: pair.dir.join("link.pub"),
+        state_dir: pair.dir.clone(),
         limits,
     }))
     .await
@@ -199,6 +199,9 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
         .unwrap();
     let (status, headers, body) = call(request).await;
     assert_eq!(status, StatusCode::OK);
+    let recorded: Value =
+        serde_json::from_slice(&std::fs::read(pair.dir.join("status.json")).unwrap()).unwrap();
+    assert_eq!(recorded["link"], "connected");
     assert_eq!(body["method"], "POST");
     assert_eq!(body["uri"], "/api/v1/profiles/p1?x=1");
     assert_eq!(body["body"], "{\"a\":1}");
@@ -419,10 +422,13 @@ async fn a_forged_hello_does_not_attach() {
     let mut request = tonic::Request::new(tokio_stream::wrappers::ReceiverStream::new(rx));
     let metadata = request.metadata_mut();
     metadata.insert(
-        serve::LINK_KEY,
+        node_plane_relay::LINK_KEY,
         keys::hex(&keys::public(&pair.link_key)).parse().unwrap(),
     );
-    metadata.insert(serve::LINK_NONCE, keys::hex(&[7; 32]).parse().unwrap());
+    metadata.insert(
+        node_plane_relay::LINK_NONCE,
+        keys::hex(&[7; 32]).parse().unwrap(),
+    );
     let mut inbound = client.attach(request).await.unwrap().into_inner();
     assert!(inbound.message().await.unwrap().is_some(), "no challenge");
     let forged = Pair::new();
@@ -467,7 +473,7 @@ async fn the_relay_serves_tls_from_files() {
     let port = listener.local_addr().unwrap().port();
     let router = serve::router(serve::Config {
         key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
-        link_key_path: pair.dir.join("link.pub"),
+        state_dir: pair.dir.clone(),
         limits: serve::Limits::default(),
     });
     let mode = tls::Mode::Files {

@@ -24,11 +24,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Status, Streaming, server::NamedService};
 use uuid::Uuid;
 
-pub const LINK_KEY: &str = "x-node-plane-link-key";
-pub const LINK_NONCE: &str = "x-node-plane-link-nonce";
-
 use crate::{
-    headers, keys,
+    LINK_KEY, LINK_NONCE, headers, keys,
     proto::{
         self, LinkMessage, RelayMessage, link_message,
         link_server::{Link, LinkServer},
@@ -59,9 +56,10 @@ const MAX_LINK_MESSAGE: usize = 5 << 20;
 pub struct Config {
     /// The relay's own key.
     pub key: Ed25519KeyPair,
-    /// The controller's public key in hex, written by the node's agent. It is
-    /// read at every Attach, so a new controller key needs no restart.
-    pub link_key_path: PathBuf,
+    /// `link.pub`: the controller's public key in hex, written by the node's
+    /// agent and read at every Attach, so a new key needs no restart.
+    /// `status.json`: whether the controller is attached, for the agent.
+    pub state_dir: PathBuf,
     pub limits: Limits,
 }
 
@@ -78,7 +76,7 @@ struct Connection {
 
 struct Inner {
     key: Ed25519KeyPair,
-    link_key_path: PathBuf,
+    state_dir: PathBuf,
     limits: Limits,
     current: Mutex<Option<Arc<Connection>>>,
     generations: AtomicU64,
@@ -92,7 +90,7 @@ pub struct Hub(Arc<Inner>);
 pub fn router(config: Config) -> Router {
     let hub = Hub(Arc::new(Inner {
         key: config.key,
-        link_key_path: config.link_key_path,
+        state_dir: config.state_dir,
         limits: config.limits,
         current: Mutex::new(None),
         generations: AtomicU64::new(0),
@@ -114,9 +112,25 @@ impl Hub {
         self.0.current.lock().unwrap().clone()
     }
 
+    /// Records for the agent whether a controller is attached.
+    fn status(&self, version: Option<&str>) {
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let status = serde_json::json!({
+            "link": if version.is_some() { "connected" } else { "disconnected" },
+            "since": since,
+            "controller_link_version": version,
+        });
+        let path = self.0.state_dir.join("status.json");
+        if let Err(error) = keys::write_private(&path, status.to_string().as_bytes()) {
+            eprintln!("{error}");
+        }
+    }
+
     /// The controller's key, if one is pinned.
     fn pinned(&self) -> Option<Vec<u8>> {
-        let text = std::fs::read_to_string(&self.0.link_key_path).ok()?;
+        let text = std::fs::read_to_string(self.0.state_dir.join("link.pub")).ok()?;
         keys::unhex(&text).filter(|key| key.len() == keys::KEY_LEN)
     }
 
@@ -157,6 +171,7 @@ impl Hub {
             old.replaced.notify_one();
         }
         eprintln!("link connected (controller link {version})");
+        self.status(Some(&version));
         loop {
             let message = tokio::select! {
                 message = inbound.message() => message,
@@ -177,6 +192,7 @@ impl Hub {
                 .is_some_and(|c| c.generation == connection.generation)
             {
                 *current = None;
+                self.status(None);
             }
         }
         connection.pending.lock().unwrap().clear();
