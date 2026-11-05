@@ -141,6 +141,28 @@ class BackendBackupsTests(unittest.TestCase):
             'SELECT id, account_id, service FROM backend_service_profiles').fetchall()], [(profile_id, new_id, 'vpn')])
         self.assertIsNone(self.db.connection.execute('SELECT id FROM backend_accounts WHERE id=?', (self.admin.id,)).fetchone())
 
+    def test_restore_keeps_logins_and_the_restoring_administrators_own(self):
+        from dataclasses import replace
+        from backend import logins
+        member = str(uuid4())
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status) VALUES (?,'approved')", (member,))
+            logins.claim(conn, self.admin.id, 'boss', 'first')
+            logins.claim(conn, member, 'carl', 'first')
+        backup_id, checksum = self.snapshot()
+        self.assertEqual(len(self.service._load(backup_id)['tables']['backend_logins']['rows']), 2)
+        new_id = str(uuid4())
+        self.db.connection.execute("INSERT INTO backend_accounts(id,role,status) VALUES (?,'admin','approved')", (new_id,))
+        self.db.connection.execute("UPDATE backend_external_identities SET account_id=? WHERE provider='telegram' AND subject='101'", (new_id,))
+        with self.db.transaction() as conn:
+            logins.claim(conn, new_id, 'newboss', 'first')
+        actor = Actor(self.actor.principal, replace(self.admin, id=new_id))
+        self.service.queue(actor, str(uuid4()), 'restore', backup_id, checksum)
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(self.service.run_one())
+        with self.db.connect() as conn:
+            self.assertEqual((logins.current(conn, new_id), logins.current(conn, member)), ('newboss', 'carl'))
+
     def test_http_import_and_export_validate_authentication_and_return_original_snapshot(self):
         from unittest.mock import patch
         from fastapi.testclient import TestClient
@@ -250,7 +272,7 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v8')
+        self.assertEqual(payload['format'], 'node-plane-backend-v9')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
@@ -300,6 +322,7 @@ class BackendBackupsTests(unittest.TestCase):
         del raw['tables']['backend_profile_tariffs']
         # Older formats had no role assignments.
         raw['tables'].pop('backend_role_assignments', None)
+        raw['tables'].pop('backend_logins', None)
         raw['format'] = 'node-plane-backend-v6'
         raw['checksum'] = hashlib.sha256(encoded(raw['tables'])).hexdigest()
         path.write_bytes(encoded(raw))
@@ -328,6 +351,7 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_profile_tariffs']
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
+        payload['tables'].pop('backend_logins', None)
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -356,6 +380,7 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_profile_tariffs']
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
+        payload['tables'].pop('backend_logins', None)
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -375,6 +400,7 @@ class BackendBackupsTests(unittest.TestCase):
         payload = json.loads(path.read_bytes())
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
+        payload['tables'].pop('backend_logins', None)
         payload['format'] = 'node-plane-backend-v1'
         del payload['tables']['backend_devices']
         from backend.grant_policies import TABLE_COLUMNS

@@ -266,6 +266,10 @@ pub(super) enum Control {
     AccessAccountAction(bool),
     /// None opens the role choice; a role (or "member") is then chosen.
     AccessRole(Option<&'static str>),
+    /// The open account's login: open the input, the input itself, save it.
+    AccessLogin,
+    AccessLoginInput,
+    AccessLoginSave,
     AccessAccountConfirm,
     AccessDeviceItem(usize),
     AccessDeviceNew,

@@ -297,6 +297,18 @@
       "AccountEditInput": {
         "additionalProperties": false,
         "properties": {
+          "login": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
+          },
           "role": {
             "anyOf": [
               {
@@ -361,6 +373,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
           },
           "role": {
             "title": "Role",
@@ -572,6 +595,17 @@
             "default": false,
             "title": "Locale Selected",
             "type": "boolean"
+          },
+          "login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
           },
           "profile_id": {
             "anyOf": [
@@ -2238,6 +2272,21 @@
         "title": "InstallationProgressOutput",
         "type": "object"
       },
+      "LoginInput": {
+        "additionalProperties": false,
+        "properties": {
+          "login": {
+            "maxLength": 32,
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login"
+        ],
+        "title": "LoginInput",
+        "type": "object"
+      },
       "MeOutput": {
         "properties": {
           "account_created": {
@@ -2313,6 +2362,39 @@
             "default": false,
             "title": "Locale Selected",
             "type": "boolean"
+          },
+          "login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login"
+          },
+          "login_change_available_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login Change Available At"
+          },
+          "login_suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login Suggestion"
           },
           "onboarding_completed": {
             "default": false,
@@ -7437,6 +7519,68 @@
           }
         ],
         "summary": "Create Access Request"
+      }
+    },
+    "/api/v1/me/login": {
+      "put": {
+        "description": "Set the account's first login or change it (once in 30 days).",
+        "operationId": "set_my_login_api_v1_me_login_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set My Login"
       }
     },
     "/api/v1/me/nodes": {

@@ -77,6 +77,8 @@ class AccountOutput(BaseModel):
     status: str
     # Assigned roles (`owner`, `admin`, `operator`, `support`); none for a member.
     roles: list[str] = []
+    # The name the account signs in with; everything else refers to `id`.
+    login: str | None = None
 
 
 class MeOutput(AccountOutput):
@@ -94,6 +96,10 @@ class MeOutput(AccountOutput):
     locale_selected: bool = False
     # Services the account has access to (`vpn` while it owns a VPN profile).
     services: list[str] = []
+    # When the account may change its own login again; None while it may now.
+    login_change_available_at: str | None = None
+    # The Telegram username as a login, offered while the account has none.
+    login_suggestion: str | None = None
 
 
 class AdminAccountOutput(AccountOutput):
@@ -128,6 +134,12 @@ class AccountEditInput(BaseModel):
     status: Literal['approved', 'disabled'] | None = None
     # The account's exact roles; an empty list makes a member.
     roles: list[Literal['owner', 'admin', 'operator', 'support']] | None = None
+    login: StrictStr | None = Field(default=None, max_length=32)
+
+
+class LoginInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    login: StrictStr = Field(max_length=32)
 
 
 class AccountPreferencesInput(BaseModel):
@@ -1391,15 +1403,31 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             from .onboarding import progress
             progress(db, current)
         from .service_profiles import services as account_services
+        details = identities.account_details(current.account.id)
         with db.connect() as conn:
             services = account_services(conn, current.account.id)
+            login = own_login(conn, current.account.id, details.get('username'))
         from .authorization import effective_roles
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
                         roles=sorted(effective_roles(current.account)),
-                        permissions=permissions, services=services,
+                        permissions=permissions, services=services, **login,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
-                        **system_settings.member_preferences(current),
-                        **identities.account_details(current.account.id))
+                        **system_settings.member_preferences(current), **details)
+
+    def own_login(conn, account_id, username):
+        from . import logins
+        value = logins.current(conn, account_id)
+        return {'login': value, 'login_change_available_at': logins.change_available_at(conn, account_id),
+                'login_suggestion': None if value else logins.suggestion(conn, account_id, username)}
+
+    @app.put('/api/v1/me/login', response_model=MeOutput)
+    def set_my_login(body: LoginInput, current=Depends(actor)):
+        """Set the account's first login or change it (once in 30 days)."""
+        require_permission(current, 'account.self.preferences.write')
+        from . import logins
+        with db.transaction() as conn:
+            logins.set_own(conn, current.account.id, body.login)
+        return me(current)
 
     @app.patch('/api/v1/me/preferences', response_model=MeOutput)
     def update_my_preferences(body: AccountPreferencesInput, request: Request, current=Depends(session)):
@@ -2241,6 +2269,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                        command_key: Annotated[str, Header(alias='Idempotency-Key')],
                        if_match: Annotated[str | None, Header(alias='If-Match')] = None, current=Depends(actor)):
         result = accounts.update(current, str(account_id), role=body.role, status=body.status, roles=body.roles,
+                                 login=body.login,
                                  revision=revision_header(request), command_key=header(request, 'Idempotency-Key'))
         response.headers['ETag'] = '"' + str(result['revision']) + '"'
         return result

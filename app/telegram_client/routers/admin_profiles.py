@@ -333,17 +333,25 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback,
                      bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     await query.answer()
     await _clear_flow(state)
-    account = await backend.request('GET', f'/api/v1/accounts/{callback_data.account_id}',
-                                    telegram_user_id=query.from_user.id)
+    await show_account(query.message.chat.id, query.from_user.id, query.message.message_id,
+                       callback_data.account_id, bot, backend, state)
+
+
+async def show_account(chat_id, user_id, message_id, account_id, bot, backend, state):
+    from .account_login import card_lines, card_row
+    await state.set_state(None)
+    account = await backend.request('GET', f'/api/v1/accounts/{account_id}', telegram_user_id=user_id)
     locale = await _locale(state)
     rows = [[InlineKeyboardButton(text=tr(locale, 'accounts.open_profile'),
         callback_data=NewProfileCallback(account_id=account['id']).pack(), style='primary')],
+        card_row(locale, account),
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AccountsCallback().pack())]]
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'accounts.card', name=account.get('telegram_user_id') or account['id'][:8]),
-               (tr(locale, 'account.status', status=tr(locale, f"status.{account['status']}")),
+    await render(bot, chat_id,
+        Screen(tr(locale, 'accounts.card', name=account.get('login') or account.get('telegram_user_id') or account['id'][:8]),
+               (*card_lines(locale, account),
+                tr(locale, 'account.status', status=tr(locale, f"status.{account['status']}")),
                 tr(locale, 'accounts.role', role=tr(locale, f"role.{account['role']}"))), embedded_buttons=True, navigation=True),
-        rows, state, query.message.message_id)
+        rows, state, message_id)
 
 
 @router.callback_query(NewProfileCallback.filter())

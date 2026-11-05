@@ -313,6 +313,9 @@ impl App {
             | Control::AccessExpiryBack
             | Control::AccessAccountAction(..)
             | Control::AccessRole(..)
+            | Control::AccessLogin
+            | Control::AccessLoginInput
+            | Control::AccessLoginSave
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)
             | Control::AccessProfileConfirm

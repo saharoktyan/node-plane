@@ -426,6 +426,38 @@ impl App {
                 }
                 None
             }
+            Control::AccessLogin => {
+                let login = self.access.card.as_ref().map(|card| {
+                    card.get("_account").unwrap_or(card)["login"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned()
+                });
+                self.access.login_input = login;
+                self.error.clear();
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessLoginInput => {
+                self.focus(control);
+                None
+            }
+            Control::AccessLoginSave => {
+                if let (Some(card), Some(login)) = (&self.access.card, &self.access.login_input)
+                    && let card = card.get("_account").unwrap_or(card)
+                    && let (Some(id), Some(revision)) =
+                        (card["id"].as_str(), card["revision"].as_u64())
+                {
+                    let command = crate::access::Command::AccountMutate {
+                        id: id.into(),
+                        revision,
+                        body: serde_json::json!({ "login": login.trim() }),
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
             Control::AccessRole(None) => {
                 self.access.role_picker = true;
                 self.access.selected = 0;
@@ -585,6 +617,7 @@ impl App {
                     return None;
                 }
                 if std::mem::take(&mut self.access.role_picker)
+                    || self.access.login_input.take().is_some()
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -703,6 +736,9 @@ impl App {
                         | Control::AccessProfileAction(_)
                         | Control::AccessAccountAction(_)
                         | Control::AccessRole(_)
+                        | Control::AccessLogin
+                        | Control::AccessLoginInput
+                        | Control::AccessLoginSave
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit

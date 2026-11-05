@@ -4053,3 +4053,30 @@ CATALOG['ru'].update({
     'relay.error.relay_certificate_path_invalid': 'Пути к сертификату должны быть абсолютными.',
     'relay.error.relay_tls_invalid': 'Режим TLS указан неверно.',
 })
+
+CATALOG['en'].update({
+    'login.title': 'Login', 'login.current': 'Login: {value}',
+    'login.none': 'No login yet. You need it to sign in to the web cabinet with a password.',
+    'login.none_admin': 'Login: not set', 'login.change_after': 'You can change it again after {date}.',
+    'login.set': 'Set login', 'login.change': 'Change login', 'login.use': 'Use {value}',
+    'login.change_admin': 'Change login',
+    'login.prompt': 'Send a login: 3–32 Latin letters, digits, _ . or -, starting with a letter or digit. '
+                    'Case does not matter for signing in. After a change, the old login stays reserved for 30 days.',
+    'login.error.login_invalid': 'This login does not fit the rules.',
+    'login.error.login_reserved': 'This login is reserved.',
+    'login.error.login_taken': 'This login is taken.',
+    'login.error.login_change_too_soon': 'The login can be changed once in 30 days.',
+})
+CATALOG['ru'].update({
+    'login.title': 'Логин', 'login.current': 'Логин: {value}',
+    'login.none': 'Логин не задан. Он нужен для входа в веб-кабинет по паролю.',
+    'login.none_admin': 'Логин: не задан', 'login.change_after': 'Сменить снова можно после {date}.',
+    'login.set': 'Задать логин', 'login.change': 'Сменить логин', 'login.use': 'Взять {value}',
+    'login.change_admin': 'Сменить логин',
+    'login.prompt': 'Отправьте логин: 3–32 латинские буквы, цифры, _ . или -, начинается с буквы или цифры. '
+                    'Регистр при входе не важен. После смены старый логин остаётся за вами 30 дней.',
+    'login.error.login_invalid': 'Логин не подходит под правила.',
+    'login.error.login_reserved': 'Этот логин зарезервирован.',
+    'login.error.login_taken': 'Этот логин занят.',
+    'login.error.login_change_too_soon': 'Логин можно менять раз в 30 дней.',
+})

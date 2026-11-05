@@ -24,6 +24,13 @@
   in the API, the bot and Workstation (migration r0039; older controllers
   cannot use the upgraded database). The controller reaches remote nodes
   through their agents; SSH only installs an agent.
+- Accounts have logins (migration r0040, backups v9): unique without regard
+  to case, 3–32 characters, reserved names refused. `PUT /api/v1/me/login`
+  sets the account's own (a change once in 30 days, the old login held for
+  30 days), `/me` reports it with when it may change and the Telegram
+  username as a suggestion, and administrators change any login with
+  `PATCH /api/v1/accounts/{id}`. In the bot: Settings → Login and the account
+  card; in Workstation: Login on the account card.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

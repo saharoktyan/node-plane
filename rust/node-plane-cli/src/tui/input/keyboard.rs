@@ -27,6 +27,7 @@ impl App {
                         Control::AccessSearch
                             | Control::AccessField(_)
                             | Control::AccessDeviceName
+                            | Control::AccessLoginInput
                             | Control::AccessDurationInput
                             | Control::AccessIdentity
                     )
@@ -277,6 +278,29 @@ impl App {
         }
 
         let controls = self.access_controls();
+        if controls.get(self.access.selected) == Some(&Control::AccessLoginInput)
+            && let Some(login) = self.access.login_input.as_mut()
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if login.chars().count() < 32 {
+                        login.push(c);
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    super::super::text_input::delete_backwards(login, key);
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.activate(Control::AccessLoginSave);
+                    return;
+                }
+                _ => {}
+            }
+        }
         if controls.get(self.access.selected) == Some(&Control::AccessDeviceName)
             && let Some(editor) = self.access.devices.as_mut().and_then(|d| d.editor.as_mut())
         {

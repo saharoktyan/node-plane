@@ -1048,6 +1048,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             )));
         }
         for (key, title) in [
+            ("login", "Login"),
             ("display_name", "Name"),
             ("telegram_user_id", "Telegram ID"),
             ("username", "Username"),
@@ -1116,6 +1117,16 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 ("Confirm", Control::AccessAccountConfirm),
                 ("Cancel", Control::AccessBack),
             ];
+        } else if let Some(login) = &app.access.login_input {
+            lines.push(Line::from(
+                "Login: 3–32 Latin letters, digits, _ . or -; case does not matter for signing in. The old login stays reserved for 30 days.",
+            ));
+            lines.push(Line::from(format!("New login: {login}▏")));
+            buttons = vec![
+                ("Type the login", Control::AccessLoginInput),
+                ("Save", Control::AccessLoginSave),
+                ("Cancel", Control::AccessBack),
+            ];
         } else if app.access.role_picker {
             lines.push(Line::from("Choose the role of this account:"));
             buttons = vec![
@@ -1146,6 +1157,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 // The picker covers member and every staff preset; the
                 // backend lets only owners assign roles other than admin.
                 buttons.push(("Role", Control::AccessRole(None)));
+                if app.access.tab == Tab::Accounts {
+                    buttons.push(("Login", Control::AccessLogin));
+                }
                 if account["role"] != "admin" {
                     buttons.push((
                         if account["status"] == "approved" {

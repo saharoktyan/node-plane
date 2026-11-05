@@ -16,6 +16,9 @@ def begin(conn, account_id):
         (account_id, json.dumps(account), timestamp))
     conn.execute("UPDATE backend_accounts SET status='disabled',revision=revision+1 WHERE id=?", (account_id,))
     conn.execute("UPDATE backend_credentials SET revoked_at=? WHERE account_id=? AND revoked_at IS NULL", (timestamp,account_id))
+    # Held for a while, then free for others.
+    from .logins import release
+    release(conn, account_id)
 
 
 def settle(conn):

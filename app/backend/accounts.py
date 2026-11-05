@@ -46,7 +46,7 @@ class AccountService:
         result = {'id': row['id'], 'role': row['role'], 'status': row['status'],
                 'revision': row['revision'],
                 'telegram_user_id': int(row['telegram_subject']) if row['telegram_subject'] else None}
-        for key in ('display_name', 'username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
+        for key in ('login', 'display_name', 'username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
             if key in row.keys():
                 result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
         if 'profile_id' in row.keys():
@@ -60,7 +60,7 @@ class AccountService:
     def _read(conn, account_id):
         row = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
             i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
-            d.language_code, a.locale, a.locale_selected,
+            d.language_code, a.locale, a.locale_selected, (SELECT l.login FROM backend_logins l WHERE l.account_id = a.id AND l.released_at IS NULL) AS login,
             (SELECT p.id FROM backend_profiles p WHERE p.owner_account_id=a.id ORDER BY p.id LIMIT 1) AS profile_id
             FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
@@ -95,7 +95,7 @@ class AccountService:
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
                 i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
-                d.language_code, a.locale, a.locale_selected
+                d.language_code, a.locale, a.locale_selected, (SELECT l.login FROM backend_logins l WHERE l.account_id = a.id AND l.released_at IS NULL) AS login
                 FROM backend_accounts a
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
@@ -191,12 +191,15 @@ class AccountService:
             conn.execute('INSERT INTO backend_account_commands VALUES (?,?,?,?,?)', (actor.account.id, key, account.id, input_json, json.dumps(result, sort_keys=True)))
             return result
 
-    def update(self, actor, account_id, *, role=None, status=None, roles=None, revision, command_key):
-        """Change an account's role or status, or (`roles`) assign its roles exactly."""
+    def update(self, actor, account_id, *, role=None, status=None, roles=None, login=None, revision, command_key):
+        """Change an account's role, status or login, or (`roles`) assign its roles exactly."""
         require_permission(actor, 'accounts.manage')
         key = _key(command_key)
-        if role is None and status is None and roles is None:
+        if role is None and status is None and roles is None and login is None:
             raise AccessDenied('invalid_input', 422)
+        if login is not None:
+            from .logins import checked
+            checked(login)
         if roles is not None:
             require_permission(actor, 'roles.manage')
             from .authorization import STAFF_ROLES
@@ -211,7 +214,8 @@ class AccountService:
         if type(revision) is not int or revision < 1:
             raise AccessDenied('invalid_revision', 422)
         input_json = json.dumps({'target': account_id, 'role': role, 'status': status,
-                                 'revision': revision, **({'roles': roles} if roles is not None else {})}, sort_keys=True)
+                                 'revision': revision, **({'roles': roles} if roles is not None else {}),
+                                 **({'login': login} if login is not None else {})}, sort_keys=True)
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
@@ -235,6 +239,11 @@ class AccountService:
                 raise AccessDenied('account_deleting', 409)
             if row['revision'] != revision:
                 raise AccessDenied('revision_conflict', 412)
+            if login is not None and login != row['login']:
+                # An administrator changes a login at any time.
+                from .logins import claim
+                claim(conn, account_id, login, 'admin')
+                conn.execute('UPDATE backend_accounts SET revision = revision + 1 WHERE id = ?', (account_id,))
             next_role = role if role is not None else row['role']
             next_status = status if status is not None else row['status']
             current_roles = _roles(conn, row)

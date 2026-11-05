@@ -697,6 +697,8 @@ pub struct Browser {
     pub role_pending: Option<bool>,
     /// The role choice of the open account is shown.
     pub role_picker: bool,
+    /// The open account's login being typed.
+    pub login_input: Option<String>,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -875,6 +877,10 @@ impl Browser {
                 }
             }
             Command::AccountMutate { body, .. } => {
+                if body["login"].is_string() {
+                    self.login_input = None;
+                    self.result = Some("Login changed.".into());
+                }
                 if body["roles"].is_array() {
                     self.role_pending = None;
                     self.result = Some("Role changed.".into());
@@ -1077,6 +1083,21 @@ pub fn provision_error(error: &str) -> String {
         "the backend did not confirm the result. Refresh profiles before trying again."
     };
     format!("Could not create profile: {cause}")
+}
+
+pub fn login_error(error: &str) -> String {
+    if error.contains("login_invalid") {
+        "Use 3–32 Latin letters, digits, _ . or -, starting with a letter or digit."
+    } else if error.contains("login_reserved") {
+        "This login is reserved."
+    } else if error.contains("login_taken") {
+        "This login is taken."
+    } else if error.contains("revision_conflict") {
+        "The account changed. Refresh it and try again."
+    } else {
+        "The login was not changed. Refresh the account and try again."
+    }
+    .into()
 }
 
 pub fn role_error(error: &str) -> String {

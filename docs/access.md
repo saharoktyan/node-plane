@@ -119,6 +119,12 @@ In Workstation, **Role** on an account card picks the role. Any administrator ma
 
 Expiry and revocation remove runtime authorization and close established VLESS connections. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed. See [Temporary configurations](temporary-configs.md) for short-lived access.
 
+## Login
+
+An account can have a login: the name it will sign in to the web cabinet with. A login is 3–32 Latin letters, digits, `_`, `.` or `-`, starts with a letter or digit, and is unique regardless of case; names such as `admin`, `root` and `support` are reserved. Everything else refers to the account itself, so changing a login breaks nothing.
+
+A member sets their login in the bot's **Settings → Login**; the bot offers their Telegram username when it fits and is free. A member can change it once in 30 days, and the old login stays reserved for them for 30 days. Administrators change any account's login at any time: on the account card in the bot, or with **Login** on the account card in Workstation's **Accounts**. Deleting an account frees its login after 30 days.
+
 ## Delete an account
 
 **Delete account** removes the account, its VPN profile and devices. After deletion, submitting a new request alone does not recreate an account; a subsequent approval or explicit administrator provisioning creates a fresh account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.

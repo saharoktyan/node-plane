@@ -496,6 +496,12 @@ impl App {
                         return;
                     }
 
+                    if self.access.login_input.is_some() && !error.is_empty() {
+                        // The input stays open with what was typed.
+                        self.error = crate::access::login_error(&error);
+                        return;
+                    }
+
                     if self.access.role_pending.take().is_some() && !error.is_empty() {
                         self.access.account_action = None;
                         self.access.result = Some(crate::access::role_error(&error));

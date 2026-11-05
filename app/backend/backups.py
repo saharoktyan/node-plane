@@ -45,6 +45,7 @@ TABLES = (
     "backend_quota_periods",
     "backend_access_requests",
     "backend_role_assignments",
+    "backend_logins",
 )
 ADDITIVE_COLUMNS = {
     "backend_access_requests": ("telegram_subject", "service"),
@@ -242,23 +243,27 @@ class BackupService:
             old_policy = payload['format'] in ('node-plane-backend-v1', 'node-plane-backend-v2')
             old_vpn_policy = payload['format'] not in ('node-plane-backend-v4', 'node-plane-backend-v5',
                                                        'node-plane-backend-v6', 'node-plane-backend-v7',
-                                                       'node-plane-backend-v8')
+                                                       'node-plane-backend-v8', 'node-plane-backend-v9')
             old_credentials = payload['format'] not in ('node-plane-backend-v5', 'node-plane-backend-v6',
-                                                        'node-plane-backend-v7', 'node-plane-backend-v8')
+                                                        'node-plane-backend-v7', 'node-plane-backend-v8',
+                                                        'node-plane-backend-v9')
             before_v6 = payload['format'] not in ('node-plane-backend-v6', 'node-plane-backend-v7',
-                                                  'node-plane-backend-v8')
-            before_v7 = payload['format'] not in ('node-plane-backend-v7', 'node-plane-backend-v8')
-            before_v8 = payload['format'] != 'node-plane-backend-v8'
+                                                  'node-plane-backend-v8', 'node-plane-backend-v9')
+            before_v7 = payload['format'] not in ('node-plane-backend-v7', 'node-plane-backend-v8',
+                                                  'node-plane-backend-v9')
+            before_v8 = payload['format'] not in ('node-plane-backend-v8', 'node-plane-backend-v9')
+            before_v9 = payload['format'] != 'node-plane-backend-v9'
             expected_tables = (set(TABLES) - (set(TABLE_COLUMNS) if old_policy else set())
                 - ({'backend_devices'} if legacy else set()) - ({'backend_vpn_policies'} if old_vpn_policy else set())
                 - ({'backend_device_credentials'} if old_credentials else set())
                 - ({'backend_retired_peers', 'backend_quota_state', 'backend_quota_periods'} if before_v6 else set())
                 - ({'backend_tariffs', 'backend_profile_tariffs'} if before_v7 else set())
-                - ({'backend_role_assignments'} if before_v8 else set()))
+                - ({'backend_role_assignments'} if before_v8 else set())
+                - ({'backend_logins'} if before_v9 else set()))
             if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
                                          'node-plane-backend-v4', 'node-plane-backend-v5', 'node-plane-backend-v6',
-                                         'node-plane-backend-v7', 'node-plane-backend-v8'
-                                         ) or set(payload['tables']) != expected_tables:
+                                         'node-plane-backend-v7', 'node-plane-backend-v8',
+                                         'node-plane-backend-v9') or set(payload['tables']) != expected_tables:
                 raise ValueError()
             if (
                 hashlib.sha256(encoded(payload["tables"])).hexdigest()
@@ -335,6 +340,10 @@ class BackupService:
                     'columns': ['account_id', 'role_id', 'scope_kind', 'scope_id'],
                     'rows': [{'account_id': row['id'], 'role_id': 'owner', 'scope_kind': 'installation', 'scope_id': ''}
                              for row in payload['tables']['backend_accounts']['rows'] if row['role'] == 'admin']}
+            if before_v9:
+                # Nor logins.
+                payload['tables']['backend_logins'] = {
+                    'columns': ['key', 'login', 'account_id', 'kind', 'claimed_at', 'released_at'], 'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -621,7 +630,8 @@ class BackupService:
                     rows = [r for r in rows if r['id'] not in deleted_accounts]
                 elif table == "backend_profiles":
                     rows = [r for r in rows if r['id'] not in deleted_profiles]
-                elif table in {"backend_external_identities", "backend_access_requests", "backend_role_assignments"}:
+                elif table in {"backend_external_identities", "backend_access_requests", "backend_role_assignments",
+                               "backend_logins"}:
                     rows = [r for r in rows if r['account_id'] not in deleted_accounts]
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
@@ -653,7 +663,7 @@ class BackupService:
                 pass
         backup_id = snapshot_id or str(uuid4())
         payload = {
-            "format": "node-plane-backend-v8",
+            "format": "node-plane-backend-v9",
             "created_at": now(),
             "trigger": trigger,
             "app_version": APP_VERSION,
@@ -713,7 +723,9 @@ class BackupService:
                     (actor.account.id,),
                 ).fetchall()
             ]
-            # The restoring administrator keeps the roles it has now.
+            # The restoring administrator keeps its login, and the roles it has now.
+            own_logins = [dict(r) for r in conn.execute(
+                "SELECT * FROM backend_logins WHERE account_id=?", (actor.account.id,)).fetchall()]
             own_roles = [
                 dict(r)
                 for r in conn.execute(
@@ -780,9 +792,13 @@ class BackupService:
             conn.execute("DELETE FROM backend_credentials WHERE account_id IS NOT NULL")
             for table in CLEAR + tuple(reversed(TABLES)):
                 conn.execute(f"DELETE FROM {table}")
+            own_keys = {row["key"] for row in own_logins}
             for table in TABLES:
                 columns = tables[table]["columns"]
                 for row in tables[table]["rows"]:
+                    if table == "backend_logins" and (row["account_id"] == actor.account.id or row["key"] in own_keys):
+                        # The restoring administrator's own logins are put back below.
+                        continue
                     if table == "backend_nodes":
                         row.update(
                             enabled=0,
@@ -807,6 +823,9 @@ class BackupService:
                         f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
                         tuple(row[c] for c in columns),
                     )
+            for row in own_logins:
+                conn.execute(f"INSERT INTO backend_logins ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
+                             tuple(row.values()))
             conn.execute("DELETE FROM backend_role_assignments WHERE account_id=?", (actor.account.id,))
             for row in own_roles:
                 conn.execute(

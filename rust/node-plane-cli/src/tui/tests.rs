@@ -9580,6 +9580,38 @@ fn role_picker_promotes_with_role_and_assigns_presets_with_roles() {
 }
 
 #[test]
+fn an_administrator_changes_an_accounts_login_on_its_card() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Accounts;
+    app.access.card = Some(serde_json::json!(
+        {"id":"account", "role":"member", "status":"approved", "revision":7, "login":"carol"}
+    ));
+    app.activate(Control::AccessLogin);
+    assert_eq!(app.access.login_input.as_deref(), Some("carol"));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::AccessLoginInput);
+    for key in [KeyCode::Backspace, KeyCode::Char('2')] {
+        app.access_key(key.into());
+    }
+    assert_eq!(app.access.login_input.as_deref(), Some("caro2"));
+    app.access_key(KeyCode::Enter.into());
+    let Some(crate::nodes::Command::Access(crate::access::Command::AccountMutate {
+        revision,
+        body,
+        ..
+    })) = app.nodes_requested.take()
+    else {
+        panic!("the login is saved");
+    };
+    assert_eq!((revision, body), (7, serde_json::json!({"login":"caro2"})));
+    assert!(crate::access::login_error("{\"code\":\"login_taken\"}").contains("taken"));
+    app.activate(Control::AccessBack);
+    assert!(app.access.login_input.is_none());
+}
+
+#[test]
 fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
     use crate::controller::Command;
     let mut app = test_profile_app();

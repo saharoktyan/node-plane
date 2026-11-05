@@ -1225,8 +1225,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sound = sections[1].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(len(sections), 3)
+        self.assertEqual(len(sections), 4)
         self.assertEqual(sections[2].title, 'Service notifications')
+        self.assertEqual(sections[3].title, 'Login')
 
     async def test_service_notification_choices_highlight_saved_mode_and_update_backend(self):
         for mode in ('on', 'silent', 'off'):

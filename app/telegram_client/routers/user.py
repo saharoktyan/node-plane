@@ -1386,6 +1386,8 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 button(user_id, tr(locale, 'ui.service.' + mode), 'service_notifications', mode)
                     .model_copy(update={'style': 'primary' if service == mode else None})
                 for mode in ('on', 'silent', 'off')),)))
+        from .account_login import settings_section as login_section
+        sections.append(login_section(locale, user_id, current))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
