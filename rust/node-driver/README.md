@@ -19,6 +19,7 @@ cargo test --locked --manifest-path rust/node-driver/Cargo.toml
 | `NODE_AGENT_CLIENT_CERT` / `NODE_AGENT_CLIENT_KEY` | Driver mutual-TLS identity |
 | `NODE_PLANE_APP_DIR` / `NODE_PLANE_SHARED_DIR` | Active application and shared state |
 | `NODE_PLANE_API_URL` | Controller API for relay links; default `http://127.0.0.1:8080` |
+| `NODE_PLANE_RELAY_CA_FILE` | PEM root that relay links trust instead of the WebPKI roots, for a relay certificate from a private CA |
 
 The driver loads shared environment settings without overriding explicit process values. The runtime bundle is selected through `runtime_assets/manifest.json`.
 

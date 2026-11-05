@@ -140,7 +140,12 @@ impl DriverContext {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
-        let relays = relays::Relays::open(relay_dir, api).map_err(std::io::Error::other)?;
+        let relay_ca = match env::var("NODE_PLANE_RELAY_CA_FILE") {
+            Ok(path) if !path.trim().is_empty() => Some(std::fs::read(&path)?),
+            _ => None,
+        };
+        let relays =
+            relays::Relays::open(relay_dir, api, relay_ca).map_err(std::io::Error::other)?;
         Ok(Self {
             relays,
             state: DriverState::open(operations_path)?,

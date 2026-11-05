@@ -33,6 +33,9 @@ pub struct Relays {
     dir: PathBuf,
     key: Arc<Ed25519KeyPair>,
     api: String,
+    /// A PEM root the links trust instead of the WebPKI roots, for a relay
+    /// with a certificate from a private CA.
+    ca: Option<Vec<u8>>,
     links: Mutex<HashMap<String, Running>>,
 }
 
@@ -47,12 +50,13 @@ pub fn url(domain: &str, port: u32, tls: &str) -> String {
 
 impl Relays {
     /// Loads the key and the pinned relays, and links to each of them.
-    pub fn open(dir: PathBuf, api: String) -> Result<Arc<Self>, String> {
+    pub fn open(dir: PathBuf, api: String, ca: Option<Vec<u8>>) -> Result<Arc<Self>, String> {
         let key = Arc::new(keys::load_or_create(&dir.join("link.key"))?);
         let relays = Arc::new(Self {
             dir,
             key,
             api,
+            ca,
             links: Mutex::new(HashMap::new()),
         });
         for entry in relays.load()? {
@@ -68,7 +72,7 @@ impl Relays {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("driver-relays-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        Self::open(dir, "http://127.0.0.1:9".into()).unwrap()
+        Self::open(dir, "http://127.0.0.1:9".into(), None).unwrap()
     }
 
     pub fn link_key(&self) -> Vec<u8> {
@@ -106,7 +110,7 @@ impl Relays {
             relay_key,
             key: self.key.clone(),
             api: self.api.clone(),
-            ca: None,
+            ca: self.ca.clone(),
             limits: link::Limits::default(),
             status: status.clone(),
         };
@@ -189,7 +193,7 @@ mod tests {
     async fn pinned_relays_survive_a_restart() {
         let dir = std::env::temp_dir().join(format!("driver-relays-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let relays = Relays::open(dir.clone(), "http://127.0.0.1:9".into()).unwrap();
+        let relays = Relays::open(dir.clone(), "http://127.0.0.1:9".into(), None).unwrap();
         let key = relays.link_key();
         relays.pin(entry("n1", "https://127.0.0.1:9")).unwrap();
         relays.pin(entry("n2", "https://127.0.0.1:9")).unwrap();
@@ -197,7 +201,7 @@ mod tests {
         assert!(relays.status("n2").is_none());
         drop(relays);
 
-        let again = Relays::open(dir.clone(), "http://127.0.0.1:9".into()).unwrap();
+        let again = Relays::open(dir.clone(), "http://127.0.0.1:9".into(), None).unwrap();
         assert_eq!(again.link_key(), key);
         let (pinned, status) = again.status("n1").unwrap();
         assert_eq!(pinned, entry("n1", "https://127.0.0.1:9"));
