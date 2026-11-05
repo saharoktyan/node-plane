@@ -33,7 +33,8 @@ LEGAL_FILES = {'LICENSE', 'THIRD_PARTY_LICENSES'}
 PYTHON_PROJECT_FILES = {'pyproject.toml', 'uv.lock'}
 ROOT_FILES = {'VERSION', 'RELEASE_CHANNEL', '.env.example'} | PYTHON_PROJECT_FILES | LEGAL_FILES
 REQUIRED = (ROOT_FILES - {'THIRD_PARTY_LICENSES'}) | {'app/backend/http_api.py', 'app/backend/executor.py',
-                        'app/telegram_client/main.py', 'app/services/release_versions.py', 'runtime_assets/manifest.json'} | {'scripts/' + s for s in SCRIPTS}
+                        'app/telegram_client/main.py', 'app/services/release_versions.py', 'runtime_assets/manifest.json',
+                        'sdk/python/node_plane_sdk/client.py'} | {'scripts/' + s for s in SCRIPTS}
 BUILD_REQUIRED = REQUIRED | LEGAL_FILES
 TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
@@ -50,7 +51,7 @@ def allowed(name, *, forward_compatible=False):
     if forward_compatible:
         return True
     return name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
-        name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts) or (
+        name.startswith(('app/', 'sdk/python/')) and path.suffix == '.py' and '__pycache__' not in path.parts) or (
         name.startswith('runtime_assets/') and '__pycache__' not in path.parts
         and (path.suffix in {'.py', '.sh', '.json'} or path.name in {'Dockerfile', 'node.env.example'})
         and not any(part.startswith('.') for part in path.parts))

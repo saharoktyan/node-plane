@@ -39,9 +39,10 @@ def run(suite: str) -> int:
 
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / 'app'))
+    sys.path.insert(0, str(ROOT / 'sdk' / 'python'))
     # Fault fixtures launch Python workers/RPC servers in child processes.
     # sys.path alone does not propagate their application imports.
-    os.environ['PYTHONPATH'] = os.pathsep.join((str(ROOT / 'app'), str(ROOT),
+    os.environ['PYTHONPATH'] = os.pathsep.join((str(ROOT / 'app'), str(ROOT), str(ROOT / 'sdk' / 'python'),
                                                os.environ.get('PYTHONPATH', '')))
     names = [f'tests.{path.stem}' for path in sorted((ROOT / 'tests').glob('test_*.py'))
              if suite_for(path.stem) == suite]
