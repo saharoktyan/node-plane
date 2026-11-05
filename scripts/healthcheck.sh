@@ -162,6 +162,12 @@ check_file_exists() {
   fi
 }
 
+bot_configured() {
+  local token
+  token="$(read_env_value BOT_TOKEN)"
+  [[ -n "$token" && "$token" != "replace_me" && "$token" != "none" ]]
+}
+
 systemd_unit_installed() {
   has_cmd systemctl && [[ "$(systemctl show node-plane-telegram.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]
 }
@@ -196,25 +202,24 @@ check_env() {
   admin_ids="$(read_env_value ADMIN_IDS)"
   adapter_token_file="$(read_env_value NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE)"
 
-  if [[ -n "$bot_token" && "$bot_token" != "replace_me" ]]; then
+  # The Telegram bot is optional; without a token there is nothing to check.
+  if [[ -z "$bot_token" || "$bot_token" == "replace_me" || "$bot_token" == "none" ]]; then
+    ok "Installed without the Telegram bot"
+  else
     ok "BOT_TOKEN is configured"
-  else
-    fail "BOT_TOKEN is missing or still set to placeholder"
-    add_remediation "Set BOT_TOKEN in $ENV_FILE"
-  fi
+    if [[ -n "$admin_ids" && "$admin_ids" != "123456789" ]]; then
+      ok "ADMIN_IDS is configured"
+    else
+      fail "ADMIN_IDS is missing or still set to placeholder"
+      add_remediation "Set ADMIN_IDS in $ENV_FILE to your Telegram numeric user id"
+    fi
 
-  if [[ -n "$admin_ids" && "$admin_ids" != "123456789" ]]; then
-    ok "ADMIN_IDS is configured"
-  else
-    fail "ADMIN_IDS is missing or still set to placeholder"
-    add_remediation "Set ADMIN_IDS in $ENV_FILE to your Telegram numeric user id"
-  fi
-
-  if [[ -n "$adapter_token_file" && -f "$adapter_token_file" && -r "$adapter_token_file" ]]; then
-    ok "backend adapter credential is available"
-  else
-    fail "backend adapter credential is missing or unreadable"
-    add_remediation "Rerun ./scripts/install.sh --mode simple to create the aiogram adapter credential"
+    if [[ -n "$adapter_token_file" && -f "$adapter_token_file" && -r "$adapter_token_file" ]]; then
+      ok "backend adapter credential is available"
+    else
+      fail "backend adapter credential is missing or unreadable"
+      add_remediation "Rerun ./scripts/install.sh --mode simple to create the aiogram adapter credential"
+    fi
   fi
 
   ok "Application directory: $APP_DIR"
@@ -330,6 +335,10 @@ check_simple_mode() {
         warn "${bot_service} is not active"
         add_remediation "Start the selected bot service with systemctl after checking its configuration"
       fi
+    elif ! bot_configured; then
+      ok "No Telegram bot unit (installed without the bot)"
+      systemd_ok=1
+      service_active_ok=1
     else
       warn "systemd unit node-plane-telegram.service is not installed"
       add_remediation "Install the unit: ./scripts/install.sh --mode simple --install-systemd"

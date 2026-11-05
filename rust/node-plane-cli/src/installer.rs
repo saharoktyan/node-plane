@@ -579,6 +579,9 @@ const CHECK_WORK_OWNER: &str = r#"
 
 const VERIFY: &str = r#"
 set -eu
+# The Telegram bot is optional; an installation without it has no unit.
+bot=0
+[ "$(systemctl show -p LoadState --value node-plane-telegram.service 2>/dev/null)" = loaded ] && bot=1
 check_polling_conflict() {
     if [ -f /opt/node-plane/shared/data/telegram-polling-conflict.json ]; then
         echo 'Another installation is using this Telegram bot token. Stop its bot, then restart node-plane-telegram.service and run Check installation.'
@@ -587,7 +590,7 @@ check_polling_conflict() {
 }
 check_polling_conflict
 # Validate getMe through the installed runtime without putting the token in argv.
-NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app /opt/node-plane/current/.venv/bin/python - <<'PY'
+[ "$bot" = 0 ] || NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app /opt/node-plane/current/.venv/bin/python - <<'PY'
 import asyncio
 from config import BOT_TOKEN
 from aiogram import Bot
@@ -611,7 +614,9 @@ PY
 for attempt in $(seq 1 20); do
     healthy=1
     check_polling_conflict
-    for unit in node-plane-backend.service node-plane-telegram.service node-plane-driver.service node-plane-backend-worker.service; do
+    units='node-plane-backend.service node-plane-driver.service node-plane-backend-worker.service'
+    [ "$bot" = 0 ] || units="$units node-plane-telegram.service"
+    for unit in $units; do
         systemctl is-active --quiet "$unit" || healthy=0
     done
     curl -fsS --max-time 3 http://127.0.0.1:8080/health/ready >/dev/null || healthy=0
@@ -619,6 +624,10 @@ for attempt in $(seq 1 20); do
     sleep 2
 done
 [ "$healthy" = 1 ] || { echo 'Some services or backend readiness are unavailable. Run Check installation before retrying.'; exit 20; }
+if [ "$bot" = 0 ]; then
+    echo 'Backend, driver and worker are ready (no Telegram bot)'
+    exit 0
+fi
 # A restart loop can briefly be active; require a stable Telegram process.
 pid=$(systemctl show -p MainPID --value node-plane-telegram.service)
 sleep 8

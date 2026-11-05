@@ -153,10 +153,14 @@ def observe():
         add('file:' + relative, 'ok' if path.exists() else 'error',
             f'{path}: present' if path.exists() else f'{path}: missing')
     env_path = BASE / 'shared/.env'
+    bot = True
     try:
-        keys = {line.split('=', 1)[0].strip() for line in env_path.read_text().splitlines()
-                if '=' in line and not line.lstrip().startswith('#') and line.split('=', 1)[1].strip()}
-        missing = sorted({'POSTGRES_DSN', 'BOT_TOKEN', 'ADMIN_IDS'} - keys)
+        values = dict(line.split('=', 1) for line in env_path.read_text().splitlines()
+                      if '=' in line and not line.lstrip().startswith('#'))
+        keys = {key.strip() for key, value in values.items() if value.strip()}
+        # The Telegram bot is optional; without its token, its keys and unit are not expected.
+        bot = values.get('BOT_TOKEN', '').strip() not in {'', 'replace_me', 'none'}
+        missing = sorted(({'POSTGRES_DSN'} | ({'BOT_TOKEN', 'ADMIN_IDS'} if bot else set())) - keys)
         add('environment', 'error' if missing else 'ok',
             'Missing configuration keys: ' + ', '.join(missing) if missing else 'Required configuration keys present (values hidden)')
     except OSError:
@@ -191,6 +195,8 @@ def observe():
     if db.get('maintenance'):
         add('maintenance', 'warning', 'Controller maintenance is active or blocked; automatic service recovery is unavailable')
     for unit in UNITS:
+        if unit == 'node-plane-telegram.service' and not bot:
+            continue
         state = unit_state(unit)
         active = state.get('ActiveState', 'unknown')
         loaded = state.get('LoadState') == 'loaded'

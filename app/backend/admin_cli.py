@@ -94,6 +94,8 @@ def main():
     profile.add_argument('--runtime-name', required=True)
     profile.add_argument('--display-name', required=True)
     profile.add_argument('--owner-account-id')
+    channels = commands.add_parser('channels', help='Show or change the channels this installation runs')
+    channels.add_argument('--telegram', choices=['on', 'off'])
     revoke = commands.add_parser('revoke-token')
     revoke.add_argument('--id', required=True)
     repair = commands.add_parser('resolve-blocked')
@@ -159,6 +161,15 @@ def main():
         elif args.command == 'bootstrap-admin':
             account = bootstrap_admin(identities, args.telegram_id, db, name=args.name)
             print(f'Administrator account: {account.id}')
+        elif args.command == 'channels':
+            import json
+            from .account_channels import enabled, set_enabled
+            with db.transaction() as conn:
+                current = enabled(conn)
+                if args.telegram is not None:
+                    current = set_enabled(conn, current | {'telegram'} if args.telegram == 'on'
+                                          else current - {'telegram'})
+            print(json.dumps({'channels': sorted(current)}))
         elif args.command == 'create-account':
             account = identities.create_account(status=args.status)
             ProfileRepository(db).ensure_account_profile(account.id)

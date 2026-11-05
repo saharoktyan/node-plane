@@ -130,6 +130,26 @@ esac
                 self.assertNotIn(secret, res_physical.stderr)
             self.assertFalse(canary.exists())
 
+    def test_installation_without_the_bot_is_healthy_without_its_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, release, current, shared, bins, canary = self._create_layout(directory)
+            (shared / ".env").write_text("BOT_TOKEN=\nADMIN_IDS=\nDB_BACKEND=postgres\n"
+                                         "POSTGRES_DSN=postgresql://u:p@127.0.0.1:5432/db\n")
+            (bins / "systemctl").write_text("""#!/bin/sh
+case "$*" in
+  *node-plane-telegram*) echo not-found; exit 0;;
+esac
+case "$1" in show) echo loaded;; is-active) exit 0;; *) exit 0;; esac
+""")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("NODE_PLANE_")}
+            env["PATH"] = f"{bins}:{env.get('PATH', '')}"
+            result = subprocess.run(["bash", str(current / "scripts" / "healthcheck.sh")],
+                                    env=env, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Installed without the Telegram bot", result.stdout)
+            self.assertIn("No Telegram bot unit", result.stdout)
+            self.assertNotIn("[FAIL]", result.stdout)
+
     def test_missing_environment_and_failed_dependencies_retain_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root, release, current, shared, bins, canary = self._create_layout(directory)

@@ -88,5 +88,10 @@ ln -sfn "$RELEASE_DIR" "$APP_DIR"
 SHARED_DIR="$(read_env_value NODE_PLANE_SHARED_DIR)"
 SHARED_DIR="${SHARED_DIR:-${BASE_DIR}/shared}"
 sudo bash "${RELEASE_DIR}/scripts/install_backend_systemd.sh" "$BASE_DIR" "$SHARED_DIR"
-sudo systemctl restart node-plane-telegram.service
-sudo systemctl status node-plane-backend.service node-plane-telegram.service --no-pager || true
+# The Telegram bot is optional; an installation without it has no unit.
+if [[ "$(sudo systemctl show node-plane-telegram.service --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; then
+  sudo systemctl restart node-plane-telegram.service
+  sudo systemctl status node-plane-backend.service node-plane-telegram.service --no-pager || true
+else
+  sudo systemctl status node-plane-backend.service --no-pager || true
+fi

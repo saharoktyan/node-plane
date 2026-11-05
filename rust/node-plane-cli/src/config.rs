@@ -225,21 +225,26 @@ impl Request {
                 !self.admin_ids.chars().any(char::is_control),
                 "Administrator IDs must fit on a single line."
             );
+            // Without a bot token the controller is installed without the
+            // Telegram bot; administrator IDs are then not used.
+            let with_bot = !self.bot_token.is_empty();
             let (bot_id, secret) = self.bot_token.split_once(':').unwrap_or_default();
             ensure!(
-                valid_telegram_id(bot_id)
-                    && secret.len() >= 20
-                    && secret
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+                !with_bot
+                    || valid_telegram_id(bot_id)
+                        && secret.len() >= 20
+                        && secret
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
                 "Telegram bot token: paste the token from BotFather (numeric bot ID, colon, then the secret)."
             );
             ensure!(
-                !self.admin_ids.is_empty()
-                    && self
-                        .admin_ids
-                        .split(',')
-                        .all(|id| valid_telegram_id(id.trim())),
+                !with_bot
+                    || !self.admin_ids.is_empty()
+                        && self
+                            .admin_ids
+                            .split(',')
+                            .all(|id| valid_telegram_id(id.trim())),
                 "Administrator IDs: enter positive numeric Telegram user IDs, separated by commas; usernames and bot tokens are not IDs."
             );
         }
@@ -263,14 +268,25 @@ impl Request {
     }
 
     pub fn env_file(&self) -> Zeroizing<String> {
+        // Without the bot, the first administrator is an account by name
+        // that Workstation signs in to.
+        let admin_name = if self.bot_token.is_empty() {
+            "NODE_PLANE_ADMIN_NAME=Administrator\n"
+        } else {
+            ""
+        };
         Zeroizing::new(format!(
-            "BOT_TOKEN={}\nADMIN_IDS={}\nMODE=simple\nNODE_PLANE_BASE_DIR=/opt/node-plane\nNODE_PLANE_APP_DIR=/opt/node-plane/current\nNODE_PLANE_SHARED_DIR=/opt/node-plane/shared\nSSH_KEY=/opt/node-plane/shared/ssh/id_ed25519\nDB_BACKEND=postgres\nNODE_PLANE_UPDATE_BRANCH={}\nNODE_PLANE_CONTROLLER_HOST={}\n",
+            "BOT_TOKEN={}\nADMIN_IDS={}\n{admin_name}MODE=simple\nNODE_PLANE_BASE_DIR=/opt/node-plane\nNODE_PLANE_APP_DIR=/opt/node-plane/current\nNODE_PLANE_SHARED_DIR=/opt/node-plane/shared\nSSH_KEY=/opt/node-plane/shared/ssh/id_ed25519\nDB_BACKEND=postgres\nNODE_PLANE_UPDATE_BRANCH={}\nNODE_PLANE_CONTROLLER_HOST={}\n",
             *self.bot_token,
-            self.admin_ids
-                .split(',')
-                .map(str::trim)
-                .collect::<Vec<_>>()
-                .join(","),
+            if self.bot_token.is_empty() {
+                ""
+            } else {
+                &self.admin_ids
+            }
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(","),
             self.branch,
             self.host
         ))
@@ -391,5 +407,23 @@ mod tests {
         assert!(r.validate().is_err());
         r.action = Action::Diagnose;
         assert!(r.validate().is_ok());
+    }
+    #[test]
+    fn install_without_a_bot_token_has_no_telegram_settings() {
+        let r = Request {
+            action: Action::Install,
+            host: "vps.example".into(),
+            port: 22,
+            user: "root".into(),
+            state_dir: PathBuf::new(),
+            tag: String::new(),
+            branch: default_branch().into(),
+            admin_ids: "42".into(),
+            bot_token: Zeroizing::new(String::new()),
+            workflow: WorkflowOptions::default(),
+        };
+        assert!(r.validate().is_ok());
+        let env = r.env_file();
+        assert!(env.starts_with("BOT_TOKEN=\nADMIN_IDS=\nNODE_PLANE_ADMIN_NAME=Administrator\n"));
     }
 }

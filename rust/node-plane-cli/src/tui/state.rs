@@ -497,22 +497,25 @@ impl Form {
                 value.is_empty() || crate::config::valid_tag(value),
                 "Enter a release tag such as v1.0.0-beta.1, or leave blank for latest."
             ),
+            // Administrator IDs are for the bot; without a token there is none.
             5 => anyhow::ensure!(
-                !value.is_empty()
-                    && value
-                        .split(',')
-                        .all(|id| crate::config::valid_telegram_id(id.trim())),
+                self.fields[6].trim().is_empty() && value.is_empty()
+                    || !value.is_empty()
+                        && value
+                            .split(',')
+                            .all(|id| crate::config::valid_telegram_id(id.trim())),
                 "Enter positive numeric Telegram administrator IDs separated by commas."
             ),
             6 => {
                 let (id, secret) = value.split_once(':').unwrap_or_default();
                 anyhow::ensure!(
-                    crate::config::valid_telegram_id(id)
-                        && secret.len() >= 20
-                        && secret
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
-                    "Paste the Telegram bot token from BotFather."
+                    value.is_empty()
+                        || crate::config::valid_telegram_id(id)
+                            && secret.len() >= 20
+                            && secret
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
+                    "Paste the Telegram bot token from BotFather, or leave it blank to install without the bot."
                 );
             }
             7 => Installation::validate_field(6, value)?,

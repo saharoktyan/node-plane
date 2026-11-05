@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Install without the Telegram bot: leave the bot token empty (in the
+  installer or Workstation's Install) and the controller is installed with
+  no bot service; its first administrator is an account by name
+  (`NODE_PLANE_ADMIN_NAME`, default `Administrator`) that Workstation signs
+  in to, and Telegram delivery is off. Update, rollback, health check,
+  installation diagnostics and Workstation's final check treat a missing
+  bot service as expected. `admin_cli channels [--telegram on|off]` shows or
+  changes the installation's channels.
 - Show the account's name in access requests: requests carry
   `display_name` (the account's, or a visitor's Telegram name), search finds
   it, and Workstation's Requests tab shows it first.

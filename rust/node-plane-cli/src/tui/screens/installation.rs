@@ -15,8 +15,8 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
         "SSH user",
         "Update channel (main / beta / dev)",
         "Release tag (blank = latest)",
-        "Telegram administrator ID(s)",
-        "BotFather token (hidden)",
+        "Telegram administrator ID(s) (with the bot)",
+        "BotFather token (hidden; blank = no Telegram bot)",
         "Administrator account (UUID / Telegram ID; blank = only admin)",
         "Offer service and operation recovery (confirmation required)",
     ];

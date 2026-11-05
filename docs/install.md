@@ -27,11 +27,11 @@ cd /opt/node-plane-install
 
 `--branch dev` selects a published development release; `--branch main` selects stable. Add `--ref vX.Y.Z` to the download command to select a specific tag. A download needs a published release with its artifacts.
 
-Enter the bot token and administrator IDs when prompted. Leave `POSTGRES_DSN` empty to provision local PostgreSQL, or supply a DSN for an existing database. The installer prepares the Python environment, database schema, controller services and driver.
+Enter the bot token and administrator IDs when prompted, or leave the token empty to install without the Telegram bot: the controller then has no bot service, and its first administrator is an account with the name you enter, which Workstation signs in to. Leave `POSTGRES_DSN` empty to provision local PostgreSQL, or supply a DSN for an existing database. The installer prepares the Python environment, database schema, controller services and driver.
 
 ## Unattended installation
 
-Create a private environment file using [`.env.example`](../.env.example). Fill `BOT_TOKEN` and `ADMIN_IDS`; use comma-separated numeric IDs. Include `POSTGRES_DSN` for an external database.
+Create a private environment file using [`.env.example`](../.env.example). Fill `BOT_TOKEN` and `ADMIN_IDS` (comma-separated numeric IDs) for the bot, or leave both empty and set `NODE_PLANE_ADMIN_NAME` to install without it. Include `POSTGRES_DSN` for an external database.
 
 ```sh
 chmod 600 /root/node-plane.env
@@ -44,8 +44,9 @@ Keep the environment file private. Do not paste its contents into logs or suppor
 
 | Variable | Meaning |
 | --- | --- |
-| `BOT_TOKEN` | Telegram bot token |
-| `ADMIN_IDS` | Initial administrators' numeric Telegram IDs |
+| `BOT_TOKEN` | Telegram bot token; empty installs without the bot |
+| `ADMIN_IDS` | Initial administrators' numeric Telegram IDs (with the bot) |
+| `NODE_PLANE_ADMIN_NAME` | First administrator's name without the bot; default `Administrator` |
 | `POSTGRES_DSN` | External PostgreSQL connection; empty selects local provisioning |
 | `NODE_PLANE_BASE_DIR` | Installation root; default `/opt/node-plane` |
 | `NODE_PLANE_SHARED_DIR` | Persistent shared state; default `/opt/node-plane/shared` |

@@ -131,6 +131,33 @@ class InstallationDiagnosticsTests(unittest.TestCase):
             self.assertEqual(check['status'], 'error')
             self.assertIn('other installation', check['detail'])
 
+    def test_installation_without_the_bot_needs_neither_its_keys_nor_its_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / 'shared').mkdir()
+            (base / 'shared/.env').write_text('POSTGRES_DSN=postgresql://x\nBOT_TOKEN=\nADMIN_IDS=\n')
+            units = []
+            def state(unit):
+                units.append(unit)
+                return {'LoadState': 'loaded', 'ActiveState': 'active'}
+            with patch.object(diagnostics, 'BASE', base), \
+                 patch.object(diagnostics, 'installed_database', return_value={'status': 'ok'}), \
+                 patch.object(diagnostics, 'unit_state', side_effect=state), \
+                 patch.object(diagnostics.urllib.request, 'urlopen', side_effect=OSError):
+                report = diagnostics.observe()
+            environment = next(c for c in report['checks'] if c['id'] == 'environment')
+            self.assertEqual(environment['status'], 'ok')
+            self.assertNotIn('node-plane-telegram.service', units)
+            (base / 'shared/.env').write_text('POSTGRES_DSN=postgresql://x\nBOT_TOKEN=1:x\n')
+            with patch.object(diagnostics, 'BASE', base), \
+                 patch.object(diagnostics, 'installed_database', return_value={'status': 'ok'}), \
+                 patch.object(diagnostics, 'unit_state', side_effect=state), \
+                 patch.object(diagnostics.urllib.request, 'urlopen', side_effect=OSError):
+                report = diagnostics.observe()
+            environment = next(c for c in report['checks'] if c['id'] == 'environment')
+            self.assertIn('ADMIN_IDS', environment['detail'])
+            self.assertIn('node-plane-telegram.service', units)
+
     def test_schema_mismatch_is_reported_and_does_not_offer_service_repair(self):
         with patch.object(diagnostics, 'installed_database', return_value={'status':'ok','schema_valid':False,'maintenance':False}), \
              patch.object(diagnostics, 'unit_state', return_value={'LoadState':'loaded','ActiveState':'failed'}), \

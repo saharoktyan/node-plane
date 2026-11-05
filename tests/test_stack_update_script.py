@@ -111,6 +111,28 @@ rollback_simple {shlex.quote(str(previous))} {shlex.quote(str(link))} {shlex.quo
                 self.assertEqual(value['rollback_status'], 'succeeded' if healthy else 'failed')
                 self.assertEqual(value['components'][component], 'failed')
 
+    def test_without_the_bot_health_is_the_backend_s(self):
+        script = (ROOT / 'scripts/update.sh').read_text()
+        functions = script[script.index('bot_installed() {'):script.index('rollback_simple() {')]
+        for ready, expected in ((True, 0), (False, 1)):
+            with self.subTest(ready=ready), tempfile.TemporaryDirectory() as directory:
+                python = Path(directory) / '.venv/bin/python'
+                python.parent.mkdir(parents=True)
+                python.write_text('#!/bin/sh\nexit ' + ('0' if ready else '1') + '\n')
+                python.chmod(0o755)
+                source = f'''set -euo pipefail
+sudo() {{ "$@"; }}
+systemctl() {{ case "$1" in show) echo not-found;; is-active) [ "$3" != node-plane-telegram.service ];; esac; }}
+sleep() {{ :; }}
+SIMPLE_BOT_SERVICE=node-plane-telegram.service
+STACK_JOB=
+STACK_CURRENT_LINK={shlex.quote(directory)}
+{functions}
+wait_for_service 6
+'''
+                result = subprocess.run(['bash', '-c', source], capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+
     def test_failed_snapshot_never_restores_an_unvisited_file_as_absent(self):
         update = (ROOT / 'scripts/update.sh').read_text()
         handler = update[update.index('on_error() {'):update.index("trap 'on_error $?' ERR")]

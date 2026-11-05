@@ -469,11 +469,26 @@ sync_shared_env() {
   fi
 }
 
+admin_cli() {
+  local release_dir="$1" base_dir="$2" shared_dir="$3" postgres_dsn="$4"
+  shift 4
+  NODE_PLANE_BASE_DIR="$base_dir" NODE_PLANE_APP_DIR="$release_dir" \
+    NODE_PLANE_SHARED_DIR="$shared_dir" DB_BACKEND=postgres POSTGRES_DSN="$postgres_dsn" \
+    PYTHONPATH="${release_dir}/app" \
+    "${release_dir}/.venv/bin/python" -m backend.admin_cli "$@"
+}
+
 prepare_telegram_identity() {
   local release_dir="$1" base_dir="$2" shared_dir="$3" env_file="${shared_dir}/.env"
-  local admin_ids admin_id token_file postgres_dsn
+  local admin_ids admin_id token_file postgres_dsn admin_name
   admin_ids="$(read_env_value ADMIN_IDS "$env_file")"
   postgres_dsn="$(read_env_value POSTGRES_DSN "$env_file")"
+  if ! telegram_bot_configured "$(read_env_value BOT_TOKEN "$env_file")"; then
+    admin_name="$(read_env_value NODE_PLANE_ADMIN_NAME "$env_file")"
+    admin_cli "$release_dir" "$base_dir" "$shared_dir" "$postgres_dsn" bootstrap-admin --name "${admin_name:-Administrator}"
+    admin_cli "$release_dir" "$base_dir" "$shared_dir" "$postgres_dsn" channels --telegram off >/dev/null
+    return 0
+  fi
   IFS=',' read -ra ids <<< "$admin_ids"
   for admin_id in "${ids[@]}"; do
     admin_id="${admin_id//[[:space:]]/}"
@@ -566,32 +581,42 @@ configure_env() {
     exit 1
   fi
 
-  if [[ -z "$bot_token" || "$bot_token" == "replace_me" ]]; then
-    bot_token="$(prompt_value "Enter BOT_TOKEN" "")"
+  # The Telegram bot is optional; without a token the installation runs
+  # without it and its first administrator is an account known by name.
+  if ! telegram_bot_configured "$bot_token"; then
+    bot_token="$(prompt_value "Enter BOT_TOKEN, or leave empty to install without the Telegram bot" "")"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
-    bot_token="$(prompt_value "Enter BOT_TOKEN" "$bot_token")"
+    bot_token="$(prompt_value "Enter BOT_TOKEN, or 'none' for no Telegram bot" "$bot_token")"
+  fi
+  if ! telegram_bot_configured "$bot_token"; then
+    bot_token=""
   fi
 
-  if [[ -z "$bot_token" || "$bot_token" == "replace_me" ]]; then
-    echo "BOT_TOKEN is required." >&2
-    exit 1
-  fi
-  if ! valid_telegram_bot_token "$bot_token"; then
+  if [[ -n "$bot_token" ]] && ! valid_telegram_bot_token "$bot_token"; then
     echo "BOT_TOKEN has an invalid format. Paste the token from BotFather: numeric bot ID, colon, then the secret." >&2
     exit 1
   fi
 
-  if [[ -z "$admin_ids" || ( "$admin_ids" == "123456789" && $EXPLICIT_CONFIG_FILE -eq 0 ) ]]; then
+  local admin_name=""
+  if [[ -z "$bot_token" ]]; then
+    admin_ids=""
+    admin_name="$(read_env_value NODE_PLANE_ADMIN_NAME)"
+    admin_name="$(prompt_value "Enter the administrator's name (Workstation signs in to this account)" "${admin_name:-Administrator}")"
+    if ! valid_admin_name "$admin_name"; then
+      echo "The administrator's name must be 1-128 printable characters." >&2
+      exit 1
+    fi
+  elif [[ -z "$admin_ids" || ( "$admin_ids" == "123456789" && $EXPLICIT_CONFIG_FILE -eq 0 ) ]]; then
     admin_ids="$(prompt_value "Enter ADMIN_IDS (comma-separated Telegram numeric user ids)" "")"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     admin_ids="$(prompt_value "Enter ADMIN_IDS (comma-separated Telegram numeric user ids)" "$admin_ids")"
   fi
 
-  if [[ -z "$admin_ids" ]]; then
-    echo "ADMIN_IDS is required." >&2
+  if [[ -n "$bot_token" && -z "$admin_ids" ]]; then
+    echo "ADMIN_IDS is required with the Telegram bot." >&2
     exit 1
   fi
-  if ! valid_telegram_admin_ids "$admin_ids"; then
+  if [[ -n "$bot_token" ]] && ! valid_telegram_admin_ids "$admin_ids"; then
     echo "ADMIN_IDS must contain positive numeric Telegram user IDs, separated by commas; usernames and bot tokens are not IDs." >&2
     exit 1
   fi
@@ -711,6 +736,7 @@ configure_env() {
   fi
   set_env_value BOT_TOKEN "$bot_token"
   set_env_value ADMIN_IDS "$admin_ids"
+  set_env_value NODE_PLANE_ADMIN_NAME "$admin_name"
   set_env_value DB_BACKEND "$db_backend"
   if [[ -n "$postgres_dsn" ]]; then
     set_env_value POSTGRES_DSN "$postgres_dsn"
@@ -880,7 +906,7 @@ run_simple_install() {
     "${new_release_dir}/.venv/bin/python" -m backend.admin_cli init-schema
     install_progress_done
     install_progress_begin identity
-    set_step "prepare Telegram administrators and adapter credential"
+    set_step "prepare administrators and the bot credential"
     prepare_telegram_identity "$new_release_dir" "$base_dir" "$shared_dir"
   else
     echo "This release does not contain the separate backend installer. Select a supported release." >&2
@@ -913,13 +939,17 @@ run_simple_install() {
   echo "Shared state:"
   echo "  ${shared_dir}"
   echo
-  echo "Systemd services: node-plane-backend, node-plane-backend-worker, node-plane-telegram"
+  if telegram_bot_configured "$(read_env_value BOT_TOKEN "${shared_dir}/.env")"; then
+    echo "Systemd services: node-plane-backend, node-plane-backend-worker, node-plane-telegram"
+  else
+    echo "Systemd services: node-plane-backend, node-plane-backend-worker (no Telegram bot)"
+  fi
   echo
   if [[ $AUTO_INSTALL_SYSTEMD -eq 1 || $NON_INTERACTIVE -eq 1 ]]; then
     install_systemd_stack "$current_link" "$base_dir" "$shared_dir"
   elif [[ $NON_INTERACTIVE -eq 0 ]]; then
     local answer
-    read -r -p "Install and start the backend, worker, and Telegram client now? [Y/n]: " answer
+    read -r -p "Install and start the backend services now? [Y/n]: " answer
     if [[ "${answer:-y}" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then
       install_systemd_stack "$current_link" "$base_dir" "$shared_dir"
     fi
@@ -961,12 +991,20 @@ run_simple_install() {
   else
     echo "  2. Install the backend, worker, and Telegram client, then verify the host setup:"
     echo "     sudo ${current_link}/scripts/install_backend_systemd.sh ${base_dir} ${shared_dir}"
-    echo "     sudo ${current_link}/scripts/install_telegram_client_systemd.sh ${base_dir} ${shared_dir} --activate"
+    if telegram_bot_configured "$(read_env_value BOT_TOKEN "${shared_dir}/.env")"; then
+      echo "     sudo ${current_link}/scripts/install_telegram_client_systemd.sh ${base_dir} ${shared_dir} --activate"
+    fi
   fi
   echo "     ./scripts/healthcheck.sh --mode simple"
-  echo "  3. Open the bot from the Telegram account listed in ADMIN_IDS"
-  echo "  4. Send /start once"
-  echo "     The administrator account is already prepared in the backend"
+  if telegram_bot_configured "$(read_env_value BOT_TOKEN "${shared_dir}/.env")"; then
+    echo "  3. Open the bot from the Telegram account listed in ADMIN_IDS"
+    echo "  4. Send /start once"
+    echo "     The administrator account is already prepared in the backend"
+  else
+    echo "  3. Connect Workstation and choose the administrator"
+    echo "     \"$(read_env_value NODE_PLANE_ADMIN_NAME "${shared_dir}/.env")\" prepared in the backend"
+    echo "  4. Installed without the Telegram bot"
+  fi
   echo "  5. Add a node, install its agent, then apply its settings"
 }
 
@@ -974,8 +1012,10 @@ install_systemd_stack() {
   local current_link="$1" base_dir="$2" shared_dir="$3"
   set_step "install backend services"
   run_as_root bash "${current_link}/scripts/install_backend_systemd.sh" "$base_dir" "$shared_dir"
-  set_step "activate Telegram client"
-  run_as_root bash "${current_link}/scripts/install_telegram_client_systemd.sh" "$base_dir" "$shared_dir" --activate
+  if telegram_bot_configured "$(read_env_value BOT_TOKEN "${shared_dir}/.env")"; then
+    set_step "activate Telegram client"
+    run_as_root bash "${current_link}/scripts/install_telegram_client_systemd.sh" "$base_dir" "$shared_dir" --activate
+  fi
   AUTO_INSTALL_SYSTEMD=1
 }
 

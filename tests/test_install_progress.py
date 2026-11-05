@@ -211,7 +211,9 @@ esac
         self.assertIn('Simple mode environment is prepared.', result.stdout)
 
     def test_missing_credentials_fail_before_any_host_provisioning(self):
-        for values, error in (('BOT_TOKEN=replace_me\n', 'BOT_TOKEN is required'),
+        # Without a token the installation goes on without the bot; a malformed
+        # token or administrator list still stops it before provisioning.
+        for values, error in (('BOT_TOKEN=12345\n', 'invalid format'),
                               ('BOT_TOKEN=999:valid-test-token-xxxxxxxxxxxxxxxxxxxx\nADMIN_IDS=not-a-number\n', 'numeric Telegram')):
             with self.subTest(values=values):
                 self.config.write_text(values)

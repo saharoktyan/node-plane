@@ -26,3 +26,12 @@ valid_telegram_admin_ids() {
   done
   valid_telegram_id "$value"
 }
+
+# The Telegram bot is optional: an installation runs it only with a token.
+telegram_bot_configured() {
+  [[ -n "$1" && "$1" != "replace_me" && "$1" != "none" ]]
+}
+
+valid_admin_name() {
+  [[ ! "$1" =~ [[:cntrl:]] && "$1" =~ [^[:space:]] && ${#1} -le 128 ]]
+}

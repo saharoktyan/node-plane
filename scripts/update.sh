@@ -163,7 +163,7 @@ Flags:
   --skip-pull        Skip fetching Git refs in --from-source mode
   --skip-deps        Unsupported in release-based systemd updates.
   --skip-restart     Do not restart services after applying changes
-  --health-timeout   Seconds to wait for node-plane-telegram.service to become active after restart
+  --health-timeout   Seconds to wait for the services (the Telegram bot, if installed) to become healthy after restart
 EOF
       exit 0
       ;;
@@ -411,16 +411,25 @@ simple_paths() {
   printf '%s\n%s\n%s\n%s\n%s\n' "$base_dir" "$app_dir" "$shared_dir" "$releases_dir" "$current_link"
 }
 
+# The Telegram bot is optional: an installation without it has no unit.
+bot_installed() {
+  [[ "$(sudo systemctl show "$SIMPLE_BOT_SERVICE" --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]
+}
+
 wait_for_service() {
   local timeout="$1"
   local elapsed=0
   local stable=0
+  local services=(node-plane-backend.service)
+  if [[ -n "$STACK_JOB" ]]; then
+    services=(node-plane-driver.service node-plane-backend.service node-plane-backend-worker.service)
+  fi
   while (( elapsed < timeout )); do
-    if sudo systemctl is-active --quiet "$SIMPLE_BOT_SERVICE"; then
-      if [[ -z "$STACK_JOB" ]]; then
+    if ! bot_installed || sudo systemctl is-active --quiet "$SIMPLE_BOT_SERVICE"; then
+      if [[ -z "$STACK_JOB" ]] && bot_installed; then
         return 0
       fi
-      if sudo systemctl is-active --quiet node-plane-driver.service node-plane-backend.service node-plane-backend-worker.service \
+      if sudo systemctl is-active --quiet "${services[@]}" \
           && "${STACK_CURRENT_LINK}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
         stable=$((stable + 1))
         if [[ "$stable" -ge 3 ]]; then
@@ -466,7 +475,9 @@ rollback_simple() {
     stack_restore || restored=0
   fi
   sudo systemctl daemon-reload
-  sudo systemctl restart "$SIMPLE_BOT_SERVICE"
+  if bot_installed; then
+    sudo systemctl restart "$SIMPLE_BOT_SERVICE"
+  fi
   if [[ -n "$STACK_JOB" ]]; then
     sudo systemctl restart node-plane-driver.service || restored=0
     if [[ -f /etc/systemd/system/node-plane-backend-worker.timer ]]; then
@@ -848,29 +859,39 @@ PYDRIVER
     fi
   fi
 
-  echo "Restarting ${SIMPLE_BOT_SERVICE}..."
+  local bot_state=succeeded
   if [[ -n "$STACK_JOB" ]]; then
     stack_progress backend succeeded
     stack_progress worker succeeded
-    STACK_COMPONENT=telegram
-    stack_progress telegram running
   fi
-  set_step "restart ${SIMPLE_BOT_SERVICE}"
   sudo systemctl daemon-reload
-  if ! sudo systemctl restart "$SIMPLE_BOT_SERVICE"; then
-    echo "Service restart failed immediately."
-    rollback_simple "$previous_release" "$current_link" "$new_release_dir"
+  if bot_installed; then
+    echo "Restarting ${SIMPLE_BOT_SERVICE}..."
+    if [[ -n "$STACK_JOB" ]]; then
+      STACK_COMPONENT=telegram
+      stack_progress telegram running
+    fi
+    set_step "restart ${SIMPLE_BOT_SERVICE}"
+    if ! sudo systemctl restart "$SIMPLE_BOT_SERVICE"; then
+      echo "Service restart failed immediately."
+      rollback_simple "$previous_release" "$current_link" "$new_release_dir"
+    fi
+  else
+    echo "No Telegram bot on this installation; checking the backend."
+    bot_state=skipped
   fi
 
   if wait_for_service "$HEALTH_TIMEOUT"; then
     if [[ -n "$STACK_JOB" ]]; then
-      stack_progress telegram succeeded
+      stack_progress telegram "$bot_state"
       stack_progress status succeeded
       CORE_ARMED=0
       sudo rm -rf "$STACK_SNAPSHOT"
     fi
     echo "New release is healthy."
-    sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
+    if bot_installed; then
+      sudo systemctl status "$SIMPLE_BOT_SERVICE" --no-pager || true
+    fi
     retain_successful_releases "$base_dir" "$new_release_dir" "$previous_release" "$shared_dir"
     return 0
   fi
