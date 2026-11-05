@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 from uuid import UUID, uuid4
 
-from .authorization import AccessDenied, require_permission
+from .authorization import AccessDenied, account_permissions, require_permission
 from .profiles import _cursor, _page
 from .telegram_visitors import TelegramVisitor
 
@@ -78,7 +78,7 @@ class AccessRequestService:
         require_permission(actor, 'access_requests.self.read')
         with self.db.connect() as conn:
             result = self._policy(conn)
-            if actor.account.role == 'admin' and actor.account.status == 'approved':
+            if 'access_requests.manage' in account_permissions(actor.account) and actor.account.status == 'approved':
                 key = f"admin_request_notifications:{actor.account.id}"
                 row = conn.execute('SELECT value FROM backend_system_settings WHERE key = ?', (key,)).fetchone()
                 result['notify_requests'] = not row or row['value'] != '0'

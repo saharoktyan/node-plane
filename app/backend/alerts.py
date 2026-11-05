@@ -36,6 +36,12 @@ DEFAULT_POLICY = {
 }
 RESOURCE_TYPES = {"disk_low", "ram_high", "load_high", "cpu_high"}
 FAST_KINDS = {"cpu_high", "ram_high", "load_high"}
+
+
+def alert_permission(kind):
+    """Who receives an alert: shared links go to those who manage profiles,
+    update notices to those who install updates, the rest to node watchers."""
+    return {'link_sharing': 'profiles.manage', 'update_available': 'settings.manage'}.get(kind, 'nodes.inspect')
 FAST_OBSERVED = FAST_KINDS | {"node_unreachable"}
 MONITORABLE_NODE_SQL = AGENT_INSTALLED_SQL + """
     AND NOT EXISTS (SELECT 1 FROM backend_node_drains d WHERE d.node_key=n.key)
@@ -358,9 +364,10 @@ class AlertService:
         if 'telegram' not in enabled(conn):
             # Alerts are Telegram messages; the event itself is kept.
             return
-        for admin in conn.execute("""SELECT a.id,i.address AS subject FROM backend_accounts a
+        from .roles import holds_sql
+        for admin in conn.execute(f"""SELECT a.id,i.address AS subject FROM backend_accounts a
             JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
-            WHERE a.role='admin' AND a.status='approved' """).fetchall():
+            WHERE {holds_sql(alert_permission(kind))} """).fetchall():
             conn.execute(
                 "INSERT INTO backend_alert_deliveries (id,event_id,account_id,telegram_subject,status) VALUES (?,?,?,?,?)",
                 (str(uuid4()), event_id, admin["id"], admin["subject"], "queued"),
@@ -718,9 +725,10 @@ class AlertService:
                 if not eligible:
                     conn.execute("UPDATE backend_alert_deliveries SET status='skipped' WHERE id=?", (row['id'],))
                     continue
+                from .roles import holds_sql
                 admin = conn.execute(
-                    """SELECT 1 FROM backend_accounts a JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
-                    WHERE a.id=? AND a.role='admin' AND a.status='approved' AND i.address=?""",
+                    f"""SELECT 1 FROM backend_accounts a JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
+                    WHERE a.id=? AND {holds_sql(alert_permission(event['kind']))} AND i.address=?""",
                     (row["account_id"], row["telegram_subject"]),
                 ).fetchone()
                 node = conn.execute(

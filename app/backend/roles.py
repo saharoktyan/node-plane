@@ -26,3 +26,17 @@ def owners(conn):
             AND r.scope_kind = 'installation')
         OR (a.role = 'admin' AND NOT EXISTS (SELECT 1 FROM backend_role_assignments r WHERE r.account_id = a.id)))
         """).fetchone()['count']
+
+
+def holds_sql(permission, account='a'):
+    """An SQL condition: the account aliased `account` is active staff holding
+    `permission` through its installation-wide roles."""
+    from .authorization import PRESETS
+    roles = ','.join(f"'{role}'" for role, granted in sorted(PRESETS.items()) if permission in granted)
+    if not roles:
+        return '0=1'
+    legacy = ("OR NOT EXISTS (SELECT 1 FROM backend_role_assignments r WHERE r.account_id = "
+              f"{account}.id AND r.scope_kind = 'installation')") if permission in PRESETS['owner'] else ''
+    return (f"({account}.role = 'admin' AND {account}.status = 'approved' AND ("
+            f"EXISTS (SELECT 1 FROM backend_role_assignments r WHERE r.account_id = {account}.id "
+            f"AND r.scope_kind = 'installation' AND r.role_id IN ({roles})) {legacy}))")

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Notifications and the bot's administration menu follow roles instead of
+  the administrator flag: access requests reach support too, node alerts
+  reach operators, and each role sees only its sections. The administration
+  overview is open to every staff role.
 - Owners assign preset roles: `PATCH /api/v1/accounts/{id}` takes `roles`
   (needs `roles.manage`), and Workstation's account card has **Role**, which
   replaces **Make admin/member**.

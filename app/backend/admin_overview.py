@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 from config import UPDATE_BRANCH, APP_SEMVER
 
-from .authorization import require_permission
+from .authorization import account_permissions, require_permission
 
 
 class AdminOverviewService:
@@ -13,7 +13,9 @@ class AdminOverviewService:
         self.db = db
 
     def get(self, actor):
-        require_permission(actor, 'profiles.manage')
+        # Counts only; every staff role sees them.
+        require_permission(actor, 'profiles.manage' if 'profiles.manage' in account_permissions(actor.account)
+                           else 'nodes.inspect')
         with self.db.connect() as conn:
             from .alerts import AlertService
             alert_count = sum(not r['dismissed'] for r in AlertService.active(conn, actor.account.id))

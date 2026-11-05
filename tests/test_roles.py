@@ -75,3 +75,38 @@ class AssignmentTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_accounts SET role='member' WHERE id=?", (first.id,))
         self.assertEqual(self.identities.get_account(first.id).roles, frozenset())
+
+
+class HolderTests(unittest.TestCase):
+    def setUp(self):
+        self.db = Database()
+        self.addCleanup(self.db.connection.close)
+        self.identities = SQLIdentityRepository(self.db)
+        self.identities.initialize_schema()
+
+    def holders(self, permission):
+        from backend.roles import holds_sql
+        with self.db.connect() as conn:
+            return {row['id'] for row in conn.execute(
+                f'SELECT a.id FROM backend_accounts a WHERE {holds_sql(permission)}').fetchall()}
+
+    def test_notices_reach_the_roles_that_handle_them(self):
+        from backend.alerts import alert_permission
+        from backend.roles import assign
+        operator = self.identities.resolve_telegram(201).id
+        support = self.identities.resolve_telegram(202).id
+        legacy = self.identities.resolve_telegram(203).id
+        member = self.identities.resolve_telegram(204).id
+        with self.db.transaction() as conn:
+            assign(conn, operator, {'operator'})
+            assign(conn, support, {'support'})
+            conn.execute("UPDATE backend_accounts SET role='admin' WHERE id=?", (legacy,))
+        self.assertEqual(self.holders('access_requests.manage'), {support, legacy})
+        self.assertEqual(self.holders(alert_permission('xray_down')), {operator, legacy})
+        self.assertEqual(self.holders(alert_permission('link_sharing')), {support, legacy})
+        self.assertEqual(self.holders(alert_permission('update_available')), {legacy})
+        self.assertEqual(self.holders('roles.manage'), {legacy})
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET status='disabled' WHERE id=?", (support,))
+        self.assertEqual(self.holders('access_requests.manage'), {legacy})
+        self.assertNotIn(member, self.holders('nodes.inspect'))

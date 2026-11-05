@@ -306,13 +306,14 @@ class AnnouncementService:
         if system:
             from .service_notifications import current
             return current(conn, system, row)
+        from .roles import holds_sql
         return conn.execute(
             f"""SELECT 1 FROM backend_accounts a
             JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             JOIN backend_announcements c ON c.id=?
             JOIN backend_accounts sender ON sender.id=c.actor_id
             WHERE a.id=? AND a.status='approved' AND i.address=?
-            AND sender.status='approved' AND sender.role='admin'
+            AND {holds_sql('settings.manage', 'sender')}
             AND a.id<>sender.id AND {RECIPIENT_PROFILE} """,
             (row["announcement_id"], row["account_id"], row["telegram_subject"]),
         ).fetchone()

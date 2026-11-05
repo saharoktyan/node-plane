@@ -285,11 +285,25 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(1, 101, 5, self.bot,
                 SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
-                    request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503))), self.state)
+                    request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503))), self.state)
         screen, rows = draw.call_args.args[2:4]
         callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
         self.assertFalse(any(value.startswith('accounts') for value in callbacks))
         self.assertTrue(any(value.startswith('admin_profiles') for value in callbacks))
+
+    async def test_admin_menu_shows_only_what_the_roles_allow(self):
+        overview = {'nodes_total': 1, 'pending_requests': 2, 'requests_enabled': True, 'problem_nodes': []}
+        with patch.object(user, 'render', new_callable=AsyncMock) as draw:
+            await user.show_admin_menu(1, 101, 5, self.bot,
+                SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
+                    request=AsyncMock(return_value={'completed': True}),
+                    me=AsyncMock(return_value={'permissions': ['nodes.inspect', 'nodes.manage']}),
+                    admin_overview=AsyncMock(return_value=overview)), self.state)
+        screen, rows = draw.call_args.args[2:4]
+        callbacks = [b.callback_data for row in screen.fallback_rows(rows) for b in row]
+        self.assertTrue(any(value.startswith('admin_nodes') for value in callbacks))
+        for hidden in ('admin_profiles', 'requests', 'updates', 'backups', 'announce_menu'):
+            self.assertFalse(any(value.startswith(hidden) for value in callbacks), hidden)
 
     async def test_legacy_status_opens_expanded_admin_overview(self):
         overview = {'version': '0.4.3', 'nodes_enabled': 2, 'nodes_total': 3,
@@ -298,7 +312,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             'tasks': {'queued': 1, 'running': 2, 'blocked': 1}, 'unacknowledged_alerts': 2, 'alerts_enabled': True,
             'backup': {'enabled': True, 'last_job': None},
             'updates': {'available': True, 'latest_version': '0.4.4', 'branch': 'dev'}}
-        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(return_value=overview),
+        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(return_value=overview),
                                   bot_title=AsyncMock(return_value={'title': 'Test'}))
         for locale in ('en', 'ru'):
             self.state_data['locale'] = locale
@@ -325,7 +339,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             'pending_requests':2, 'requests_enabled':False, 'problem_nodes':[],
             'unacknowledged_alerts':3, 'alerts_enabled':False,
             'tasks':{'queued':0, 'running':0, 'blocked':0}, 'checked_at':'2026-10-12T12:34:56+00:00'}
-        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(return_value=overview), bot_title=AsyncMock(return_value={'title':'Test'}))
+        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(return_value=overview), bot_title=AsyncMock(return_value={'title':'Test'}))
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
         screen, rows = draw.call_args.args[2:4]
@@ -338,7 +352,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_problem_nodes_group_regions_and_clamp_page_after_recovery(self):
         affected = [{'key': f'n{i:02}', 'title': f'Node {i:02}', 'region': 'Europe', 'flag': '🌍'} for i in range(11)]
-        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(return_value={'problem_nodes': affected}))
+        backend = SimpleNamespace(request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(return_value={'problem_nodes': affected}))
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_problem_nodes(123, 123, 77, self.bot, backend, self.state, 1)
         screen, rows = draw.call_args.args[2:4]
@@ -359,7 +373,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             'profiles_total': 5, 'pending_requests': 2,
             'problem_nodes': [{'key': 'lv1', 'title': 'Latvia', 'flag': '🇱🇻'}]}
         backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
-                                  request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(return_value=overview))
+                                  request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(return_value=overview))
         for locale in ('ru', 'en'):
             self.state_data['locale'] = locale
             with patch.object(user, 'render', new_callable=AsyncMock) as draw:
@@ -408,7 +422,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         async def slow_overview(*args):
             await asyncio.Event().wait()
         backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
-                                  request=AsyncMock(return_value={'completed': True}), admin_overview=slow_overview)
+                                  request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=slow_overview)
         with patch.object(user, 'ADMIN_MENU_TIMEOUT', 0.01), \
              patch.object(user, 'render', new_callable=AsyncMock) as draw:
             await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
@@ -419,7 +433,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_admin_summary_permission_failure_is_not_treated_as_optional(self):
         backend = SimpleNamespace(bot_title=AsyncMock(return_value={'title': 'Node Plane'}),
-            request=AsyncMock(return_value={'completed': True}), admin_overview=AsyncMock(side_effect=BackendError('permission_denied', 403)))
+            request=AsyncMock(return_value={'completed': True}), me=AsyncMock(return_value={}), admin_overview=AsyncMock(side_effect=BackendError('permission_denied', 403)))
         with patch.object(user, 'render', new_callable=AsyncMock) as draw:
             with self.assertRaises(BackendError):
                 await user.show_admin_menu(123, 123, 77, self.bot, backend, self.state)
@@ -1757,7 +1771,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             pending_access_requests=AsyncMock(return_value={
                 'items': [], 'next_cursor': None}),
             bot_title=AsyncMock(return_value={'title': 'Configured title'}),
-            admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503)),
+            me=AsyncMock(return_value={}), admin_overview=AsyncMock(side_effect=BackendError('backend_unavailable', 503)),
             request=AsyncMock(side_effect=[{'account_id': 'account-id'},
                 {'completed': True}, BackendError('resource_not_found', 404)]))
         with patch.object(admin_requests, 'render', new_callable=AsyncMock), \

@@ -109,6 +109,8 @@ Staff hold roles; every other account is a member, who manages only their own pr
 
 The first administrators of an installation are owners. Promoting a member makes an administrator; only an owner demotes an owner.
 
+Notifications follow the roles: access requests go to those who handle them (owners, administrators, support), node alerts to those who manage servers (owners, administrators, operators), shared-link alerts to those who manage profiles, and update notices to owners and administrators. The bot's administration menu shows only the sections a role allows.
+
 In Workstation, **Role** on an account card picks the role. Any administrator makes a member an administrator or demotes staff other than owners; only an owner assigns the other presets. Through the API, `PATCH /api/v1/accounts/{id}` takes `roles` (the exact list, empty for a member) with the `roles.manage` permission, or `role` (`admin`/`member`) as before.
 
 **Block account** disables bot/API access. Installed VPN access is retained; use **Freeze profile** to suspend it while keeping profile settings. After freezing or unfreezing, inspect the runtime operation status.

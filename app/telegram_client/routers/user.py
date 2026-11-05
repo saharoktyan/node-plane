@@ -1228,8 +1228,13 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     except BackendError as exc:
         if exc.status not in {503, 504}:
             raise
-    title, overview = await asyncio.gather(optional_read(backend.bot_title(user_id)),
-        optional_read(backend.admin_overview(user_id)), return_exceptions=True)
+    title, overview, me = await asyncio.gather(optional_read(backend.bot_title(user_id)),
+        optional_read(backend.admin_overview(user_id)), optional_read(backend.me(user_id)), return_exceptions=True)
+    # Sections follow the account's roles; without an answer, all are shown
+    # and the backend refuses what the roles do not allow.
+    permissions = set(me['permissions']) if isinstance(me, dict) and 'permissions' in me else None
+    def may(permission):
+        return permissions is None or permission in permissions
     for result in (title, overview):
         if isinstance(result, BackendError) and result.status in {401, 403}:
             raise result
@@ -1270,18 +1275,22 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
     else:
         sections.append(Section(tr(locale, 'admin.rich.overview'),
             (tr(locale, 'admin.rich.overview_unavailable'),), inline_rows=inline))
-    sections.append(Section(tr(locale, 'admin.rich.management'), rows=((
-        InlineKeyboardButton(text=tr(locale, 'admin.profiles'), callback_data=AdminProfilesCallback().pack()),
-        InlineKeyboardButton(text=tr(locale, 'admin.nodes'), callback_data=AdminNodesCallback().pack())),)))
-    if requests:
+    management = tuple(InlineKeyboardButton(text=tr(locale, key), callback_data=callback().pack())
+        for key, callback, permission in (('admin.profiles', AdminProfilesCallback, 'profiles.manage'),
+                                          ('admin.nodes', AdminNodesCallback, 'nodes.inspect'))
+        if may(permission))
+    if management:
+        sections.append(Section(tr(locale, 'admin.rich.management'), rows=(management,)))
+    if requests and may('access_requests.manage'):
         sections.append(Section(tr(locale, 'admin.rich.access_management') + ' · ' + tr(locale, 'requests.pending_count', count=requests), rows=((
             InlineKeyboardButton(text=tr(locale, 'admin.requests'), callback_data=RequestsCallback().pack(), style='primary'),),)))
-    sections.append(Section(tr(locale, 'admin.rich.system'), rows=(
-        (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data='updates',
-            style='primary' if isinstance(overview, dict) and (overview.get('updates') or {}).get('available') else None),
-         InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
-        (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),),
-        (InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),))))
+    if may('settings.manage'):
+        sections.append(Section(tr(locale, 'admin.rich.system'), rows=(
+            (InlineKeyboardButton(text=tr(locale, 'settings.admin.updates'), callback_data='updates',
+                style='primary' if isinstance(overview, dict) and (overview.get('updates') or {}).get('available') else None),
+             InlineKeyboardButton(text=tr(locale, 'backups.title'), callback_data='backups')),
+            (InlineKeyboardButton(text=tr(locale, 'announce.title'), callback_data='announce_menu'),),
+            (InlineKeyboardButton(text=tr(locale, 'admin.settings'), callback_data=AdminSettingsCallback().pack()),))))
     await render(bot, chat_id, Screen(f"{tr(locale, 'admin.menu')} · {bot_title}",
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)
