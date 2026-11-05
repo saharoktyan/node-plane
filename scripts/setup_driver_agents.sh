@@ -1058,6 +1058,15 @@ deploy_agents() {
       return 1
     fi
     echo "No enabled managed servers found; skipping node-agent deploy."
+    if [[ $DRY_RUN -eq 0 ]]; then
+      # A controller without a node of its own enrolls its first agent by
+      # token; the driver needs the agent CA and its client certificate for it.
+      set_step "prepare driver-agent mutual TLS certificates"
+      prepare_driver_agent_tls
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CA_CERT" "$TLS_CA_CERT"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_CERT" "$TLS_CLIENT_CERT"; then ENV_CHANGED=1; fi
+      if set_env_value_if_changed "$ENV_FILE" "NODE_AGENT_CLIENT_KEY" "$TLS_CLIENT_KEY"; then ENV_CHANGED=1; fi
+    fi
     return 0
   fi
 

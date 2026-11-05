@@ -82,3 +82,25 @@ class SshKeyDefaultTests(unittest.TestCase):
         self.assertIn('LOCAL_TOKEN_CREATED=1', token[:token.index('\n}\n')])
         final = source[source.index('set_step "restart node-plane-driver with updated env"'):]
         self.assertIn('systemctl try-restart node-plane-backend node-plane-backend-worker', final)
+
+    def test_no_managed_servers_still_prepares_the_agent_ca(self):
+        # The first agent of a controller without its own node enrolls by token.
+        source = (ROOT / 'scripts' / 'setup_driver_agents.sh').read_text()
+        def function(name):
+            start = source.index(name + '() {')
+            return source[start:source.index('\n}\n', start) + 3]
+        names = ('certificate_matches_key', 'issue_driver_client_certificate', 'prepare_driver_agent_tls',
+                 'read_env_value', 'set_env_value', 'set_env_value_if_changed', 'deploy_agents')
+        with tempfile.TemporaryDirectory() as directory:
+            tls, env = Path(directory) / 'tls', Path(directory) / '.env'
+            env.write_text('NODE_PLANE_ADMIN_NAME=Ops Team\n')
+            script = ('set -euo pipefail\nset_step() { :; }\nneed_cmd() { :; }\nlist_managed_servers_tsv() { :; }\n'
+                      + ''.join(map(function, names)) + 'deploy_agents\necho "changed=$ENV_CHANGED"')
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=60, env={
+                **os.environ, 'DRY_RUN': '0', 'ONLY_NODE_KEY': '', 'ENV_CHANGED': '0', 'ENV_FILE': str(env),
+                'TLS_ROOT': str(tls), 'TLS_CA_CERT': str(tls / 'ca.crt'), 'TLS_CA_KEY': str(tls / 'ca.key'),
+                'TLS_CLIENT_CERT': str(tls / 'driver-client.crt'), 'TLS_CLIENT_KEY': str(tls / 'driver-client.key')})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('changed=1', result.stdout)
+            self.assertIn(f'NODE_AGENT_CA_CERT={tls}/ca.crt', env.read_text())
+            self.assertTrue((tls / 'driver-client.crt').is_file())
