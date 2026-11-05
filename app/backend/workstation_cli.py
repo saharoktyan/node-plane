@@ -63,7 +63,7 @@ def validate_request(request) -> dict:
         raise WorkstationError('invalid_request')
     action = request.get('action')
     allowed = {'version', 'action'}
-    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'revoke-access', 'restore-access', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
+    if action in {'authenticate', 'revoke', 'lookup-update', 'lookup-node', 'lookup-node-create', 'revoke-access', 'restore-access', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
         _uuid(request.get('session_id'))
         allowed.add('session_id')
     elif action != 'list':
@@ -79,17 +79,6 @@ def validate_request(request) -> dict:
             validate_telegram_id(request.get('telegram_id'))
         except AccessDenied:
             raise WorkstationError('invalid_request') from None
-    elif action == 'audit-enrollment':
-        _uuid(request.get('command_id'))
-        allowed |= {'command_id', 'target', 'key_fingerprint', 'outcome'}
-        if (not isinstance(request.get('target'), str)
-                or len(request['target']) > 340
-                or not re.fullmatch(r'[A-Za-z0-9_.:@\[\]-]+', request['target'])
-                or not isinstance(request.get('key_fingerprint'), str)
-                or not re.fullmatch(r'SHA256:[A-Za-z0-9+/]{43}', request['key_fingerprint'])
-                or not isinstance(request.get('outcome'), str)
-                or request['outcome'] not in {'admitted', 'succeeded', 'unconfirmed'}):
-            raise WorkstationError('invalid_request')
     elif action in {'lookup-update', 'lookup-node', 'lookup-node-create'}:
         _uuid(request.get('command_id'))
         allowed.add('command_id')
@@ -366,7 +355,7 @@ class WorkstationService:
                 return {'version': VERSION, 'ok': True, 'session_id': session_id, 'revoked': revoked}
             if previous is not None and previous.get('revoked'):
                 raise WorkstationError('session_revoked')
-            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'audit-enrollment', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
+            if request['action'] in {'lookup-update', 'lookup-node', 'lookup-node-create', 'telegram-settings', 'telegram-token', 'telegram-admin-add', 'telegram-admin-remove'}:
                 if previous is None:
                     raise WorkstationError('session_not_found')
                 try:
@@ -411,13 +400,6 @@ class WorkstationService:
                     if len(matches) > 1:
                         raise WorkstationError('node_command_conflict')
                     return {'version': VERSION, 'ok': True, 'job': matches[0] if matches else None}
-                if request['action'] == 'audit-enrollment':
-                    context = self.audit.context(principal.id)
-                    if context is None:
-                        raise WorkstationError('workstation_attribution_required')
-                    self.audit.record_enrollment(context, request['command_id'], request['target'],
-                        request['key_fingerprint'], request['outcome'])
-                    return {'version': VERSION, 'ok': True}
                 with self.db.connect() as conn:
                     row = conn.execute('''SELECT id, kind, intent_json FROM backend_update_jobs
                         WHERE actor_id = ? AND command_key = ?''',

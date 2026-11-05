@@ -170,7 +170,7 @@ impl App {
 
     pub(super) fn load_connections(&mut self, request: &Request) -> Result<()> {
         self.connections = Connections::load(&self.state_dir)?;
-        self.form.fields[11] =
+        self.form.fields[8] =
             (self.connections.diagnostic_recovery || request.workflow.repair).to_string();
         let catalog = theme::load(&self.state_dir)?;
         self.themes = catalog.themes;
@@ -238,28 +238,26 @@ impl App {
                 "Run installation diagnostics?",
                 format!(
                     "Check controller services, database schema, registered servers and interrupted operations on {host}.\n\n{}",
-                    if self.form.fields[11] == "true" {
+                    if self.form.fields[8] == "true" {
                         "Offer recovery actions with separate confirmation."
                     } else {
                         "Show the diagnostic report."
                     }
                 ),
             ),
-            Action::PrepareNode => (
-                "Prepare node SSH?",
-                format!(
-                    "Prepare SSH access to {} from controller {host}.\n\nAuthorize the controller public key on the node for installation and maintenance.",
-                    self.form.fields[8]
-                ),
+            // Nodes is a screen, not a workflow; the controller never runs one for it.
+            Action::Nodes => (
+                "Open Nodes?",
+                "Servers are managed on the Nodes screen.".into(),
             ),
         }
     }
     pub(super) fn toggle_diagnostic_recovery(&mut self) {
         let mut next = self.connections.clone();
-        next.diagnostic_recovery = self.form.fields[11] != "true";
+        next.diagnostic_recovery = self.form.fields[8] != "true";
         match next.save(&self.state_dir) {
             Ok(()) => {
-                self.form.fields[11] = next.diagnostic_recovery.to_string();
+                self.form.fields[8] = next.diagnostic_recovery.to_string();
                 self.connections = next;
                 self.error.clear();
             }

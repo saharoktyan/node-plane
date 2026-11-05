@@ -52,13 +52,13 @@ impl App {
                 self.activate(Control::ControllerUpdates);
                 return;
             }
-            self.screen = if self.form.action == Action::PrepareNode {
+            self.screen = if self.form.action == Action::Nodes {
                 Screen::Nodes
             } else {
                 Screen::Form
             };
             self.nodes_sidebar = true;
-            if self.form.action == Action::PrepareNode
+            if self.form.action == Action::Nodes
                 && self.nodes.profile_id != self.form.saved.as_ref().map(|p| p.id)
             {
                 self.nodes = crate::nodes::Browser::default();
@@ -619,7 +619,7 @@ impl App {
                 }
             }
             Control::RepairMode => {
-                if let Some(index) = self.form.visible().iter().position(|&i| i == 11) {
+                if let Some(index) = self.form.visible().iter().position(|&i| i == 8) {
                     self.quick_focus = false;
                     self.form.selected = index + 1;
                 }

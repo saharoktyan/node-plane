@@ -1,9 +1,8 @@
-//! Backend-owned updates and controller-key enrollment. A lost dispatch response
+//! Backend-owned updates. A lost dispatch response
 //! is reconciled by its durable identity, never by replaying the installation.
 use crate::{
     backend::{self, Credential},
     config::{Action, Request},
-    enrollment,
     events::{self, Event},
     operation_store::{self, Intent, OperationLock, UpdateRecord},
     ssh::{self, Interaction, SshOptions, SshSession},
@@ -204,7 +203,6 @@ pub async fn execute_connected(
     let _lock = OperationLock::acquire(&request.state_dir)?;
     let mut result = match request.action {
         Action::Update => update(&request, session, interaction, &tx).await,
-        Action::PrepareNode => prepare_node(&request, session, interaction, &tx).await,
         _ => bail!("Unsupported workstation operation"),
     };
     if result
@@ -224,62 +222,6 @@ pub async fn execute_connected(
             )
         ));
     }
-    result
-}
-
-pub(crate) async fn prepare_node(
-    request: &Request,
-    controller: &mut SshSession,
-    interaction: Arc<dyn Interaction>,
-    tx: &mpsc::Sender<Event>,
-) -> Result<String> {
-    let session_id = Uuid::new_v4();
-    if !backend::authorized(controller, &request.workflow.account) {
-        stage(tx, "Authorizing the controller administrator");
-    }
-    let credential =
-        backend::authenticate(controller, session_id, &request.workflow.account, tx).await?;
-    let result=async {
-        let updates = backend::request(controller, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
-        crate::nodes::validate_controller_channel(&crate::nodes::Command::List, crate::nodes::controller_branch(&updates)?, crate::config::default_branch())?;
-        let response=backend::request(controller,&credential,Method::GET,"/api/v1/system/ssh-key",None,None).await?;
-        let public=response["public_key"].as_str().context("Controller did not return its SSH public key")?;
-        let key=russh::keys::PublicKey::from_openssh(public).context("Controller returned an invalid SSH public key")?;
-        let options=SshOptions{host:request.workflow.target_host.clone(),port:request.workflow.target_port,user:request.workflow.target_user.clone(),state_dir:request.state_dir.clone()};
-        stage(tx,"Connecting to the target node; enrolling the workstation key if needed");
-        let target_key = format!("{}@{}:{}", options.user, options.host.to_ascii_lowercase(), options.port);
-        let cached = controller.peers.remove(&target_key);
-        let mut target = match cached {
-            Some(target) if !target.is_closed() => target,
-            Some(target) => { let _ = target.close().await; ssh::connect(&options, interaction).await? },
-            None => ssh::connect(&options, interaction).await?,
-        };
-        let result=async {
-            let description=format!("Allow this controller to connect to {}@{}:{}?\n\nController public key: {}\nThe existing authorized keys remain. No VPN protocols or agent are installed by this step.",options.user,options.host,options.port,key.fingerprint(russh::keys::ssh_key::HashAlg::Sha256));
-            ensure!(request.workflow.yes || events::confirm(tx,"Prepare SSH access",description)?,"Node preparation cancelled.");
-            stage(tx,"Adding the controller public key and verifying controller-to-node login");
-            let operation_id = Uuid::new_v4();
-            let address = format!("{}@[{}]:{}", options.user, options.host, options.port);
-            let fingerprint = key.fingerprint(russh::keys::ssh_key::HashAlg::Sha256).to_string();
-            backend::audit_enrollment(controller, session_id, operation_id, &address, &fingerprint, "admitted").await?;
-            let enrolled = async {
-                target.enroll_public_key(public, operation_id).await?;
-                enrollment::verify_controller_login(controller,&options,&target.server_key()).await?;
-                Ok::<(), anyhow::Error>(())
-            }.await;
-            let outcome = if enrolled.is_ok() {"succeeded"} else {"unconfirmed"};
-            let audited = backend::audit_enrollment(controller, session_id, operation_id, &address, &fingerprint, outcome).await;
-            enrolled?;
-            if audited.is_err() {
-                anyhow::bail!("Controller SSH access is verified, but audit completion is unconfirmed. Do not repeat enrollment solely for this error. Operation: {operation_id}");
-            }
-            Ok(format!("Controller SSH access to {} is verified. Add the SSH node in the bot to install its agent and protocols.",options.host))
-        }.await;
-        if controller.persistent { controller.peers.insert(target_key, target); }
-        else { let _=target.close().await; }
-        result
-    }.await;
-    let _ = backend::revoke(controller, session_id).await;
     result
 }
 

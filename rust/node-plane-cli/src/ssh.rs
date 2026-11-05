@@ -97,7 +97,6 @@ impl client::Handler for HostVerifier {
 
 pub struct SshSession {
     session: client::Handle<HostVerifier>,
-    server_key: String,
     pub ssh_user: String,
     pub workstation_fingerprint: String,
     pub endpoint: String,
@@ -122,11 +121,10 @@ pub async fn connect(
             .context("Local key task failed")??,
     );
     let workstation_fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
-    let (mut session, server_key) = open_connection(options, interaction.clone()).await?;
+    let (mut session, _) = open_connection(options, interaction.clone()).await?;
     if authenticate_key(&mut session, &options.user, key.clone()).await? {
         let mut connected = SshSession {
             session,
-            server_key,
             ssh_user: options.user.clone(),
             workstation_fingerprint,
             endpoint: endpoint(options),
@@ -143,7 +141,6 @@ pub async fn connect(
     let public_key = key.public_key().to_openssh()?;
     let mut initial = SshSession {
         session,
-        server_key,
         ssh_user: options.user.clone(),
         workstation_fingerprint: workstation_fingerprint.clone(),
         endpoint: self::endpoint(options),
@@ -167,7 +164,7 @@ pub async fn connect(
 
     // Test a completely new SSH authentication; successful file creation alone
     // does not prove sshd reads this authorized_keys file or permits public keys.
-    let (mut verified, server_key) = open_connection(options, interaction).await?;
+    let (mut verified, _) = open_connection(options, interaction).await?;
     let key_accepted = authenticate_key(&mut verified, &options.user, key).await?;
     let _ = initial.close().await;
     ensure!(
@@ -176,7 +173,6 @@ pub async fn connect(
     );
     Ok(SshSession {
         session: verified,
-        server_key,
         ssh_user: options.user.clone(),
         workstation_fingerprint,
         endpoint: self::endpoint(options),
@@ -314,13 +310,12 @@ pub async fn connect_once(
     );
     let workstation_fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
     let interaction: Arc<dyn Interaction> = Arc::new(Once(interaction));
-    let (mut session, server_key) = open_connection(options, interaction.clone()).await?;
+    let (mut session, _) = open_connection(options, interaction.clone()).await?;
     if !authenticate_key(&mut session, &options.user, key).await? {
         authenticate_existing(&mut session, options, interaction).await?;
     }
     Ok(SshSession {
         session,
-        server_key,
         ssh_user: options.user.clone(),
         workstation_fingerprint,
         endpoint: endpoint(options),
@@ -473,12 +468,6 @@ impl SshSession {
         Ok(())
     }
 
-    /// Exact OpenSSH host public key accepted by the workstation's trust store.
-    /// This can pin a controller-side verification without trusting ssh-keyscan.
-    pub fn server_key(&self) -> String {
-        self.server_key.clone()
-    }
-
     /// Access the controller API through SSH without opening a listening port on
     /// the workstation or exposing the API on the controller's public network.
     /// The destination is intentionally fixed: this is not a general forwarding API.
@@ -493,26 +482,6 @@ impl SshSession {
         .context("Timed out connecting to the controller API through SSH")?
         .context("Could not connect to the controller API through SSH. Check the backend service and sshd forwarding policy")?;
         Ok(channel.into_stream())
-    }
-
-    /// Add a controller's public key to this SSH user's authorized_keys while
-    /// preserving every existing key. This does not establish that the controller
-    /// can log in: a separate controller-side probe must verify that connection.
-    pub async fn enroll_public_key(
-        &mut self,
-        public_key: &str,
-        operation_id: uuid::Uuid,
-    ) -> Result<()> {
-        let command =
-            self.audited_enrollment_command(public_key, "controller-key-enrollment", operation_id)?;
-        let code = self.run(&command, None, |_, _| {}).await.context(
-            "Could not add the controller public key. Check the SSH home directory and permissions",
-        )?;
-        ensure!(
-            code == 0,
-            "Could not add the controller public key (exit {code}). Check the SSH home directory and permissions"
-        );
-        Ok(())
     }
 
     fn audited_enrollment_command(
@@ -1759,65 +1728,6 @@ mod tests {
             .unwrap()
         }
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        async fn cancelled_target_preparation_keeps_both_connections_for_next_action() {
-            use crate::events::{Answer, Event, Prompt};
-            let server = MockServer::start().await;
-            let state = tempfile::tempdir().unwrap();
-            prepare_nodes_fixture(&server, state.path());
-            let mut worker = crate::nodes::Worker::new().unwrap();
-            for _ in 0..2 {
-                let mut request = nodes_request(&server, state.path());
-                request.action = crate::config::Action::PrepareNode;
-                request.workflow.target_host = request.host.clone();
-                request.workflow.target_port = request.port;
-                request.workflow.target_user = request.user.clone();
-                let (tx, rx) = std::sync::mpsc::channel();
-                worker.workflow(request, tx).unwrap();
-                let result = tokio::task::spawn_blocking(move || {
-                    loop {
-                        match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
-                            Event::Finished(result) => break result,
-                            Event::Prompt(prompt, reply) => {
-                                reply
-                                    .send(match prompt {
-                                        Prompt::HostKey { .. } => Answer::Confirm(true),
-                                        Prompt::ConfirmAction { .. } => Answer::Confirm(false),
-                                        _ => Answer::Cancel,
-                                    })
-                                    .unwrap();
-                            }
-                            _ => {}
-                        }
-                    }
-                })
-                .await
-                .unwrap();
-                assert!(result.is_err());
-                assert_eq!(worker.state(), crate::nodes::ConnectionState::Connected);
-            }
-            assert_eq!(server.connections.lock().unwrap().len(), 2);
-            let actions: Vec<serde_json::Value> =
-                fs::read_to_string(server.home.join("backend-actions"))
-                    .unwrap()
-                    .lines()
-                    .map(|line| serde_json::from_str(line).unwrap())
-                    .collect();
-            assert_eq!(
-                actions
-                    .iter()
-                    .filter(|value| value["action"] == "authenticate")
-                    .count(),
-                1
-            );
-            assert!(
-                !actions
-                    .iter()
-                    .any(|value| value["action"] == "audit-enrollment")
-            );
-            worker.shutdown().unwrap();
-            assert_eq!(worker.state(), crate::nodes::ConnectionState::Closed);
-        }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn diagnostics_updates_and_nodes_share_connection_and_credential() {
             use crate::events::{Answer, Event};
             let server = MockServer::start().await;
@@ -2565,8 +2475,6 @@ mod tests {
             let session = connect(&server.options(state.path()), Arc::new(Prompts::default()))
                 .await
                 .unwrap();
-            let observed = russh::keys::PublicKey::from_openssh(&session.server_key()).unwrap();
-            assert_eq!(observed, *server.host_key.lock().unwrap().public_key());
             let trusted: BTreeMap<String, String> =
                 serde_json::from_slice(&fs::read(state.path().join("known_hosts.json")).unwrap())
                     .unwrap();
@@ -2574,7 +2482,13 @@ mod tests {
                 trusted
                     .get(&endpoint(&server.options(state.path())))
                     .unwrap(),
-                &observed.fingerprint(HashAlg::Sha256).to_string(),
+                &server
+                    .host_key
+                    .lock()
+                    .unwrap()
+                    .public_key()
+                    .fingerprint(HashAlg::Sha256)
+                    .to_string(),
             );
             let mut stream = session.backend_stream().await.unwrap();
             stream
@@ -2590,84 +2504,6 @@ mod tests {
             assert_eq!(
                 *server.forwards.lock().unwrap(),
                 vec![("127.0.0.1".to_owned(), 8080, "127.0.0.1".to_owned(), 0)],
-            );
-            session.close().await.unwrap();
-        }
-
-        #[tokio::test]
-        async fn controller_enrollment_is_idempotent_and_preserves_administrator_and_workstation_keys()
-         {
-            let server = MockServer::start().await;
-            let state = tempfile::tempdir().unwrap();
-            let mut session = connect(&server.options(state.path()), Arc::new(Prompts::default()))
-                .await
-                .unwrap();
-            let path = server.home.join(".ssh/authorized_keys");
-            let administrator = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-            let administrator_public = administrator.public_key().to_openssh().unwrap();
-            let mut existing = fs::read(&path).unwrap();
-            existing
-                .extend_from_slice(format!("\n{administrator_public} administrator\n").as_bytes());
-            fs::write(&path, &existing).unwrap();
-            let controller = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-            let public = controller.public_key().to_openssh().unwrap();
-            session
-                .enroll_public_key(&public, uuid::Uuid::new_v4())
-                .await
-                .unwrap();
-            let after = fs::read(&path).unwrap();
-            let journal = fs::read_to_string(server.home.join("audit.jsonl")).unwrap();
-            let events: Vec<serde_json::Value> = journal
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-            let enrollment: Vec<_> = events
-                .iter()
-                .filter(|event| event["action"] == "controller-key-enrollment")
-                .collect();
-            assert_eq!(enrollment.len(), 2);
-            assert_eq!(enrollment[0]["phase"], "admitted");
-            assert_eq!(enrollment[1]["exit_status"], 0);
-            assert_eq!(enrollment[0]["ssh_user"], "test");
-            assert_eq!(
-                enrollment[0]["device_fingerprint"],
-                session.workstation_fingerprint
-            );
-            assert_eq!(
-                enrollment[0]["key_fingerprint"],
-                controller
-                    .public_key()
-                    .fingerprint(HashAlg::Sha256)
-                    .to_string()
-            );
-            assert_eq!(enrollment[0]["target"], session.endpoint);
-            assert!(!journal.contains(&public));
-            assert!(!journal.contains("test-password"));
-            assert!(
-                events
-                    .iter()
-                    .any(|event| event["action"] == "workstation-key-enrollment")
-            );
-            assert!(after.starts_with(&existing));
-            session
-                .enroll_public_key(&public, uuid::Uuid::new_v4())
-                .await
-                .unwrap();
-            assert_eq!(after, fs::read(&path).unwrap());
-            assert!(
-                session
-                    .enroll_public_key(&format!("{public}\n{public}"), uuid::Uuid::new_v4())
-                    .await
-                    .is_err()
-            );
-            assert_eq!(after, fs::read(&path).unwrap());
-            assert_eq!(
-                String::from_utf8(after)
-                    .unwrap()
-                    .lines()
-                    .filter(|line| *line == public)
-                    .count(),
-                1
             );
             session.close().await.unwrap();
         }

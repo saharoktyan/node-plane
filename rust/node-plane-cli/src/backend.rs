@@ -377,24 +377,6 @@ pub async fn revoke(session: &mut SshSession, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-pub async fn audit_enrollment(
-    session: &mut SshSession,
-    session_id: Uuid,
-    operation_id: Uuid,
-    target: &str,
-    key_fingerprint: &str,
-    outcome: &str,
-) -> Result<()> {
-    helper(
-        session,
-        json!({"version":1,"action":"audit-enrollment",
-        "session_id":session_id,"command_id":operation_id,"target":target,
-        "key_fingerprint":key_fingerprint,"outcome":outcome}),
-    )
-    .await?;
-    Ok(())
-}
-
 pub async fn request(
     session: &SshSession,
     credential: &Credential,

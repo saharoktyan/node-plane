@@ -18,9 +18,6 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
         "Telegram administrator ID(s)",
         "BotFather token (hidden)",
         "Administrator account (UUID / Telegram ID; blank = only admin)",
-        "Target node hostname / IP",
-        "Target SSH port",
-        "Target SSH user",
         "Offer service and operation recovery (confirmation required)",
     ];
     let right = draw_navigation(frame, app, area, hits);
@@ -53,17 +50,7 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
     }
     let title = app.form.saved.as_ref().map_or_else(
         || " Connection settings ".to_string(),
-        |profile| {
-            format!(
-                " {} · {} ",
-                profile.name,
-                if app.form.action == Action::PrepareNode {
-                    "Prepare SSH access"
-                } else {
-                    app.form.action.label()
-                }
-            )
-        },
+        |profile| format!(" {} · {} ", profile.name, app.form.action.label()),
     );
     let sections = dialog(frame, right, &title);
     if app.form.action == Action::Install
@@ -120,7 +107,7 @@ pub(in crate::tui) fn draw_form(frame: &mut Frame, app: &App, area: Rect, hits: 
         });
         if i == 3 {
             draw_channel(frame, rect, &value, selected, false, hits);
-        } else if i == 11 {
+        } else if i == 8 {
             draw_field(
                 frame,
                 rect,

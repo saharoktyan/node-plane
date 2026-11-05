@@ -142,11 +142,6 @@ class WorkstationAudit:
                     (event_id, *enrollment))
         return event_id
 
-    def record_enrollment(self, context, command_id, target, fingerprint, outcome):
-        self.record(context, 'SSH controller key enrollment',
-            'admitted' if outcome == 'admitted' else 'completed', command_id=command_id,
-            enrollment=(target, fingerprint, outcome))
-
     def page(self, actor, offset=0, errors_only=False):
         from .authorization import require_permission
         require_permission(actor, 'maintenance.manage')

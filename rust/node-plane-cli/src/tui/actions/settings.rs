@@ -180,7 +180,7 @@ impl App {
                 None
             }
             Control::RepairMode => {
-                if let Some(position) = self.form.visible().iter().position(|&i| i == 11) {
+                if let Some(position) = self.form.visible().iter().position(|&i| i == 8) {
                     self.quick_focus = false;
                     self.form.selected = position + 1;
                     self.toggle_diagnostic_recovery();
@@ -456,13 +456,11 @@ impl App {
             self.form.saved = None;
             self.form.fields[6].zeroize();
             self.password.zeroize();
-            for index in [0, 3, 4, 5, 7, 8] {
+            for index in [0, 3, 4, 5, 7] {
                 self.form.fields[index].clear();
             }
             self.form.fields[1] = "22".into();
             self.form.fields[2] = "root".into();
-            self.form.fields[9] = "22".into();
-            self.form.fields[10] = "root".into();
             self.form.selected = 0;
         }
         self.connections = next;
@@ -507,13 +505,11 @@ impl App {
         } else {
             self.form.fields[6].zeroize();
             self.form.saved = None;
-            for index in [0, 3, 4, 5, 7, 8] {
+            for index in [0, 3, 4, 5, 7] {
                 self.form.fields[index].clear();
             }
             self.form.fields[1] = "22".into();
             self.form.fields[2] = "root".into();
-            self.form.fields[9] = "22".into();
-            self.form.fields[10] = "root".into();
             self.form.selected = 0;
         }
         self.connections = preferences;
@@ -603,13 +599,11 @@ impl App {
             self.form.saved = None;
             self.form.fields[6].zeroize();
             if was_saved {
-                for index in [0, 3, 4, 5, 7, 8] {
+                for index in [0, 3, 4, 5, 7] {
                     self.form.fields[index].clear();
                 }
                 self.form.fields[1] = "22".into();
                 self.form.fields[2] = "root".into();
-                self.form.fields[9] = "22".into();
-                self.form.fields[10] = "root".into();
             }
         }
         self.quick_focus = false;

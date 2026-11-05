@@ -40,8 +40,9 @@ class CredentialAttributionTests(TestCase):
         context = self.service.audit.context(first['credential_id'])
         for status in (200, 202, 400, 503):
             self.service.audit.record(context, 'POST /api/v1/system/updates/run', 'completed', http_status=status)
-        self.service.audit.record_enrollment(context, str(uuid4()), 'root@[vps.example]:22',
-            'SHA256:' + 'b' * 43, 'unconfirmed')
+        # An unconfirmed enrollment recorded by an earlier Workstation release.
+        self.service.audit.record(context, 'SSH controller key enrollment', 'completed',
+            command_id=str(uuid4()), enrollment=('root@[vps.example]:22', 'SHA256:' + 'b' * 43, 'unconfirmed'))
         actor = Actor(Principal('test', PrincipalKind.SERVICE, ADMIN_PERMISSIONS), self.admin)
         page = self.service.audit.page(actor, errors_only=True)
         self.assertEqual(page['total'], 3)
@@ -66,39 +67,18 @@ class CredentialAttributionTests(TestCase):
         row = self.db.connection.execute('SELECT account_id, account_label FROM backend_workstation_audit WHERE credential_id IS NOT NULL').fetchone()
         self.assertEqual(dict(row), {'account_id': self.admin.id, 'account_label': 'Telegram ID: 101 · @operator'})
 
-    def test_enrollment_records_target_key_and_actor_without_key_material(self):
+    def test_controller_key_enrollment_is_no_longer_accepted(self):
+        # Workstation no longer adds the controller's SSH key to servers.
         self.issue()
-        command_id = str(uuid4())
-        request = {'version': 1, 'action': 'audit-enrollment', 'session_id': self.session_id,
-            'command_id': command_id, 'target': 'root@[vps.example]:22',
-            'key_fingerprint': 'SHA256:' + 'b' * 43, 'outcome': 'admitted'}
-        self.service.handle(request)
-        self.service.handle({**request, 'outcome': 'succeeded'})
-        rows = self.db.connection.execute('''SELECT a.account_label,a.command_id,e.*
-            FROM backend_workstation_audit a JOIN backend_workstation_enrollment e ON e.event_id=a.id
-            ORDER BY a.occurred_at''').fetchall()
-        self.assertEqual([row['outcome'] for row in rows], ['admitted', 'succeeded'])
-        self.assertTrue(all(row['account_label'] == 'Telegram ID: 101 · @operator' and row['command_id'] == command_id for row in rows))
-        self.assertEqual(rows[0]['target'], request['target'])
-        self.assertEqual(rows[0]['key_fingerprint'], request['key_fingerprint'])
-        self.service.handle({'version': 1, 'action': 'revoke', 'session_id': self.session_id})
-        with self.assertRaises(WorkstationError):
-            self.service.handle(request)
-
-    def test_enrollment_rejects_missing_identity_and_free_form_payloads(self):
         request = {'version': 1, 'action': 'audit-enrollment', 'session_id': self.session_id,
             'command_id': str(uuid4()), 'target': 'root@[vps.example]:22',
             'key_fingerprint': 'SHA256:' + 'b' * 43, 'outcome': 'admitted'}
         with self.assertRaises(WorkstationError):
-            self.service.handle(request)
-        for extra in ({'target': 'secret\nserver'}, {'outcome': {}}, {'outcome': 'raw-exception'},
-                      {'key_fingerprint': 'ssh-ed25519 actual-key'}, {'private_key': 'secret'}):
-            with self.assertRaises(WorkstationError):
-                validate_request({**request, **extra})
+            validate_request(request)
+
+    def test_unauthenticated_requests_are_rejected(self):
         with self.assertRaises(WorkstationError):
             self.service.handle({'version': 1, 'action': 'authenticate', 'session_id': self.session_id})
-        with self.assertRaises(WorkstationError):
-            self.service.handle(request)
 
 
 class APIAuditTests(TestCase):
@@ -201,10 +181,10 @@ class APIAuditTests(TestCase):
             self.assertNotIn('forged-person', audit.text)
             self.assertNotIn(credential['token'], audit.text)
             self.assertEqual(self.client.get('/api/v1/system/workstation-audit').status_code, 401)
-            service.handle({'version': 1, 'action': 'audit-enrollment',
-                'session_id': service.audit.context(credential['credential_id'])['session_id'],
-                'command_id': str(uuid4()), 'target': 'root@[vps.example]:22',
-                'key_fingerprint': 'SHA256:' + 'b' * 43, 'outcome': 'succeeded'})
+            # Enrollments recorded by earlier Workstation releases stay visible.
+            service.audit.record(service.audit.context(credential['credential_id']),
+                'SSH controller key enrollment', 'completed', command_id=str(uuid4()),
+                enrollment=('root@[vps.example]:22', 'SHA256:' + 'b' * 43, 'succeeded'))
             events = self.client.get('/api/v1/system/workstation-audit', headers=headers).json()['items']
             enrolled = next(event for event in events if event['target'])
             self.assertEqual(enrolled['outcome'], 'succeeded')

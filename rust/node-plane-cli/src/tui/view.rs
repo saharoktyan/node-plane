@@ -789,7 +789,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                 Screen::Controller if app.controller_sidebar => {
                     Some(Control::Action(app.form.action))
                 }
-                Screen::Nodes if app.nodes_sidebar => Some(Control::Action(Action::PrepareNode)),
+                Screen::Nodes if app.nodes_sidebar => Some(Control::Action(Action::Nodes)),
                 Screen::Temporary if app.temporary_sidebar => Some(Control::Temporary),
                 Screen::Form if app.form.selected == 0 && !app.quick_focus => {
                     Some(Control::Action(app.form.action))
@@ -1033,15 +1033,13 @@ pub(super) fn preparation_step(action: Action, stage: &str) -> (usize, usize) {
                 4
             }
         }
-        Action::PrepareNode => {
+        Action::Nodes => {
             if stage.starts_with("Connecting to the controller") {
                 1
             } else if stage.starts_with("Authorizing") {
                 2
-            } else if stage.starts_with("Connecting to the target") {
-                3
             } else {
-                4
+                3
             }
         }
         Action::Diagnose => {
@@ -1070,7 +1068,7 @@ pub(super) fn preparation_step(action: Action, stage: &str) -> (usize, usize) {
     (
         step,
         match action {
-            Action::Diagnose => 3,
+            Action::Diagnose | Action::Nodes => 3,
             Action::Install => 5,
             _ => 4,
         },

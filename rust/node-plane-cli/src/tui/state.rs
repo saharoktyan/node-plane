@@ -413,9 +413,6 @@ impl Form {
                 r.admin_ids.clone(),
                 String::new(),
                 r.workflow.account.clone(),
-                r.workflow.target_host.clone(),
-                r.workflow.target_port.to_string(),
-                r.workflow.target_user.clone(),
                 r.workflow.repair.to_string(),
             ],
             selected: 0,
@@ -435,9 +432,9 @@ impl Form {
         }
         let all: &[usize] = match self.action {
             Action::Install => &[0, 1, 2, 3, 6, 5, 4],
-            Action::Diagnose => &[0, 1, 2, 11],
+            Action::Diagnose => &[0, 1, 2, 8],
             Action::Update => &[0, 1, 2, 3, 4],
-            Action::PrepareNode => &[0, 1, 2, 8, 9, 10],
+            Action::Nodes => &[0, 1, 2],
         };
         all.iter()
             .copied()
@@ -492,9 +489,9 @@ impl Form {
         };
         let value = self.fields[index].trim();
         match index {
-            0 | 8 => Installation::validate_field(1, value)?,
-            1 | 9 => Installation::validate_field(2, value)?,
-            2 | 10 => Installation::validate_field(3, value)?,
+            0 => Installation::validate_field(1, value)?,
+            1 => Installation::validate_field(2, value)?,
+            2 => Installation::validate_field(3, value)?,
             3 => Installation::validate_field(4, value)?,
             4 => anyhow::ensure!(
                 value.is_empty() || crate::config::valid_tag(value),
@@ -538,7 +535,7 @@ impl Form {
             r.workflow.operation = None;
         }
         r.action = self.action;
-        r.workflow.repair = self.fields.get(11).is_some_and(|v| v == "true");
+        r.workflow.repair = self.fields.get(8).is_some_and(|v| v == "true");
         r.host = self.fields[0].trim().into();
         r.port = self.fields[1].trim().parse()?;
         r.user = self.fields[2].trim().into();
@@ -547,9 +544,6 @@ impl Form {
         r.admin_ids = self.fields[5].trim().into();
         r.bot_token = Zeroizing::new(self.fields[6].trim().to_owned());
         r.workflow.account = self.fields[7].trim().into();
-        r.workflow.target_host = self.fields[8].trim().into();
-        r.workflow.target_port = self.fields[9].trim().parse()?;
-        r.workflow.target_user = self.fields[10].trim().into();
         r.validate()
     }
     pub(super) fn installation(&self) -> Installation {
@@ -572,15 +566,6 @@ impl Form {
         }
     }
     pub(super) fn use_installation(&mut self, profile: &Installation) {
-        if !profile.matches(
-            &self.fields[0],
-            self.fields[1].trim().parse().unwrap_or(22),
-            &self.fields[2],
-        ) {
-            self.fields[8].clear();
-            self.fields[9] = "22".into();
-            self.fields[10] = "root".into();
-        }
         self.fields[0] = profile.host.clone();
         self.fields[1] = profile.port.to_string();
         self.fields[2] = profile.user.clone();
@@ -599,7 +584,7 @@ impl Form {
     pub(super) fn append(&mut self, text: &str) {
         if self.selected > 0 && self.selected <= self.visible().len() {
             let index = self.visible()[self.selected - 1];
-            if matches!(index, 3 | 11) {
+            if matches!(index, 3 | 8) {
                 return;
             }
             let field = &mut self.fields[index];

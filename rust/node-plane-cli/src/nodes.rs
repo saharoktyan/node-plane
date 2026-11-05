@@ -889,7 +889,7 @@ impl Worker {
                                         .await
                                     }
                                     crate::config::Action::Update
-                                    | crate::config::Action::PrepareNode => {
+                                    | crate::config::Action::Nodes => {
                                         crate::workstation::execute_connected(
                                             *request,
                                             ssh,

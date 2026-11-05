@@ -8,7 +8,9 @@
   once with the controller's key (added to the server beforehand) and runs
   that command. Updates, agent-only setup and restore no longer use SSH;
   `setup_driver_agents.sh` installs only the controller's own agent and
-  keeps the routes of remote ones.
+  keeps the routes of remote ones. Workstation's **Prepare SSH access** and
+  its `prepare-node` command, which added the controller's key to a server,
+  are removed.
 - Remove remote nodes without SSH: before it removes itself, the agent
   checks that the runtime, its configs and containers are gone and reports
   that with the server's machine-id, recorded before draining. The node is

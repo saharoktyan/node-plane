@@ -248,7 +248,7 @@ impl App {
                 } else {
                     controls.extend(self.form.visible().iter().enumerate().map(
                         |(position, index)| {
-                            if *index == 11 {
+                            if *index == 8 {
                                 Control::RepairMode
                             } else {
                                 Control::Field(position + 1)

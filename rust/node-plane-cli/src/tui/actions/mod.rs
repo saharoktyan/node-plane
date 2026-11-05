@@ -462,7 +462,7 @@ impl App {
                 self.error.clear();
                 if action == Action::Install && self.has_installation() {
                     self.open_controller();
-                } else if action == Action::PrepareNode {
+                } else if action == Action::Nodes {
                     self.open_nodes();
                 } else if action == Action::Update {
                     self.open_controller();

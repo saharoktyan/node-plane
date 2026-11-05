@@ -1282,14 +1282,14 @@ fn diagnostic_recovery_preference_survives_reopening_workstation() {
     let state = tempfile::tempdir().unwrap();
     let mut app = test_profile_app();
     app.state_dir = state.path().into();
-    app.form.fields[11] = "false".into();
+    app.form.fields[8] = "false".into();
     app.toggle_diagnostic_recovery();
     assert!(Connections::load(state.path()).unwrap().diagnostic_recovery);
     let mut request = test_request();
     request.state_dir = state.path().into();
     let mut reopened = App::new(&request);
     reopened.load_connections(&request).unwrap();
-    assert_eq!(reopened.form.fields[11], "true");
+    assert_eq!(reopened.form.fields[8], "true");
     reopened.toggle_diagnostic_recovery();
     assert!(!Connections::load(state.path()).unwrap().diagnostic_recovery);
 }
@@ -1299,7 +1299,11 @@ fn workflow_confirmation_explains_the_selected_action_without_installation_boile
     let mut app = test_profile_app();
     let mut titles = std::collections::HashSet::new();
     app.form.fields[6] = "SECRET_TOKEN".into();
-    for action in Action::ALL {
+    // Nodes is a screen; it runs no workflow.
+    for action in Action::ALL
+        .into_iter()
+        .filter(|action| *action != Action::Nodes)
+    {
         app.form.select_action(action);
         let (title, description) = app.workflow_confirmation();
         titles.insert(title);
@@ -1307,7 +1311,7 @@ fn workflow_confirmation_explains_the_selected_action_without_installation_boile
         assert!(!description.contains("SECRET_TOKEN"));
         assert!(description.contains("controller.example"));
     }
-    assert_eq!(titles.len(), 4);
+    assert_eq!(titles.len(), 3);
 }
 
 #[test]
@@ -2826,18 +2830,15 @@ fn action_specific_fields_do_not_edit_hidden_credentials() {
     let mut form = Form {
         action: Action::Update,
         diagnostic_menu: false,
-        fields: vec![String::new(); 11],
+        fields: vec![String::new(); 9],
         selected: 6,
         saved: None,
     };
     form.append("admin-account");
     assert!(form.fields[7].is_empty());
     assert!(form.fields[5].is_empty());
-    form.action = Action::PrepareNode;
-    form.selected = 4;
-    form.append("target.example");
-    assert_eq!(form.fields[8], "target.example");
-    assert!(form.fields[6].is_empty());
+    form.cycle(false);
+    assert!(form.action == Action::Nodes);
     form.cycle(false);
     assert!(form.action == Action::Diagnose);
     form.cycle(false);
@@ -3754,16 +3755,17 @@ fn mouse_selects_sidebar_and_fields_and_preserves_hidden_credentials() {
     let action = app
         .hits
         .iter()
-        .find(|hit| matches!(hit.control, Control::Action(Action::PrepareNode)))
+        .find(|hit| matches!(hit.control, Control::Action(Action::Nodes)))
         .unwrap()
         .area;
     assert!(click(&mut app, (action.x + 1, action.y + 1)).is_none());
-    assert!(app.form.action == Action::PrepareNode);
+    assert!(app.form.action == Action::Nodes);
     assert!(matches!(app.screen, Screen::Nodes));
     assert!(matches!(
         app.nodes_requested.take(),
         Some(crate::nodes::Command::List)
     ));
+    app.form.select_action(Action::Update);
     app.screen = Screen::Form;
     app.form.selected = 1;
     terminal
@@ -3773,7 +3775,7 @@ fn mouse_selects_sidebar_and_fields_and_preserves_hidden_credentials() {
         .form
         .visible()
         .iter()
-        .position(|&index| index == 8)
+        .position(|&index| index == 4)
         .unwrap()
         + 1;
     let field = app
@@ -3783,8 +3785,8 @@ fn mouse_selects_sidebar_and_fields_and_preserves_hidden_credentials() {
         .unwrap()
         .area;
     click(&mut app, (field.x + 1, field.y + 1));
-    app.form.append("node.example");
-    assert_eq!(app.form.fields[8], "node.example");
+    app.form.append("v0.5.0");
+    assert_eq!(app.form.fields[4], "v0.5.0");
     assert!(app.form.fields[6].is_empty());
     let button = app
         .hits
@@ -3900,20 +3902,19 @@ fn saved_installations_restore_and_hide_filled_fields_without_saving_secrets() {
     restarted.load_connections(&request).unwrap();
     assert_eq!(restarted.form.fields[4], "");
     restarted.form.select_action(Action::Diagnose);
-    assert_eq!(restarted.form.visible(), vec![11]);
+    assert_eq!(restarted.form.visible(), vec![8]);
     restarted.form.select_action(Action::Install);
     assert_eq!(restarted.form.visible(), vec![6, 4]);
 }
 #[test]
-fn switching_installations_drops_target_and_secret_and_does_not_reuse_another_update() {
+fn switching_installations_drops_secret_and_does_not_reuse_another_update() {
     let mut request = test_request();
     request.workflow.operation = Some(uuid::Uuid::new_v4());
     let mut form = Form::new(&request);
     form.fields[6] = "TOKEN".into();
-    form.fields[8] = "previous-target.example".into();
     let profile = saved_installation("other.example");
     form.use_installation(&profile);
-    assert!(form.fields[6].is_empty() && form.fields[8].is_empty());
+    assert!(form.fields[6].is_empty());
     form.apply(&mut request).unwrap();
     assert!(request.workflow.operation.is_none());
     assert_eq!(request.host, profile.host);
@@ -4099,7 +4100,6 @@ fn quick_switcher_wraps_profiles_and_new_selection_survives_restart() {
     app.load_connections(&request).unwrap();
     assert_eq!(app.profile_index(), 0);
     app.form.fields[6] = "SECRET".into();
-    app.form.fields[8] = "old-target.example".into();
     app.cycle_profile(false).unwrap();
     assert_eq!(app.form.saved.as_ref().unwrap().id, two.id);
     assert!(matches!(app.screen, Screen::Idle));
@@ -4109,7 +4109,7 @@ fn quick_switcher_wraps_profiles_and_new_selection_survives_restart() {
         serde_json::json!({"installed":true}),
     )));
     assert!(matches!(app.screen, Screen::Idle));
-    assert!(app.form.fields[6].is_empty() && app.form.fields[8].is_empty());
+    assert!(app.form.fields[6].is_empty());
     app.cycle_profile(false).unwrap();
     assert!(!app.actions_enabled());
     let mut restarted = App::new(&request);
@@ -4262,7 +4262,7 @@ fn browser_node(key: &str, region: &str) -> crate::nodes::Node {
 #[test]
 fn nodes_resize_search_and_fold_remain_local_without_new_requests() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     assert!(matches!(
         app.nodes_requested.take(),
         Some(crate::nodes::Command::List)
@@ -4293,7 +4293,7 @@ fn nodes_resize_search_and_fold_remain_local_without_new_requests() {
 #[test]
 fn agent_only_card_switches_to_protocol_installation_after_protocol_is_added() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
     node.protocols.clear();
@@ -4337,7 +4337,7 @@ fn agent_only_card_switches_to_protocol_installation_after_protocol_is_added() {
 #[test]
 fn node_card_bootstrap_checks_prerequisites_in_worker_and_hides_mutations_while_busy() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
     app.nodes.card = Some(node.clone());
@@ -4415,7 +4415,7 @@ fn sidebar_right_enters_content_and_settings_escape_returns_to_settings() {
     }
     assert!(app.section_navigation(KeyCode::Esc));
     assert!(matches!(app.screen, Screen::Idle));
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     app.nodes_sidebar = true;
     app.nodes_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
@@ -4425,7 +4425,7 @@ fn sidebar_right_enters_content_and_settings_escape_returns_to_settings() {
 #[test]
 fn node_card_arrows_follow_button_geometry_after_resize() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
     node.transport = Some("ssh".into());
@@ -4547,7 +4547,7 @@ fn empty_profiles_actions_fill_the_row_and_small_grids_stay_in_bounds() {
 #[test]
 fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
     node.transport = Some("ssh".into());
@@ -4628,7 +4628,7 @@ fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {
 #[test]
 fn nodes_worker_returns_to_browser_and_profile_switch_drops_cached_nodes() {
     let mut app = test_profile_app();
-    app.activate(Control::Action(Action::PrepareNode));
+    app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     app.nodes_busy = true;
     app.screen = Screen::Running;
@@ -4770,7 +4770,7 @@ fn removed_installation_disables_server_actions_and_can_be_checked_manually() {
         serde_json::json!({"installed":false}),
     )));
     assert!(!app.controller_ready());
-    for action in [Action::Update, Action::Diagnose, Action::PrepareNode] {
+    for action in [Action::Update, Action::Diagnose, Action::Nodes] {
         app.activate(Control::Action(action));
         assert!(app.nodes_requested.is_none());
     }
@@ -4789,7 +4789,7 @@ fn removed_installation_disables_server_actions_and_can_be_checked_manually() {
     );
     assert!(!app.hits.iter().any(|hit| matches!(
         hit.control,
-        Control::Action(Action::Update | Action::Diagnose | Action::PrepareNode)
+        Control::Action(Action::Update | Action::Diagnose | Action::Nodes)
             | Control::Access
             | Control::Temporary
     )));

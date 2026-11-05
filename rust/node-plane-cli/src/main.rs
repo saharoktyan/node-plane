@@ -4,7 +4,6 @@ mod backend;
 mod config;
 mod connections;
 mod controller;
-mod enrollment;
 mod events;
 mod installer;
 mod node_editor;
@@ -106,21 +105,6 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
-    /// Add the controller's public key to a target VPS and verify its SSH access.
-    PrepareNode {
-        #[command(flatten)]
-        connection: Connection,
-        #[arg(long)]
-        target: String,
-        #[arg(long, default_value = "root")]
-        target_user: String,
-        #[arg(long, default_value_t = 22)]
-        target_port: u16,
-        #[arg(long, default_value = "")]
-        account: String,
-        #[arg(long)]
-        yes: bool,
-    },
 }
 
 fn main() {
@@ -188,25 +172,6 @@ fn entry() -> Result<()> {
             request.tag = tag;
             request.workflow.account = account;
             request.workflow.operation = operation;
-            request.workflow.yes = yes;
-        }
-        Some(Command::PrepareNode {
-            connection,
-            target,
-            target_user,
-            target_port,
-            account,
-            yes,
-        }) => {
-            request.action = Action::PrepareNode;
-            request.host = connection.host;
-            request.port = connection.port;
-            request.user = connection.user;
-            request.branch.clear();
-            request.workflow.target_host = target;
-            request.workflow.target_user = target_user;
-            request.workflow.target_port = target_port;
-            request.workflow.account = account;
             request.workflow.yes = yes;
         }
         None => {}
@@ -451,7 +416,7 @@ pub fn spawn(
                         Action::Install | Action::Diagnose => {
                             installer::execute(request, interaction, tx.clone()).await
                         }
-                        Action::Update | Action::PrepareNode => {
+                        Action::Update | Action::Nodes => {
                             workstation::execute(request, interaction, tx.clone()).await
                         }
                     }

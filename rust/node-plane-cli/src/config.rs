@@ -142,21 +142,16 @@ pub enum Action {
     Install,
     Diagnose,
     Update,
-    PrepareNode,
+    Nodes,
 }
 impl Action {
-    pub const ALL: [Self; 4] = [
-        Self::Install,
-        Self::Update,
-        Self::PrepareNode,
-        Self::Diagnose,
-    ];
+    pub const ALL: [Self; 4] = [Self::Install, Self::Update, Self::Nodes, Self::Diagnose];
     pub fn label(self) -> &'static str {
         match self {
             Self::Install => "Install Node Plane",
             Self::Diagnose => "Diagnostic",
             Self::Update => "Node Plane Updates",
-            Self::PrepareNode => "Nodes",
+            Self::Nodes => "Nodes",
         }
     }
 }
@@ -166,9 +161,6 @@ pub struct WorkflowOptions {
     pub stop: Arc<AtomicBool>,
     pub account: String,
     pub operation: Option<uuid::Uuid>,
-    pub target_host: String,
-    pub target_port: u16,
-    pub target_user: String,
 }
 impl Default for WorkflowOptions {
     fn default() -> Self {
@@ -178,9 +170,6 @@ impl Default for WorkflowOptions {
             stop: Arc::new(AtomicBool::new(false)),
             account: String::new(),
             operation: None,
-            target_host: String::new(),
-            target_port: 22,
-            target_user: "root".into(),
         }
     }
 }
@@ -256,7 +245,7 @@ impl Request {
         }
         if matches!(
             self.action,
-            Action::Update | Action::PrepareNode | Action::Diagnose
+            Action::Update | Action::Nodes | Action::Diagnose
         ) && !self.workflow.account.is_empty()
         {
             ensure!(
@@ -268,28 +257,6 @@ impl Request {
                             .parse::<u64>()
                             .is_ok_and(|id| id > 0 && id < 2_u64.pow(63))),
                 "Account must be a backend UUID or a Telegram administrator numeric ID."
-            );
-        }
-        if self.action == Action::PrepareNode {
-            ensure!(
-                !self.workflow.target_host.is_empty()
-                    && self.workflow.target_host.len() <= 253
-                    && self
-                        .workflow
-                        .target_host
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || ".:-".contains(c)),
-                "Enter the target node hostname or IP address."
-            );
-            ensure!(
-                self.workflow.target_port > 0
-                    && !self.workflow.target_user.is_empty()
-                    && self
-                        .workflow
-                        .target_user
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c)),
-                "Enter a valid target SSH user and port."
             );
         }
         Ok(())

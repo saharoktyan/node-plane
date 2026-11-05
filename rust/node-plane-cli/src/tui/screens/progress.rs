@@ -39,7 +39,7 @@ pub(in crate::tui) fn draw_running(frame: &mut Frame, app: &App, area: Rect) {
         let (step, total) = preparation_step(app.form.action, &app.stage);
         let title = match app.form.action {
             Action::Update => " Update preparation ",
-            Action::PrepareNode => " Prepare SSH access ",
+            Action::Nodes => " Nodes ",
             Action::Diagnose => " Diagnostics ",
             Action::Install if app.tracker.completed == 7 => " Verifying installation ",
             Action::Install => " Installation preparation ",
