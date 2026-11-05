@@ -184,6 +184,8 @@ class NodeSettingsService:
             raw = observed['last_runtime_intent_json']
             services = sorted(changed_engines(json.loads(raw) if raw else None, intent['protocols'], intent['settings'])
                               or (set(intent['protocols']) | set(removed)) & set(TYPES))
+            from .service_instances import require_manage
+            require_manage(actor, services)
             task_id = str(uuid4())
             conn.execute('''INSERT INTO backend_node_settings_tasks
                 (id, node_key, actor_account_id, command_key, revision, intent_json, status, services_json)

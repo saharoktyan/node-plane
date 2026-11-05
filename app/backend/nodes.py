@@ -439,6 +439,7 @@ class NodeService:
                 if 'xray' in values['protocols'] and values['settings']['xray_tcp_port'] == values['settings']['xray_xhttp_port']:
                     raise AccessDenied('invalid_input', 422)
                 values.setdefault('xray_transports', (defaults['xray_transports'] or ['tcp', 'xhttp']) if 'xray' in values['protocols'] else [])
+                service_instances.require_manage(actor, set(values['protocols']) & set(service_instances.TYPES))
                 inserted = conn.execute('''INSERT INTO backend_nodes
                     (key, title, region, flag, enabled, protocols_json, xray_transports_json, settings_json)
                     VALUES (?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(key) DO NOTHING RETURNING key''',
@@ -494,6 +495,12 @@ class NodeService:
                 previous_protocols = json.loads(connection['protocols_json'])
                 removed_protocols = sorted(set(previous_protocols) - set(next_values['protocols']))
                 added_protocols = sorted(set(next_values['protocols']) - set(previous_protocols))
+                touched = service_instances.changed_engines(
+                    {'protocols': previous_values['protocols'], 'settings': previous_values['settings']},
+                    next_values['protocols'], next_values['settings'])
+                if next_values['xray_transports'] != previous_values['xray_transports']:
+                    touched.add('xray')
+                service_instances.require_manage(actor, touched)
 
                 runtime_changed = any(next_values[field] != previous_values[field]
                     for field in ('protocols', 'xray_transports', 'settings'))

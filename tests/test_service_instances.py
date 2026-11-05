@@ -29,3 +29,35 @@ class ChangedEnginesTests(unittest.TestCase):
     def test_compared_settings_can_be_limited(self):
         settings = {**self.applied['settings'], 'policy_value': 'x'}
         self.assertEqual(changed_engines(self.applied, ['awg', 'xray'], settings, keys={'awg_port'}), set())
+
+
+class ServicePermissionTests(unittest.TestCase):
+    from tests.test_backend_node_jobs import BackendNodeJobTests
+    setUp = BackendNodeJobTests.setUp
+    del BackendNodeJobTests
+
+    def edit(self, actor, settings):
+        from uuid import uuid4
+        from backend.nodes import NodeService
+        revision = self.db.connection.execute("SELECT desired_revision FROM backend_nodes WHERE key='n1'").fetchone()[0]
+        return NodeService(self.db).command(actor, action='edit', node_key='n1', revision=revision,
+                                            command_key=str(uuid4()), values={'settings': settings})
+
+    def test_a_change_needs_the_permission_of_each_engine_it_touches(self):
+        from unittest.mock import patch
+        from backend.authorization import AccessDenied, Account, Actor, PRESETS
+        operator = Actor(self.actor.principal, Account(self.actor.account.id, 'admin', 'approved', frozenset({'operator'})))
+        limited = {**PRESETS, 'operator': PRESETS['operator'] - {'services.awg.manage'}}
+        with patch.dict('backend.authorization.PRESETS', limited):
+            with self.assertRaises(AccessDenied) as denied:
+                self.edit(operator, {'awg_port': 51999})
+            self.assertEqual(denied.exception.code, 'permission_denied')
+            with self.assertRaises(AccessDenied):
+                self.edit(operator, {'public_host': 'other.example'})
+            self.edit(operator, {'xray_tcp_port': 2053})
+        self.edit(operator, {'awg_port': 51999})
+
+    def test_service_permissions_ride_on_the_nodes_scope(self):
+        from backend.authorization import account_permissions, service_permission
+        self.assertNotIn('services.xray.manage', self.actor.principal.scopes)
+        self.assertIn(service_permission('xray'), account_permissions(self.actor.account))

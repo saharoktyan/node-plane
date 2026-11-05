@@ -50,6 +50,13 @@ def sync_node(conn, node_key):
         conn.execute('DELETE FROM backend_service_instances WHERE node_key=? AND service=?', (node_key, service))
 
 
+def require_manage(actor, services):
+    """The actor may manage every one of these service types."""
+    from .authorization import require_permission, service_permission
+    for service in sorted(services):
+        require_permission(actor, service_permission(service))
+
+
 def sync_all(conn):
     for row in conn.execute('SELECT key FROM backend_nodes ORDER BY key').fetchall():
         sync_node(conn, row['key'])

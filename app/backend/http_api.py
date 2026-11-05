@@ -1308,8 +1308,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return current.public()
         require_permission(current, 'account.self.read')
         permissions = []
-        from .authorization import ROLE_PERMISSIONS
-        for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS | ROLE_PERMISSIONS):
+        from .authorization import ROLE_PERMISSIONS, SERVICE_PERMISSIONS
+        for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS | ROLE_PERMISSIONS
+                                 | SERVICE_PERMISSIONS):
             try:
                 require_permission(current, permission)
             except AccessDenied:

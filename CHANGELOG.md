@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Each service type on nodes has a permission (`services.xray.manage`,
+  `services.awg.manage`), held by owners, administrators and operators and
+  listed by `GET /api/v1/me`. Editing node settings and queueing their
+  application need it for every engine the change touches. Clients use the
+  existing `nodes.manage` token scope for it, so no session has to reconnect.
 - Notifications and the bot's administration menu follow roles instead of
   the administrator flag: access requests reach support too, node alerts
   reach operators, and each role sees only its sections. The administration

@@ -104,10 +104,12 @@ Staff hold roles; every other account is a member, who manages only their own pr
 |---|---|
 | Owner | everything, including changing other owners; an installation always keeps one owner |
 | Administrator | everything except changing owners |
-| Operator | servers: setup, settings, diagnostics, maintenance |
+| Operator | servers and their services (Xray, AmneziaWG): setup, settings, diagnostics, maintenance |
 | Support | access requests, profiles, and issuing configurations for people |
 
 The first administrators of an installation are owners. Promoting a member makes an administrator; only an owner demotes an owner.
+
+Each type of service on servers has its own permission (`services.xray.manage`, `services.awg.manage`); owners, administrators and operators hold them. Changing a server's settings, or applying them, needs the permission of every engine the change touches; a setting shared by the engines, such as the public address, touches all of them.
 
 Notifications follow the roles: access requests go to those who handle them (owners, administrators, support), node alerts to those who manage servers (owners, administrators, operators), shared-link alerts to those who manage profiles, and update notices to owners and administrators. The bot's administration menu shows only the sections a role allows.
 

@@ -83,11 +83,22 @@ ADMIN_PERMISSIONS = frozenset({
 # roles add to them. Custom roles would be further rows of `backend_roles`.
 MEMBER_PERMISSIONS = SELF_PERMISSIONS | APPROVED_PERMISSIONS
 ROLE_PERMISSIONS = frozenset({"roles.manage"})
+
+
+def service_permission(service: str) -> str:
+    """Managing one type of service on nodes: its instances, settings and
+    their application. Clients ask for it with the `nodes.manage` scope;
+    the account's roles decide which types."""
+    return f"services.{service}.manage"
+
+
+from db.migration_revisions.r0033_service_instances import TYPES as _SERVICE_TYPES  # noqa: E402
+SERVICE_PERMISSIONS = frozenset(service_permission(service) for service in _SERVICE_TYPES)
 PRESETS = {
-    "owner": ADMIN_PERMISSIONS | ROLE_PERMISSIONS,
-    "admin": ADMIN_PERMISSIONS,
+    "owner": ADMIN_PERMISSIONS | ROLE_PERMISSIONS | SERVICE_PERMISSIONS,
+    "admin": ADMIN_PERMISSIONS | SERVICE_PERMISSIONS,
     "operator": frozenset({"nodes.manage", "nodes.inspect", "nodes.execute", "maintenance.manage",
-                           "diagnostics.sensitive.read"}),
+                           "diagnostics.sensitive.read"}) | SERVICE_PERMISSIONS,
     "support": frozenset({"access_requests.manage", "profiles.manage", "configs.manage.read",
                           "configs.manage.issue"}),
 }
@@ -143,7 +154,8 @@ def require_permission(actor: Actor, permission: str) -> None:
         raise AccessDenied("account_disabled")
     if actor.account.role not in {"member", "admin"} or actor.account.status != "approved":
         raise AccessDenied("invalid_account_state")
-    if permission not in actor.principal.scopes:
+    scope = "nodes.manage" if permission.startswith("services.") else permission
+    if scope not in actor.principal.scopes:
         raise AccessDenied("permission_denied")
     if permission not in account_permissions(actor.account):
         raise AccessDenied("permission_denied")
