@@ -14,7 +14,7 @@ from node_public_settings import merge_settings
 
 from .authorization import AccessDenied, require_permission
 from .profiles import _cursor, _page
-from .service_instances import vpn_public
+from . import service_instances
 
 
 _KEY = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
@@ -231,8 +231,8 @@ class NodeService:
                 # A server is a node once its agent is installed; before that
                 # the record is an invitation to install it.
                 'stage': 'node' if row['agent_installed'] else 'invitation',
-                # Services on the node; VPN is the first type.
-                'service_instances': [instance for instance in (vpn_public(row, bool(row['agent_installed'])),) if instance],
+                # Services on the node: the VPN engines xray and awg for now.
+                'service_instances': service_instances.public(row, bool(row['agent_installed'])),
                 'agent': ({'method': row['agent_method'], 'installed_at': row['agent_installed_at'],
                            'version': row['agent_version'], 'checked_at': row['agent_checked_at']}
                           if row['agent_method'] else None),
@@ -248,7 +248,7 @@ class NodeService:
         return f'''SELECT n.*, c.transport, c.ssh_target, m.notes, r.region_id,
             ai.method AS agent_method, ai.installed_at AS agent_installed_at,
             ai.agent_version AS agent_version, ai.checked_at AS agent_checked_at,
-            si.id AS vpn_instance_id,
+            {service_instances.SELECT_SQL},
             (SELECT history.intent_json FROM (
                 SELECT s.node_key,s.revision,s.intent_json FROM backend_node_settings_tasks s WHERE s.status='succeeded'
                 UNION ALL
@@ -269,8 +269,7 @@ class NodeService:
             LEFT JOIN backend_node_connections c ON c.node_key = n.key
             LEFT JOIN backend_node_notes m ON m.node_key = n.key
             LEFT JOIN backend_node_regions r ON r.node_key = n.key
-            LEFT JOIN backend_agent_installations ai ON ai.node_key = n.key
-            LEFT JOIN backend_service_instances si ON si.node_key = n.key AND si.service = 'vpn' '''
+            LEFT JOIN backend_agent_installations ai ON ai.node_key = n.key'''
 
     def list(self, actor, *, limit=25, cursor=None, search=None, order="key", stage=None):
         """Nodes and invitations; `stage` keeps one of them."""
@@ -539,8 +538,7 @@ class NodeService:
                 reconcile(conn, actor)
             elif action == 'edit' and added_protocols:
                 reconcile(conn, actor)
-            from .service_instances import sync_vpn
-            sync_vpn(conn, node_key)
+            service_instances.sync_node(conn, node_key)
             row = conn.execute(self._select() + ' WHERE n.key = ?', (node_key,)).fetchone()
             if 'notes' in values:
                 conn.execute('INSERT INTO backend_node_notes(node_key, notes) VALUES (?, ?) ON CONFLICT(node_key) DO UPDATE SET notes = excluded.notes', (node_key, values['notes']))

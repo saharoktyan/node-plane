@@ -160,8 +160,8 @@ class NodeOperations:
             if row['action'] in INVALIDATE and row['action'] != 'cleanup_runtime':
                 conn.execute('UPDATE backend_nodes SET applied_revision = ?, enabled = 1 WHERE key = ? AND desired_revision = ?',
                              (row['revision'], row['node_key'], row['revision']))
-            from .service_instances import sync_vpn
-            sync_vpn(conn, row['node_key'])
+            from .service_instances import sync_node
+            sync_node(conn, row['node_key'])
             if row['action'] in INVALIDATE | {'reconcile_access'} and row['action'] != 'cleanup_runtime':
                 actor = SimpleNamespace(account=SimpleNamespace(id=row['actor_id']))
                 from .grant_policies import reconcile

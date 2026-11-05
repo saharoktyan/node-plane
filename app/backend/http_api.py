@@ -555,7 +555,8 @@ class AdminNodeOutput(BaseModel):
     setup_attempted: bool = True
     # `node` once the agent is installed, `invitation` before.
     stage: Literal['node', 'invitation'] = 'invitation'
-    # Services on the node (`vpn` for now), each with its own state.
+    # Services on the node (the VPN engines `xray` and `awg` for now), each
+    # with its own state; Xray lists the protocols it serves as `inbounds`.
     service_instances: list[dict] = []
     # How the agent was installed and what it last reported; None before.
     agent: dict | None = None

@@ -2,12 +2,14 @@
 
 ## Unreleased
 
-- Services on a node have their own records (migration r0033). VPN is the
-  first type: a node carries a `vpn` instance while it has VPN protocols, and
-  until the removal of its last protocol is applied on the server. Nodes in
-  the API list them in `service_instances` (id, service, state `planned`,
-  `active`, `changes_pending` or `removing`, protocols and revisions). The
-  VPN configuration itself stays with the node for now.
+- Services on a node have their own records (migration r0033), one per VPN
+  engine: `xray` and `awg`. An instance exists while the node has that
+  protocol, and until the removal of the protocol is applied on the server.
+  Nodes in the API list them in `service_instances` (id, service, state
+  `planned`, `active`, `changes_pending` or `removing`, revisions); Xray lists
+  the protocols it serves as `inbounds` (VLESS over each transport), so new
+  Xray protocols become new inbounds rather than new services. The engines'
+  configuration stays with the node for now.
 - A server is a node once its agent is installed; before that it is an
   invitation to install the agent. Nodes in the API carry `stage` (`node` or
   `invitation`) instead of `agent_installed`, `GET /api/v1/nodes` takes
