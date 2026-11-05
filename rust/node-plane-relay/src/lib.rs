@@ -6,6 +6,7 @@
 //! API and sends the responses back. The relay has no powers of its own;
 //! the controller's API checks every request (see `relay-design.md`).
 pub mod headers;
+pub mod keys;
 pub mod link;
 pub mod serve;
 
@@ -14,15 +15,3 @@ pub mod proto {
 }
 
 pub const VERSION: &str = env!("NODE_PLANE_BINARY_VERSION");
-
-/// Reads a shared link token; it must be long enough to resist guessing.
-pub fn read_token(path: &str) -> Result<String, String> {
-    let token = std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
-    let token = token.trim().to_string();
-    if token.len() < 32 || token.chars().any(char::is_whitespace) {
-        return Err(format!(
-            "{path}: the link token must be at least 32 characters"
-        ));
-    }
-    Ok(token)
-}

@@ -514,6 +514,7 @@ dependencies = [
  "hyper-util",
  "node-plane-api",
  "prost",
+ "ring",
  "serde_json",
  "tokio",
  "tokio-stream",

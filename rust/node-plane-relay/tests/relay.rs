@@ -1,5 +1,13 @@
 //! `serve`, `link` and a fake controller API on loopback ports.
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use axum::{
     Json, Router,
@@ -10,10 +18,42 @@ use axum::{
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use node_plane_relay::{link, serve};
+use node_plane_relay::{keys, link, serve};
+use ring::signature::Ed25519KeyPair;
 use serde_json::{Value, json};
 
-const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+/// A relay's state directory with the controller's key pinned, and the
+/// controller's key.
+struct Pair {
+    dir: PathBuf,
+    relay_key: Vec<u8>,
+    link_key: Arc<Ed25519KeyPair>,
+}
+
+impl Pair {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "relay-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let relay = keys::load_or_create(&dir.join("relay.key")).unwrap();
+        let link = keys::load_or_create(&dir.join("link.key")).unwrap();
+        std::fs::write(dir.join("link.pub"), keys::hex(&keys::public(&link))).unwrap();
+        Self {
+            relay_key: keys::public(&relay),
+            link_key: Arc::new(link),
+            dir,
+        }
+    }
+}
+
+impl Drop for Pair {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
 
 async fn listen(router: Router) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -61,18 +101,20 @@ fn fake_api() -> Router {
         .route("/api/v1/*rest", any(echo))
 }
 
-async fn relay(limits: serve::Limits) -> SocketAddr {
+async fn relay(pair: &Pair, limits: serve::Limits) -> SocketAddr {
     listen(serve::router(serve::Config {
-        token: TOKEN.into(),
+        key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
+        link_key_path: pair.dir.join("link.pub"),
         limits,
     }))
     .await
 }
 
-fn link_config(relay: SocketAddr, api: SocketAddr) -> link::Config {
+fn link_config(pair: &Pair, relay: SocketAddr, api: SocketAddr) -> link::Config {
     link::Config {
         relay: format!("http://{relay}"),
-        token: TOKEN.into(),
+        relay_key: pair.relay_key.clone(),
+        key: pair.link_key.clone(),
         api: format!("http://{api}"),
         limits: link::Limits {
             response_body: 16 << 10,
@@ -111,7 +153,8 @@ async fn wait_for_link(relay: SocketAddr, state: &str) {
 
 #[tokio::test]
 async fn without_a_link_the_relay_answers_controller_unavailable() {
-    let relay = relay(serve::Limits::default()).await;
+    let pair = Pair::new();
+    let relay = relay(&pair, serve::Limits::default()).await;
     let (status, headers, body) = get_json(relay, "/health").await;
     assert_eq!(
         (status, body),
@@ -137,11 +180,12 @@ async fn without_a_link_the_relay_answers_controller_unavailable() {
 
 #[tokio::test]
 async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
+    let pair = Pair::new();
     let (relay, api) = (
-        relay(serve::Limits::default()).await,
+        relay(&pair, serve::Limits::default()).await,
         listen(fake_api()).await,
     );
-    tokio::spawn(link::run(link_config(relay, api)));
+    tokio::spawn(link::run(link_config(&pair, relay, api)));
     wait_for_link(relay, "connected").await;
 
     let request = Request::post(format!("http://{relay}/api/v1/profiles/p1?x=1"))
@@ -172,13 +216,14 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
 
 #[tokio::test]
 async fn the_relay_enforces_its_limits() {
+    let pair = Pair::new();
     let limits = serve::Limits {
         request_body: 1024,
         timeout: Duration::from_millis(300),
         ..serve::Limits::default()
     };
-    let (relay, api) = (relay(limits).await, listen(fake_api()).await);
-    tokio::spawn(link::run(link_config(relay, api)));
+    let (relay, api) = (relay(&pair, limits).await, listen(fake_api()).await);
+    tokio::spawn(link::run(link_config(&pair, relay, api)));
     wait_for_link(relay, "connected").await;
 
     let large = Request::post(format!("http://{relay}/api/v1/echo"))
@@ -203,27 +248,49 @@ async fn the_relay_enforces_its_limits() {
     );
 }
 
+async fn refused(config: &link::Config) -> String {
+    let mut established = false;
+    let error = link::session(config, &mut established).await.unwrap_err();
+    assert!(!established, "{error}");
+    error
+}
+
 #[tokio::test]
-async fn a_link_with_the_wrong_token_is_refused() {
+async fn only_the_pinned_keys_attach() {
+    let pair = Pair::new();
     let (relay, api) = (
-        relay(serve::Limits::default()).await,
+        relay(&pair, serve::Limits::default()).await,
         listen(fake_api()).await,
     );
-    let mut config = link_config(relay, api);
-    config.token = "f".repeat(32);
-    let mut established = false;
-    let error = link::session(&config, &mut established).await.unwrap_err();
-    assert!(!established && error.contains("does not match"), "{error}");
+    let stranger = Pair::new();
+
+    // Another controller's key.
+    let mut config = link_config(&pair, relay, api);
+    config.key = stranger.link_key.clone();
+    let error = refused(&config).await;
+    assert!(error.contains("not the controller's"), "{error}");
+
+    // A server that is not the pinned relay.
+    let mut config = link_config(&pair, relay, api);
+    config.relay_key = stranger.relay_key.clone();
+    let error = refused(&config).await;
+    assert!(error.contains("did not prove its key"), "{error}");
+
+    // No controller pinned on the relay.
+    std::fs::remove_file(pair.dir.join("link.pub")).unwrap();
+    let error = refused(&link_config(&pair, relay, api)).await;
+    assert!(error.contains("not the controller's"), "{error}");
     assert_eq!(get_json(relay, "/health").await.2["link"], "disconnected");
 }
 
 #[tokio::test]
 async fn a_newer_link_replaces_the_older_one() {
+    let pair = Pair::new();
     let (relay, api) = (
-        relay(serve::Limits::default()).await,
+        relay(&pair, serve::Limits::default()).await,
         listen(fake_api()).await,
     );
-    let config = link_config(relay, api);
+    let config = link_config(&pair, relay, api);
     let first = tokio::spawn({
         let config = config.clone();
         async move {
@@ -242,12 +309,13 @@ async fn a_newer_link_replaces_the_older_one() {
 
 #[tokio::test]
 async fn an_unreachable_api_answers_bad_gateway() {
-    let relay = relay(serve::Limits::default()).await;
+    let pair = Pair::new();
+    let relay = relay(&pair, serve::Limits::default()).await;
     // Nothing listens on the API port yet.
     let spare = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let api = spare.local_addr().unwrap();
     drop(spare);
-    tokio::spawn(link::run(link_config(relay, api)));
+    tokio::spawn(link::run(link_config(&pair, relay, api)));
     wait_for_link(relay, "connected").await;
     let (status, _, body) = get_json(relay, "/api/v1/me").await;
     assert_eq!(
@@ -256,18 +324,33 @@ async fn an_unreachable_api_answers_bad_gateway() {
     );
 }
 
-/// The binary itself: `serve` and `link` as processes, set up from the environment.
+/// The binary itself: `serve` and `link` as processes, set up from the
+/// environment, with keys made by `key`.
 #[tokio::test]
 async fn the_binary_serves_and_links() {
     let api = listen(fake_api()).await;
-    let dir = std::env::temp_dir().join(format!("relay-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let token = dir.join("token");
-    std::fs::write(&token, format!("{TOKEN}\n")).unwrap();
+    let pair = Pair::new();
+    let binary = env!("CARGO_BIN_EXE_node-plane-relay");
+    let key = |path: PathBuf| {
+        let output = std::process::Command::new(binary)
+            .arg("key")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    // The relay's key is new; the controller's is the pinned one.
+    let relay_key = key(pair.dir.join("state/relay.key"));
+    std::fs::copy(pair.dir.join("link.pub"), pair.dir.join("state/link.pub")).unwrap();
+    assert_eq!(
+        key(pair.dir.join("link.key")),
+        keys::hex(&keys::public(&pair.link_key))
+    );
+
     let spare = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let relay = spare.local_addr().unwrap();
     drop(spare);
-    let binary = env!("CARGO_BIN_EXE_node-plane-relay");
     let spawn = |args: &[(&str, String)], command: &str| {
         tokio::process::Command::new(binary)
             .arg(command)
@@ -280,8 +363,8 @@ async fn the_binary_serves_and_links() {
         &[
             ("NODE_PLANE_RELAY_LISTEN", relay.to_string()),
             (
-                "NODE_PLANE_RELAY_LINK_TOKEN_FILE",
-                token.display().to_string(),
+                "NODE_PLANE_RELAY_STATE_DIR",
+                pair.dir.join("state").display().to_string(),
             ),
         ],
         "serve",
@@ -289,7 +372,11 @@ async fn the_binary_serves_and_links() {
     let _link = spawn(
         &[
             ("NODE_PLANE_RELAY_URL", format!("http://{relay}")),
-            ("NODE_PLANE_RELAY_TOKEN_FILE", token.display().to_string()),
+            ("NODE_PLANE_RELAY_KEY", relay_key),
+            (
+                "NODE_PLANE_RELAY_LINK_KEY_FILE",
+                pair.dir.join("link.key").display().to_string(),
+            ),
             ("NODE_PLANE_API_URL", format!("http://{api}")),
         ],
         "link",
@@ -307,14 +394,46 @@ async fn the_binary_serves_and_links() {
         (StatusCode::OK, &json!("relay"))
     );
 
-    std::fs::write(&token, "short").unwrap();
     let refused = tokio::process::Command::new(binary)
-        .arg("serve")
-        .env("NODE_PLANE_RELAY_LINK_TOKEN_FILE", &token)
+        .arg("link")
+        .env("NODE_PLANE_RELAY_URL", "http://127.0.0.1:9")
+        .env("NODE_PLANE_RELAY_KEY", "00")
         .output()
         .await
         .unwrap();
     assert_eq!(refused.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("at least 32 characters"));
-    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("not a public key"));
+}
+
+/// Naming the pinned key is not enough: the Hello must be signed with it.
+#[tokio::test]
+async fn a_forged_hello_does_not_attach() {
+    use node_plane_relay::proto::{Hello, LinkMessage, link_client::LinkClient, link_message};
+    let pair = Pair::new();
+    let relay = relay(&pair, serve::Limits::default()).await;
+    let mut client = LinkClient::connect(format!("http://{relay}"))
+        .await
+        .unwrap();
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    let mut request = tonic::Request::new(tokio_stream::wrappers::ReceiverStream::new(rx));
+    let metadata = request.metadata_mut();
+    metadata.insert(
+        serve::LINK_KEY,
+        keys::hex(&keys::public(&pair.link_key)).parse().unwrap(),
+    );
+    metadata.insert(serve::LINK_NONCE, keys::hex(&[7; 32]).parse().unwrap());
+    let mut inbound = client.attach(request).await.unwrap().into_inner();
+    assert!(inbound.message().await.unwrap().is_some(), "no challenge");
+    let forged = Pair::new();
+    let hello = LinkMessage {
+        message: Some(link_message::Message::Hello(Hello {
+            version: "x".into(),
+            signature: keys::sign(&forged.link_key, keys::ATTACH_LINK, &[&[0; 32]]),
+        })),
+    };
+    tx.send(hello).await.unwrap();
+    // The relay drops the stream instead of serving it.
+    let ended = tokio::time::timeout(Duration::from_secs(5), inbound.message()).await;
+    assert!(matches!(ended, Ok(Ok(None)) | Ok(Err(_))), "{ended:?}");
+    assert_eq!(get_json(relay, "/health").await.2["link"], "disconnected");
 }

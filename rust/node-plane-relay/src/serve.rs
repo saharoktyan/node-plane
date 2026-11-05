@@ -1,6 +1,7 @@
 //! The public side: `/api/v1/*` over the controller's link, and `/health`.
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -17,13 +18,17 @@ use axum::{
     routing::{any, get},
 };
 use node_plane_api::{codes, error_body};
+use ring::signature::Ed25519KeyPair;
 use tokio::sync::{Notify, Semaphore, mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Status, Streaming, server::NamedService};
 use uuid::Uuid;
 
+pub const LINK_KEY: &str = "x-node-plane-link-key";
+pub const LINK_NONCE: &str = "x-node-plane-link-nonce";
+
 use crate::{
-    headers,
+    headers, keys,
     proto::{
         self, LinkMessage, RelayMessage, link_message,
         link_server::{Link, LinkServer},
@@ -52,9 +57,16 @@ impl Default for Limits {
 const MAX_LINK_MESSAGE: usize = 5 << 20;
 
 pub struct Config {
-    pub token: String,
+    /// The relay's own key.
+    pub key: Ed25519KeyPair,
+    /// The controller's public key in hex, written by the node's agent. It is
+    /// read at every Attach, so a new controller key needs no restart.
+    pub link_key_path: PathBuf,
     pub limits: Limits,
 }
+
+/// How long the controller has to answer the challenge.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The controller's link while it is connected.
 struct Connection {
@@ -65,7 +77,8 @@ struct Connection {
 }
 
 struct Inner {
-    token: String,
+    key: Ed25519KeyPair,
+    link_key_path: PathBuf,
     limits: Limits,
     current: Mutex<Option<Arc<Connection>>>,
     generations: AtomicU64,
@@ -78,7 +91,8 @@ pub struct Hub(Arc<Inner>);
 
 pub fn router(config: Config) -> Router {
     let hub = Hub(Arc::new(Inner {
-        token: config.token,
+        key: config.key,
+        link_key_path: config.link_key_path,
         limits: config.limits,
         current: Mutex::new(None),
         generations: AtomicU64::new(0),
@@ -100,26 +114,38 @@ impl Hub {
         self.0.current.lock().unwrap().clone()
     }
 
-    fn authorized(&self, metadata: &tonic::metadata::MetadataMap) -> bool {
-        let Some(value) = metadata.get("authorization").and_then(|v| v.to_str().ok()) else {
-            return false;
-        };
-        value
-            .strip_prefix("Bearer ")
-            .is_some_and(|token| same(token.as_bytes(), self.0.token.as_bytes()))
+    /// The controller's key, if one is pinned.
+    fn pinned(&self) -> Option<Vec<u8>> {
+        let text = std::fs::read_to_string(&self.0.link_key_path).ok()?;
+        keys::unhex(&text).filter(|key| key.len() == keys::KEY_LEN)
     }
 
-    /// Serves one link from its Hello until it ends or a newer link replaces it.
+    /// Serves one link from a valid Hello until it ends or a newer link
+    /// replaces it.
     async fn run(
         self,
         mut inbound: Streaming<LinkMessage>,
         tx: mpsc::Sender<Result<RelayMessage, Status>>,
+        link_key: Vec<u8>,
+        nonce: [u8; 32],
     ) {
-        let version = match inbound.message().await {
-            Ok(Some(LinkMessage {
+        let relay_key = keys::public(&self.0.key);
+        let version = match tokio::time::timeout(HELLO_TIMEOUT, inbound.message()).await {
+            Ok(Ok(Some(LinkMessage {
                 message: Some(link_message::Message::Hello(hello)),
-            })) => hello.version,
-            _ => return,
+            }))) if keys::verify(
+                &link_key,
+                keys::ATTACH_LINK,
+                &[&nonce, &relay_key],
+                &hello.signature,
+            ) =>
+            {
+                hello.version
+            }
+            _ => {
+                eprintln!("link refused: no valid hello");
+                return;
+            }
         };
         let connection = Arc::new(Connection {
             generation: self.0.generations.fetch_add(1, Ordering::Relaxed),
@@ -166,11 +192,37 @@ impl Link for Hub {
         &self,
         request: tonic::Request<Streaming<LinkMessage>>,
     ) -> Result<tonic::Response<Self::AttachStream>, Status> {
-        if !self.authorized(request.metadata()) {
-            return Err(Status::unauthenticated("the link token does not match"));
+        let hex = |name| {
+            request
+                .metadata()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .and_then(keys::unhex)
+        };
+        let (Some(link_key), Some(link_nonce)) = (hex(LINK_KEY), hex(LINK_NONCE)) else {
+            return Err(Status::unauthenticated(
+                "the link key and nonce are required",
+            ));
+        };
+        if link_nonce.len() != 32 || self.pinned().as_ref() != Some(&link_key) {
+            return Err(Status::unauthenticated(
+                "the link key is not the controller's",
+            ));
         }
+        let inbound = request.into_inner();
+        let nonce = keys::nonce();
+        let challenge = proto::Challenge {
+            nonce: nonce.to_vec(),
+            signature: keys::sign(&self.0.key, keys::ATTACH_RELAY, &[&link_nonce, &link_key]),
+        };
         let (tx, rx) = mpsc::channel(self.0.limits.concurrent);
-        tokio::spawn(self.clone().run(request.into_inner(), tx));
+        let first = RelayMessage {
+            message: Some(relay_message::Message::Challenge(challenge)),
+        };
+        // The channel is new and empty.
+        tx.try_send(Ok(first))
+            .map_err(|_| Status::internal("link closed"))?;
+        tokio::spawn(self.clone().run(inbound, tx, link_key, nonce));
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 }
@@ -270,8 +322,4 @@ fn failure(status: StatusCode, code: &str) -> Response {
         headers.insert("x-request-id", value);
     }
     response
-}
-
-fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0, |acc, (x, y)| acc | (x ^ y)) == 0
 }

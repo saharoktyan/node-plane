@@ -12,14 +12,19 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use node_plane_api::{codes, error_body, headers as api_headers};
+use ring::signature::Ed25519KeyPair;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 use uuid::Uuid;
 
 use crate::{
-    headers,
-    proto::{self, Hello, LinkMessage, link_client::LinkClient, link_message, relay_message},
+    headers, keys,
+    proto::{
+        self, Hello, LinkMessage, RelayMessage, link_client::LinkClient, link_message,
+        relay_message,
+    },
+    serve::{LINK_KEY, LINK_NONCE},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -43,7 +48,10 @@ impl Default for Limits {
 pub struct Config {
     /// `https://cab.example.com`, or `http://` for a relay on this host.
     pub relay: String,
-    pub token: String,
+    /// The relay's public key, as its node's agent reported it.
+    pub relay_key: Vec<u8>,
+    /// The controller's own key.
+    pub key: Arc<Ed25519KeyPair>,
     /// The controller API, `http://127.0.0.1:8080`.
     pub api: String,
     pub limits: Limits,
@@ -84,22 +92,48 @@ pub async fn session(config: &Config, established: &mut bool) -> Result<(), Stri
     let channel = endpoint.connect().await.map_err(|e| e.to_string())?;
     let mut client = LinkClient::new(channel).max_decoding_message_size(2 << 20);
     let (tx, rx) = mpsc::channel(config.limits.concurrent);
-    let hello = LinkMessage {
-        message: Some(link_message::Message::Hello(Hello {
-            version: crate::VERSION.to_string(),
-        })),
-    };
-    tx.send(hello).await.map_err(|e| e.to_string())?;
+    let link_key = keys::public(&config.key);
+    let nonce = keys::nonce();
     let mut request = tonic::Request::new(ReceiverStream::new(rx));
-    let token = format!("Bearer {}", config.token)
-        .parse()
-        .map_err(|_| "the link token is not a valid header value".to_string())?;
-    request.metadata_mut().insert("authorization", token);
+    for (name, value) in [
+        (LINK_KEY, keys::hex(&link_key)),
+        (LINK_NONCE, keys::hex(&nonce)),
+    ] {
+        request
+            .metadata_mut()
+            .insert(name, value.parse().expect("hex is a valid header value"));
+    }
     let mut inbound = client
         .attach(request)
         .await
         .map_err(|s| format!("{}: {}", s.code(), s.message()))?
         .into_inner();
+    let challenge = match inbound.message().await.map_err(|s| s.to_string())? {
+        Some(RelayMessage {
+            message: Some(relay_message::Message::Challenge(challenge)),
+        }) if challenge.nonce.len() == 32
+            && keys::verify(
+                &config.relay_key,
+                keys::ATTACH_RELAY,
+                &[&nonce, &link_key],
+                &challenge.signature,
+            ) =>
+        {
+            challenge
+        }
+        _ => return Err("the relay did not prove its key".into()),
+    };
+    let hello = LinkMessage {
+        message: Some(link_message::Message::Hello(Hello {
+            version: crate::VERSION.to_string(),
+            signature: keys::sign(
+                &config.key,
+                keys::ATTACH_LINK,
+                &[&challenge.nonce, &config.relay_key],
+            ),
+        })),
+    };
+    tx.send(hello).await.map_err(|e| e.to_string())?;
     *established = true;
     eprintln!("link connected to {}", config.relay);
     let http: Http = Client::builder(TokioExecutor::new()).build_http();

@@ -5,9 +5,14 @@ package nodeplane.relay.v1;
 // The controller's outgoing connection to its relay. The controller dials
 // out and holds one Attach stream; the relay sends HTTP requests from the
 // web cabinet over it and the controller answers each by id.
+//
+// Both sides have Ed25519 keys and know each other's public key: the
+// controller hands them over through the relay node's agent. Attach proves
+// both keys every time.
 service Link {
-  // The caller proves itself with `authorization: Bearer <token>` metadata.
-  // The first message the controller sends is Hello.
+  // Metadata `x-node-plane-link-key` (hex) names the controller's key and
+  // `x-node-plane-link-nonce` (hex, 32 bytes) is its challenge to the relay.
+  // The relay answers with Challenge, the controller with Hello.
   rpc Attach(stream LinkMessage) returns (stream RelayMessage);
 }
 
@@ -20,7 +25,14 @@ message Header {
 message RelayMessage {
   oneof message {
     Request request = 1;
+    Challenge challenge = 2;
   }
+}
+
+message Challenge {
+  bytes nonce = 1;
+  // Relay key over "node-plane relay attach relay" || link nonce || link_key
+  bytes signature = 2;
 }
 
 message Request {
@@ -42,6 +54,8 @@ message LinkMessage {
 
 message Hello {
   string version = 1;
+  // Link key over "node-plane relay attach link" || challenge nonce || relay_key
+  bytes signature = 2;
 }
 
 message Response {

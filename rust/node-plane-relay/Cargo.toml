@@ -12,6 +12,8 @@ http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 node-plane-api = { path = "../node-plane-api" }
 prost = "0.13"
+# Already in the tree through rustls; Ed25519 keys of both sides.
+ring = "0.17"
 serde_json = "1.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "process"] }
 tokio-stream = "0.1"
