@@ -8464,6 +8464,14 @@ fn access_request_tab_labels_use_compact_identity_and_date_with_account_fallback
     });
     assert_eq!(label(Tab::Requests, &item_tg_id), "98765432 · 24/10/26");
 
+    // The account's own name comes first
+    let item_named = serde_json::json!({
+        "display_name": "Ann Lee",
+        "username": "ann",
+        "created_at": "2026-10-24T15:30:00Z"
+    });
+    assert_eq!(label(Tab::Requests, &item_named), "Ann Lee · 24/10/26");
+
     // Nested _account fallback
     let item_nested = serde_json::json!({
         "created_at": "2026-10-25T08:00:00Z",

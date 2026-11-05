@@ -119,7 +119,7 @@ class AccessRequestService:
     @staticmethod
     def public(row):
         result = {key: row[key] for key in ('id', 'account_id', 'status', 'created_at', 'decided_at', 'decided_by')}
-        for key in ('telegram_user_id', 'username', 'first_name', 'last_name', 'language_code', 'locale'):
+        for key in ('display_name', 'telegram_user_id', 'username', 'first_name', 'last_name', 'language_code', 'locale'):
             if key in row.keys():
                 result[key] = row[key]
         if result.get('telegram_user_id') is not None:
@@ -128,9 +128,13 @@ class AccessRequestService:
 
     @staticmethod
     def _pending_query():
+        # A visitor has no account yet; their name comes from Telegram.
         return '''SELECT r.*, COALESCE(r.telegram_subject,i.subject) AS telegram_user_id,
-            d.username, d.first_name, d.last_name, d.language_code, d.locale
+            COALESCE(a.display_name, NULLIF(TRIM(COALESCE(d.first_name, '') || ' ' || COALESCE(d.last_name, '')), ''),
+                     '@' || d.username) AS display_name,
+            d.username, d.first_name, d.last_name, d.language_code, COALESCE(a.locale, d.locale) AS locale
             FROM backend_access_requests r
+            LEFT JOIN backend_accounts a ON a.id = r.account_id
             LEFT JOIN backend_external_identities i ON i.account_id = r.account_id AND i.provider = 'telegram'
             LEFT JOIN backend_telegram_identity_details d ON d.subject = COALESCE(r.telegram_subject,i.subject)'''
 
@@ -209,7 +213,7 @@ class AccessRequestService:
                         current = row['id']
                         item = self.public(row)
                         haystack = ' '.join(str(item.get(field) or '') for field in
-                            ('telegram_user_id', 'username', 'first_name', 'last_name', 'account_id')).casefold()
+                            ('display_name', 'telegram_user_id', 'username', 'first_name', 'last_name', 'account_id')).casefold()
                         if term in haystack:
                             matches.append(item)
                             if len(matches) == limit + 1:

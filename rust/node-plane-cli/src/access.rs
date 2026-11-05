@@ -964,10 +964,16 @@ pub fn label(tab: Tab, item: &Value) -> String {
     }
     if tab == Tab::Requests {
         let account = item.get("_account").unwrap_or(item);
-        let identity = account["username"]
+        let identity = account["display_name"]
             .as_str()
             .filter(|name| !name.is_empty())
-            .map(|name| format!("@{}", name.trim_start_matches('@')))
+            .map(str::to_owned)
+            .or_else(|| {
+                account["username"]
+                    .as_str()
+                    .filter(|name| !name.is_empty())
+                    .map(|name| format!("@{}", name.trim_start_matches('@')))
+            })
             .unwrap_or_else(|| text(&account["telegram_user_id"]));
         let date = item["created_at"].as_str().unwrap_or("");
         let short_date = match (date.get(8..10), date.get(5..7), date.get(2..4)) {

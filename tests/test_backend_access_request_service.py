@@ -164,6 +164,11 @@ class AccessRequestServiceTests(unittest.TestCase):
         found = self.requests.list_pending(self.admin_actor, limit=1,
                                            search='ALEX_')
         self.assertEqual([item['username'] for item in found['items']], ['alex_one'])
+        self.assertEqual(found['items'][0]['display_name'], 'Alex')
+        self.db.connection.execute("UPDATE backend_accounts SET display_name='Sam Account' WHERE id=?",
+                                   (self.identities.find_telegram_account(104).id,))
+        named = self.requests.list_pending(self.admin_actor, limit=5, search='sam account')
+        self.assertEqual([item['username'] for item in named['items']], ['sam'])
         self.assertIsNone(found['next_cursor'])
         self.assertEqual([page['pending_total'] for page in (first, second, third, found)], [3, 3, 3, 3])
         with self.assertRaises(AccessDenied) as error:

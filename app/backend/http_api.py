@@ -877,6 +877,7 @@ class AccessRequestOutput(BaseModel):
     created_at: str
     decided_at: str | None
     decided_by: UUID | None
+    display_name: str | None = None
     telegram_user_id: int | None = None
     username: str | None = None
     first_name: str | None = None

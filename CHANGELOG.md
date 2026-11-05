@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Show the account's name in access requests: requests carry
+  `display_name` (the account's, or a visitor's Telegram name), search finds
+  it, and Workstation's Requests tab shows it first.
 - Keep announcements and service notifications in the Inbox for accounts
   without a Telegram channel instead of skipping them. The installation now
   records which channels it runs (`channels.enabled`, Telegram by default
