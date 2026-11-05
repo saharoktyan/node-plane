@@ -119,6 +119,9 @@ class NodeLifecycle:
             node = conn.execute('SELECT key FROM backend_nodes WHERE key = ?', (node_key,)).fetchone()
             if node is None:
                 raise AccessDenied('resource_not_found', 404)
+            if conn.execute('SELECT 1 FROM backend_relays WHERE node_key = ?', (node_key,)).fetchone():
+                # The cabinet would lose its entry point; move or remove the relay first.
+                raise AccessDenied('node_has_relay', 409)
             previous = conn.execute('SELECT operation_ids_json FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone()
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',

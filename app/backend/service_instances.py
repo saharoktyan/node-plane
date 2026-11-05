@@ -17,10 +17,19 @@ from uuid import uuid4
 
 from db.migration_revisions.r0033_service_instances import TYPES
 
+# System services a node can run besides the VPN engines; their instances
+# are set up on their own, not by the node's protocols.
+SYSTEM_TYPES = ('relay',)
+ALL_TYPES = TYPES + SYSTEM_TYPES
+
 # Columns `NodeService._select` adds for the instances of a node row.
 SELECT_SQL = ',\n            '.join(
-    f"(SELECT s.id FROM backend_service_instances s WHERE s.node_key=n.key AND s.service='{service}') "
-    f"AS {service}_instance_id" for service in TYPES)
+    [f"(SELECT s.id FROM backend_service_instances s WHERE s.node_key=n.key AND s.service='{service}') "
+     f"AS {service}_instance_id" for service in ALL_TYPES]
+    + ["(SELECT status FROM backend_relays WHERE node_key=n.key) AS relay_status"])
+
+# A relay's status as the state of its instance.
+RELAY_STATES = {'applying': 'changes_pending', 'active': 'active', 'failed': 'failed', 'removing': 'removing'}
 
 
 def create_schema(conn):
@@ -35,7 +44,7 @@ def sync_node(conn, node_key):
     if node is None:
         return
     existing = {row['service'] for row in conn.execute(
-        'SELECT service FROM backend_service_instances WHERE node_key=?', (node_key,)).fetchall()}
+        'SELECT service FROM backend_service_instances WHERE node_key=?', (node_key,)).fetchall()} & set(TYPES)
     wanted = set(json.loads(node['protocols_json'])) & set(TYPES)
     if settings_apply_pending(node):
         # A removed protocol stays on the server until the change is applied;
@@ -129,9 +138,13 @@ def public(row, installed):
     protocols = json.loads(row['protocols_json'])
     pending = pending_engines(row) if installed else set()
     result = []
-    for service in TYPES:
+    for service in ALL_TYPES:
         identity = row[f'{service}_instance_id']
         if not identity:
+            continue
+        if service == 'relay':
+            result.append({'id': identity, 'service': service, 'state': RELAY_STATES[row['relay_status']],
+                           'inbounds': [], 'desired_revision': None, 'applied_revision': None})
             continue
         if not installed:
             state = 'planned'

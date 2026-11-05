@@ -726,6 +726,49 @@ class NodeActionInput(BaseModel):
     revision: StrictInt
 
 
+class RelayInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    node_key: str = Field(min_length=1, max_length=128)
+    domain: str = Field(min_length=1, max_length=253)
+    port: StrictInt = 443
+    tls: Literal['acme', 'files', 'proxy']
+    acme_contact: str | None = Field(default=None, max_length=254)
+    certificate_path: str | None = Field(default=None, max_length=256)
+    key_path: str | None = Field(default=None, max_length=256)
+
+
+class RelayLinkOutput(BaseModel):
+    agent_reachable: bool
+    running: bool
+    connected: bool
+    error: str | None = None
+    since: str | None = None
+
+
+class RelayOutput(BaseModel):
+    node_key: str
+    instance_id: str
+    domain: str
+    port: int
+    tls: Literal['acme', 'files', 'proxy']
+    acme_contact: str | None = None
+    certificate_path: str | None = None
+    key_path: str | None = None
+    status: Literal['applying', 'active', 'failed', 'removing']
+    revision: int
+    applied_revision: int | None = None
+    relay_key: str | None = None
+    error_code: str | None = None
+    url: str
+    updated_at: str
+    # What the driver sees now; null when it was not asked or did not answer.
+    link: RelayLinkOutput | None = None
+
+
+class RelayEnvelope(BaseModel):
+    relay: RelayOutput | None = None
+
+
 class AgentEnrollmentInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     revision: StrictInt
@@ -1336,9 +1379,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return current.public()
         require_permission(current, 'account.self.read')
         permissions = []
-        from .authorization import ROLE_PERMISSIONS, SERVICE_PERMISSIONS
+        from .authorization import RELAY_PERMISSION, ROLE_PERMISSIONS, SERVICE_PERMISSIONS
         for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS | ROLE_PERMISSIONS
-                                 | SERVICE_PERMISSIONS):
+                                 | SERVICE_PERMISSIONS | {RELAY_PERMISSION}):
             try:
                 require_permission(current, permission)
             except AccessDenied:
@@ -1936,6 +1979,30 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/nodes/{node_key}/agent-enrollment')
     def get_node_agent_enrollment(node_key: str, current=Depends(actor)):
         return agent_enrollments.get(current, node_key)
+
+    def relay_call(work):
+        from .relays import RelayService
+        if node_driver is not None:
+            return work(RelayService(db, node_driver))
+        from .driver_transport import GrpcIntentDriver, local_channel
+        with local_channel('127.0.0.1:50051') as channel:
+            return work(RelayService(db, GrpcIntentDriver(channel)))
+
+    @app.get('/api/v1/relay', response_model=RelayEnvelope)
+    def get_relay(current=Depends(actor)):
+        """The web cabinet's relay, with its link as the driver sees it now."""
+        return relay_call(lambda relays: relays.get(current))
+
+    @app.put('/api/v1/relay', response_model=RelayEnvelope, status_code=202)
+    def configure_relay(body: RelayInput, current=Depends(actor)):
+        """Set up the relay on a node, or change it; the worker applies it."""
+        from .relays import RelayService
+        return RelayService(db).configure(current, body.node_key, body.model_dump(exclude={'node_key'}))
+
+    @app.delete('/api/v1/relay', response_model=RelayEnvelope, status_code=202)
+    def remove_relay(current=Depends(actor)):
+        from .relays import RelayService
+        return RelayService(db).remove(current)
 
     @app.get('/api/v1/node-bootstraps/{identity}')
     def get_node_bootstrap(identity: UUID, current=Depends(actor)):

@@ -111,6 +111,7 @@ class GrpcIntentDriver:
         self.operations = operation_service_pb2_grpc.OperationServiceStub(channel)
         self.runtime = runtime_service_pb2_grpc.RuntimeServiceStub(channel)
         self.nodes = node_service_pb2_grpc.NodeServiceStub(channel)
+        self.channel = channel
         self.timeout = timeout
 
     def inspect_node(self, node_key):
@@ -196,6 +197,38 @@ class GrpcIntentDriver:
             timeout=max(self.timeout, 1200))
         if json.loads(response.result_json) != {'node_key': node_key, 'prepared': True}:
             raise ValueError('driver returned an invalid node preparation result')
+
+    def _relays(self):
+        from driver.v1 import relay_service_pb2_grpc
+        return relay_service_pb2_grpc.RelayServiceStub(self.channel)
+
+    @staticmethod
+    def _relay_status(response):
+        return {'agent_reachable': response.agent_reachable, 'installed': response.installed,
+                'active': response.active, 'relay_key': response.relay_key or None,
+                'linked': response.linked, 'link_connected': response.link_connected,
+                'link_error': response.link_error or None, 'link_since': response.link_since or None,
+                'url': response.url or None}
+
+    def apply_relay(self, node_key, settings):
+        """Install or update the node's relay; the driver pins its key and links to it."""
+        from driver.v1 import relay_service_pb2
+        response = self._relays().ApplyRelay(relay_service_pb2.ApplyRelayRequest(
+            node_key=node_key, domain=settings['domain'], port=settings['port'], tls=settings['tls'],
+            acme_contact=settings.get('acme_contact') or '',
+            certificate_path=settings.get('certificate_path') or '',
+            key_path=settings.get('key_path') or ''), timeout=max(self.timeout, 120))
+        return self._relay_status(response)
+
+    def remove_relay(self, node_key):
+        from driver.v1 import relay_service_pb2
+        return self._relay_status(self._relays().RemoveRelay(
+            relay_service_pb2.RelayNodeRequest(node_key=node_key), timeout=max(self.timeout, 120)))
+
+    def relay_status(self, node_key):
+        from driver.v1 import relay_service_pb2
+        return self._relay_status(self._relays().GetRelay(
+            relay_service_pb2.RelayNodeRequest(node_key=node_key), timeout=20))
 
     def read_xray_public(self, node_key):
         """Read the live Reality public identity; no legacy registry access."""

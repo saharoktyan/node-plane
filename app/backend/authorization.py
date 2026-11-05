@@ -94,9 +94,11 @@ def service_permission(service: str) -> str:
 
 from db.migration_revisions.r0033_service_instances import TYPES as _SERVICE_TYPES  # noqa: E402
 SERVICE_PERMISSIONS = frozenset(service_permission(service) for service in _SERVICE_TYPES)
+# The web cabinet's relay is a system service: owners and administrators.
+RELAY_PERMISSION = service_permission("relay")
 PRESETS = {
-    "owner": ADMIN_PERMISSIONS | ROLE_PERMISSIONS | SERVICE_PERMISSIONS,
-    "admin": ADMIN_PERMISSIONS | SERVICE_PERMISSIONS,
+    "owner": ADMIN_PERMISSIONS | ROLE_PERMISSIONS | SERVICE_PERMISSIONS | {RELAY_PERMISSION},
+    "admin": ADMIN_PERMISSIONS | SERVICE_PERMISSIONS | {RELAY_PERMISSION},
     "operator": frozenset({"nodes.manage", "nodes.inspect", "nodes.execute", "maintenance.manage",
                            "diagnostics.sensitive.read"}) | SERVICE_PERMISSIONS,
     "support": frozenset({"access_requests.manage", "profiles.manage", "configs.manage.read",

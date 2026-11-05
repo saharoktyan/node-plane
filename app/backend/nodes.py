@@ -208,6 +208,8 @@ class NodeService:
             from db.migration_revisions.r0033_service_instances import create_schema, backfill
             create_schema(conn)
             backfill(conn)
+            from db.migration_revisions.r0038_relays import create_schema as create_relay_schema
+            create_relay_schema(conn)
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,
@@ -484,6 +486,9 @@ class NodeService:
                 _validate({'settings': next_values['settings']}, create=False)
                 if 'xray' in next_values['protocols'] and next_values['settings']['xray_tcp_port'] == next_values['settings']['xray_xhttp_port']:
                     raise AccessDenied('invalid_input', 422)
+                from .relays import port_conflict
+                if port_conflict(conn, node_key, next_values['protocols'], next_values['settings']):
+                    raise AccessDenied('relay_port_in_use', 409)
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' in values['protocols'] and not next_values['xray_transports']:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' not in values['protocols']:

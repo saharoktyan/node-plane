@@ -4759,6 +4759,281 @@
         "title": "RegistryRetirementOutput",
         "type": "object"
       },
+      "RelayEnvelope": {
+        "properties": {
+          "relay": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelayOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RelayEnvelope",
+        "type": "object"
+      },
+      "RelayInput": {
+        "additionalProperties": false,
+        "properties": {
+          "acme_contact": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acme Contact"
+          },
+          "certificate_path": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Path"
+          },
+          "domain": {
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "key_path": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Path"
+          },
+          "node_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Node Key",
+            "type": "string"
+          },
+          "port": {
+            "default": 443,
+            "title": "Port",
+            "type": "integer"
+          },
+          "tls": {
+            "enum": [
+              "acme",
+              "files",
+              "proxy"
+            ],
+            "title": "Tls",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "domain",
+          "tls"
+        ],
+        "title": "RelayInput",
+        "type": "object"
+      },
+      "RelayLinkOutput": {
+        "properties": {
+          "agent_reachable": {
+            "title": "Agent Reachable",
+            "type": "boolean"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "required": [
+          "agent_reachable",
+          "running",
+          "connected"
+        ],
+        "title": "RelayLinkOutput",
+        "type": "object"
+      },
+      "RelayOutput": {
+        "properties": {
+          "acme_contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acme Contact"
+          },
+          "applied_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Revision"
+          },
+          "certificate_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Path"
+          },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "instance_id": {
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "key_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Path"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelayLinkOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "node_key": {
+            "title": "Node Key",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "relay_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relay Key"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "applying",
+              "active",
+              "failed",
+              "removing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tls": {
+            "enum": [
+              "acme",
+              "files",
+              "proxy"
+            ],
+            "title": "Tls",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "instance_id",
+          "domain",
+          "port",
+          "tls",
+          "status",
+          "revision",
+          "url",
+          "updated_at"
+        ],
+        "title": "RelayOutput",
+        "type": "object"
+      },
       "RenewalApproveInput": {
         "additionalProperties": false,
         "properties": {
@@ -11915,6 +12190,167 @@
           }
         ],
         "summary": "Grant Regions"
+      }
+    },
+    "/api/v1/relay": {
+      "delete": {
+        "operationId": "remove_relay_api_v1_relay_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Relay"
+      },
+      "get": {
+        "description": "The web cabinet's relay, with its link as the driver sees it now.",
+        "operationId": "get_relay_api_v1_relay_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Relay"
+      },
+      "put": {
+        "description": "Set up the relay on a node, or change it; the worker applies it.",
+        "operationId": "configure_relay_api_v1_relay_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelayInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Configure Relay"
       }
     },
     "/api/v1/renewal-requests": {

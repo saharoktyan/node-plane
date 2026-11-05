@@ -45,3 +45,5 @@ class RelayPolicyTests(unittest.TestCase):
                      '/api/v1/nodes/drain', '/api/v1/profiles/p1/devices', '/api/v1/system/traffic'):
             self.assertIsNone(refusal(path, {}, 'account'), path)
         self.assertEqual(refusal('/api/v1/nodes/n1/drain', {}, 'account'), 'not_available_through_relay')
+        # The relay is not configured through itself.
+        self.assertEqual(refusal('/api/v1/relay', {}, 'account'), 'not_available_through_relay')

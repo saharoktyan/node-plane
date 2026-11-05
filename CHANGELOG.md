@@ -10,8 +10,16 @@
   and system operations on relayed requests (`not_available_through_relay`).
   Each side has its own Ed25519 key and pins the other's; every connection
   proves both. The relay serves TLS itself (a Let's Encrypt certificate or
-  one from files) or plain HTTP behind a reverse proxy. Not installed yet:
-  the relay as a node service comes next.
+  one from files) or plain HTTP behind a reverse proxy.
+- The relay is a service of a node (migration r0038): `PUT /api/v1/relay`
+  picks the node, domain, port and TLS mode, the worker has the node's agent
+  run it as a sandboxed `node-plane-relay` service (from the agent's own
+  binary, so it updates with the agent), and the driver pins its key and
+  holds the link. `GET /api/v1/relay` shows whether the controller is
+  attached; `DELETE` removes it. One relay per installation; owners and
+  administrators manage it (`services.relay.manage`). Its port may not be
+  one of the node's Xray ports, and a node with the relay is not removed.
+  A backup restore drops the relay setting: set it up again.
 - The API contract is part of the repository: `api/openapi.json` (written by
   `scripts/export_openapi.py`, checked by a test) with its own version, and
   the shared rules for errors, idempotency, revisions and pagination in
