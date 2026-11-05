@@ -39,6 +39,9 @@ class Account:
     # An account is active (`approved`) or `disabled`; access to services
     # belongs to profiles, and visitors have no account at all.
     status: str = "approved"
+    # Assigned roles for the whole installation; None when not loaded, then
+    # `role` decides (an administrator without assignments is an owner).
+    roles: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,38 @@ ADMIN_PERMISSIONS = frozenset({
 })
 
 
+# Role presets. Every active account has the member's own permissions; the
+# roles add to them. Custom roles would be further rows of `backend_roles`.
+MEMBER_PERMISSIONS = SELF_PERMISSIONS | APPROVED_PERMISSIONS
+ROLE_PERMISSIONS = frozenset({"roles.manage"})
+PRESETS = {
+    "owner": ADMIN_PERMISSIONS | ROLE_PERMISSIONS,
+    "admin": ADMIN_PERMISSIONS,
+    "operator": frozenset({"nodes.manage", "nodes.inspect", "nodes.execute", "maintenance.manage",
+                           "diagnostics.sensitive.read"}),
+    "support": frozenset({"access_requests.manage", "profiles.manage", "configs.manage.read",
+                          "configs.manage.issue"}),
+}
+# Roles that make an account staff; `backend_accounts.role` mirrors them
+# as `admin`.
+STAFF_ROLES = frozenset(PRESETS)
+
+
+def effective_roles(account: Account) -> frozenset[str]:
+    roles = getattr(account, "roles", None)
+    if roles is not None:
+        return roles
+    return frozenset({"owner"}) if account.role == "admin" else frozenset()
+
+
+def account_permissions(account: Account) -> frozenset[str]:
+    """What an active account may do: its own things plus its roles."""
+    permissions = MEMBER_PERMISSIONS
+    for role in effective_roles(account):
+        permissions |= PRESETS.get(role, frozenset())
+    return permissions
+
+
 def validate_telegram_id(user_id: int) -> None:
     if type(user_id) is not int or not 0 < user_id < 2**63:
         raise AccessDenied("invalid_telegram_identity", 422)
@@ -110,10 +145,7 @@ def require_permission(actor: Actor, permission: str) -> None:
         raise AccessDenied("invalid_account_state")
     if permission not in actor.principal.scopes:
         raise AccessDenied("permission_denied")
-    permissions = SELF_PERMISSIONS | APPROVED_PERMISSIONS
-    if actor.account.role == "admin":
-        permissions |= ADMIN_PERMISSIONS
-    if permission not in permissions:
+    if permission not in account_permissions(actor.account):
         raise AccessDenied("permission_denied")
 
 

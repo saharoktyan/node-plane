@@ -137,7 +137,9 @@ class ConfigIssuanceService:
                 RETURNING role, status''', (actor.account.id,)).fetchone()
             if account is None:
                 raise AccessDenied('permission_denied')
-            current_actor = Actor(actor.principal, Account(actor.account.id, account['role'], account['status']))
+            from .identity_repository import account_roles
+            current_actor = Actor(actor.principal, Account(actor.account.id, account['role'], account['status'],
+                                                           account_roles(conn, {'id': actor.account.id, 'role': account['role']})))
             profile = conn.execute('SELECT * FROM backend_profiles WHERE id = ?', (profile_id,)).fetchone()
             if profile is None or (profile['owner_account_id'] != actor.account.id and account['role'] != 'admin'):
                 raise AccessDenied('resource_not_found', 404)

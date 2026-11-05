@@ -16,6 +16,7 @@ from .authorization import (
     PrincipalKind,
     require_permission,
 )
+from .identity_repository import account_roles, actor_account
 from .backups import CLEAR, TABLES, BackupService
 from .installation_maintenance import InstallationMaintenance
 from .maintenance_gate import active
@@ -111,7 +112,8 @@ class SystemCleanupService:
         if not row:
             raise AccessDenied("permission_denied")
         current = Actor(
-            actor.principal, Account(actor.account.id, row["role"], row["status"])
+            actor.principal, Account(actor.account.id, row["role"], row["status"],
+                                     account_roles(conn, {"id": actor.account.id, "role": row["role"]}))
         )
         require_permission(current, "maintenance.manage")
         return current
@@ -594,7 +596,7 @@ class SystemCleanupService:
                     Principal(
                         job["principal_id"], PrincipalKind.SERVICE, ADMIN_PERMISSIONS
                     ),
-                    Account(job["actor_id"], account["role"], account["status"]),
+                    actor_account(self.db, job["actor_id"], account),
                 )
                 require_permission(actor, "maintenance.manage")
                 if intent.get("cancel_requested"):

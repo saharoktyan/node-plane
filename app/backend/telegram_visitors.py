@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .authorization import Account, AccessDenied, Principal, PrincipalKind, validate_telegram_id
+from .authorization import AccessDenied, Principal, PrincipalKind, validate_telegram_id
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,8 @@ def observe(db, principal, user_id, key, **details):
         row = conn.execute('''SELECT a.id,a.role,a.status FROM backend_accounts a
             JOIN backend_external_identities i ON i.account_id=a.id
             WHERE i.provider='telegram' AND i.subject=?''', (str(user_id),)).fetchone()
-        account = Account(row['id'], row['role'], row['status']) if row else None
+        from .identity_repository import load_account
+        account = load_account(conn, row['id']) if row else None
         if account:
             # A newly known username renames an automatically named profile.
             # Access stays with profiles: none is created here.

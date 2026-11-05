@@ -8,7 +8,8 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4, uuid5
 
-from .authorization import AccessDenied, require_permission, Actor, Account, Principal, PrincipalKind, ADMIN_PERMISSIONS
+from .authorization import AccessDenied, require_permission, Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+from .identity_repository import actor_account
 from .agent_rollout import AgentRolloutService
 from .node_operations import NodeOperations
 
@@ -615,7 +616,7 @@ class UpdateService:
             with self.db.connect() as conn:
                 account = conn.execute('SELECT role,status FROM backend_accounts WHERE id=?', (job['actor_id'],)).fetchone()
             actor = Actor(Principal('updates-worker', PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
-                Account(job['actor_id'], account['role'], account['status'])) if account else None
+                actor_account(self.db, job['actor_id'], account)) if account else None
             if actor is None or actor.account.role != 'admin' or actor.account.status != 'approved':
                 self._finish(job['id'], 'blocked')
                 return True

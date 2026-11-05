@@ -17,6 +17,13 @@ def _key(value):
         raise AccessDenied('invalid_idempotency_key', 422) from None
 
 
+def _roles(conn, row):
+    """The account's installation-wide roles, as the permissions see them."""
+    from .authorization import Account, effective_roles
+    from .identity_repository import account_roles
+    return sorted(effective_roles(Account(row['id'], row['role'], row['status'], account_roles(conn, row))))
+
+
 class AccountService:
     def __init__(self, db):
         self.db = db
@@ -44,6 +51,8 @@ class AccountService:
                 result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
         if 'profile_id' in row.keys():
             result['profile_id'] = row['profile_id']
+        if 'roles' in row.keys():
+            result['roles'] = row['roles']
         result['deleted'] = bool(row['deleted']) if 'deleted' in row.keys() else False
         return result
 
@@ -60,6 +69,7 @@ class AccountService:
         if row is None:
             return None
         result = dict(row)
+        result['roles'] = _roles(conn, row)
         deletion = conn.execute('SELECT telegram_json,completed_at FROM backend_account_deletions WHERE account_id=?', (account_id,)).fetchone()
         if deletion:
             saved = json.loads(deletion['telegram_json'])
@@ -90,6 +100,7 @@ class AccountService:
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
                 WHERE a.id > ? AND NOT EXISTS (SELECT 1 FROM backend_account_deletions x WHERE x.account_id=a.id) ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
+            rows = [{**dict(row), 'roles': _roles(conn, row)} for row in rows]
         return _page([self.public(row) for row in rows], limit, 'accounts', 'id')
 
     def provision_profile(self, actor, identity, command_key, *, display_name=None):
@@ -228,12 +239,22 @@ class AccountService:
                         WHERE role = 'admin' AND status = 'approved' ''').fetchone()['count']
                     if remaining <= 1:
                         raise AccessDenied('last_admin_required', 409)
+                    # Only an owner changes an owner's roles, and one owner stays.
+                    if 'owner' in _roles(conn, row):
+                        require_permission(actor, 'roles.manage')
+                        from .roles import owners
+                        if owners(conn) <= 1:
+                            raise AccessDenied('last_owner_required', 409)
                 pending = conn.execute('''SELECT id FROM backend_access_requests
                     WHERE account_id = ? AND status = 'pending' ''', (account_id,)).fetchone()
                 if pending is not None:
                     raise AccessDenied('request_pending', 409)
                 conn.execute('''UPDATE backend_accounts SET role = ?, status = ?, revision = revision + 1
                     WHERE id = ?''', (next_role, next_status, account_id))
+                if next_role != row['role']:
+                    # Promotion makes an administrator; demotion takes every role.
+                    from .roles import assign
+                    assign(conn, account_id, {'admin'} if next_role == 'admin' else set())
                 conn.execute("""INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?)
                     ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision""", (account_id, revision + 1))
             from .profiles import ProfileRepository

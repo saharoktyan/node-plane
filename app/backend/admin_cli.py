@@ -49,7 +49,11 @@ def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int | N
         conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
         conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
             revision = revision + 1 WHERE id = ? AND (role != 'admin' OR status != 'approved')""", (account.id,))
-    
+        # The first administrators own the installation.
+        if not conn.execute('SELECT 1 FROM backend_role_assignments WHERE account_id = ?', (account.id,)).fetchone():
+            from .roles import assign
+            assign(conn, account.id, {'owner'})
+
     # The CLI supplies the fully initialized application database. Callers
     # bootstrapping only the identity schema may omit it.
     if db is not None:

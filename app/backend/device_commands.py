@@ -52,7 +52,9 @@ class DeviceCommands:
             account=conn.execute('SELECT role,status FROM backend_accounts WHERE id=?',(actor.account.id,)).fetchone()
             if account is None:
                 raise AccessDenied('permission_denied')
-            current=Actor(actor.principal,Account(actor.account.id,account['role'],account['status']))
+            from .identity_repository import account_roles
+            current=Actor(actor.principal,Account(actor.account.id,account['role'],account['status'],
+                account_roles(conn,{'id':actor.account.id,'role':account['role']})))
             profile=conn.execute('''UPDATE backend_profiles SET desired_revision=desired_revision
                 WHERE id=? RETURNING *''',(profile_id,)).fetchone()
             if profile is None or (profile['owner_account_id']!=current.account.id and current.account.role!='admin'):

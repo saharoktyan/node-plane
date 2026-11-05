@@ -74,6 +74,8 @@ class AccountOutput(BaseModel):
     id: str
     role: str
     status: str
+    # Assigned roles (`owner`, `admin`, `operator`, `support`); none for a member.
+    roles: list[str] = []
 
 
 class MeOutput(AccountOutput):
@@ -1304,7 +1306,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return current.public()
         require_permission(current, 'account.self.read')
         permissions = []
-        for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS):
+        from .authorization import ROLE_PERMISSIONS
+        for permission in sorted(SELF_PERMISSIONS | APPROVED_PERMISSIONS | ADMIN_PERMISSIONS | ROLE_PERMISSIONS):
             try:
                 require_permission(current, permission)
             except AccessDenied:
@@ -1316,7 +1319,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from .profiles import ProfileRepository
         with db.connect() as conn:
             services = ['vpn'] if ProfileRepository.has_vpn_profile(conn, current.account.id) else []
+        from .authorization import effective_roles
         return MeOutput(id=current.account.id, role=current.account.role, status=current.account.status,
+                        roles=sorted(effective_roles(current.account)),
                         permissions=permissions, services=services,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),

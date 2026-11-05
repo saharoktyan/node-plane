@@ -98,6 +98,17 @@ A member whose access has a term sees **Extend access** on their profile card in
 
 An administrator role grants management permissions. Change a role only for someone who should manage the installation.
 
+Staff hold roles; every other account is a member, who manages only their own profiles. The roles are fixed presets:
+
+| Role | May |
+|---|---|
+| Owner | everything, including changing other owners; an installation always keeps one owner |
+| Administrator | everything except changing owners |
+| Operator | servers: setup, settings, diagnostics, maintenance |
+| Support | access requests, profiles, and issuing configurations for people |
+
+The first administrators of an installation are owners. Promoting a member makes an administrator; only an owner demotes an owner.
+
 **Block account** disables bot/API access. Installed VPN access is retained; use **Freeze profile** to suspend it while keeping profile settings. After freezing or unfreezing, inspect the runtime operation status.
 
 Expiry and revocation remove runtime authorization and close established VLESS connections. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed. See [Temporary configurations](temporary-configs.md) for short-lived access.

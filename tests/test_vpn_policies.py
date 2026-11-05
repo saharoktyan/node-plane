@@ -140,6 +140,8 @@ class VpnPolicyTests(unittest.TestCase):
         del payload['tables']['backend_quota_periods']
         del payload['tables']['backend_tariffs']
         del payload['tables']['backend_profile_tariffs']
+        # Older formats had no role assignments.
+        payload['tables'].pop('backend_role_assignments', None)
         payload['format'] = 'node-plane-backend-v3'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

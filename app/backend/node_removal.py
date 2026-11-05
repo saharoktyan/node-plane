@@ -12,7 +12,8 @@ import grpc
 from pathlib import Path
 
 from .agent_removal import AgentRemovalVerifier, AgentStillRunning
-from .authorization import Actor, Account, Principal, PrincipalKind, ADMIN_PERMISSIONS, require_permission, AccessDenied
+from .authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS, require_permission, AccessDenied
+from .identity_repository import actor_account
 from .node_lifecycle import NodeLifecycle
 from .removal_verifier import RemovalVerifier, RemovalVerificationError
 
@@ -94,7 +95,7 @@ class NodeRemovalService:
             if account is None:
                 continue
             actor = Actor(Principal('node-removal-worker', PrincipalKind.SERVICE, ADMIN_PERMISSIONS),
-                          Account(row['actor_id'], account['role'], account['status']))
+                          actor_account(self.db, row['actor_id'], account))
             lifecycle = NodeLifecycle(self.db)
             phase = 'verify_identity'
             try:

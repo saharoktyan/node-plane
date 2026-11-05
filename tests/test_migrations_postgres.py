@@ -269,12 +269,14 @@ class MigrationsPostgresTests(unittest.TestCase):
         from backend.authorization import PrincipalKind, Actor, Principal, ADMIN_PERMISSIONS
         from backend.profiles import ProfileRepository
         from backend.operations import OperationRepository
-        # Current code writes account details and channels; r0028 and r0029
-        # later find them in place.
+        # Current code writes account details, channels and roles; r0028, r0029
+        # and r0035 later find them in place.
         with self.db.transaction() as conn:
             from db.migration_revisions.r0028_account_details import add_columns
             add_columns(conn)
             from db.migration_revisions.r0029_account_channels import create_schema
+            create_schema(conn)
+            from db.migration_revisions.r0035_roles import create_schema
             create_schema(conn)
         identities = SQLIdentityRepository(self.db)
         admin = bootstrap_admin(identities,101,self.db)
@@ -345,6 +347,7 @@ class MigrationsPostgresTests(unittest.TestCase):
         migrate(self.db,revisions=[r for r in REVISIONS if r.number < 28])
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('a1','approved'),('a2','approved')")
+            conn.execute("INSERT INTO backend_accounts(id,role,status) VALUES ('a3','admin','approved')")
             conn.execute("INSERT INTO backend_external_identities VALUES ('telegram','101','a1')")
             conn.execute("""INSERT INTO backend_telegram_identity_details
                 (subject,username,first_name,last_name,language_code,locale,locale_selected,updated_at)
@@ -365,7 +368,11 @@ class MigrationsPostgresTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT service FROM backend_access_requests WHERE id='r1'").fetchone()['service'], 'vpn')
             rows = conn.execute('SELECT id,display_name,locale,locale_selected FROM backend_accounts ORDER BY id').fetchall()
             channels = conn.execute('SELECT account_id,channel,address,enabled FROM backend_account_channels').fetchall()
-        self.assertEqual([tuple(row.values()) for row in rows], [('a1','Ann','ru',1), ('a2',None,None,0)])
+        self.assertEqual([tuple(row.values()) for row in rows], [('a1','Ann','ru',1), ('a2',None,None,0), ('a3',None,None,0)])
+        with self.db.connect() as conn:
+            # r0035: administrators become owners.
+            assignments = conn.execute('SELECT account_id,role_id FROM backend_role_assignments').fetchall()
+        self.assertEqual([tuple(r.values()) for r in assignments], [('a3','owner')])
         self.assertEqual([tuple(row.values()) for row in channels], [('a1','telegram','101',1)])
         # r0030: an Inbox entry needs no Telegram chat.
         with self.db.transaction() as conn:
@@ -380,12 +387,14 @@ class MigrationsPostgresTests(unittest.TestCase):
         from backend.profiles import ProfileRepository
         from backend.operations import OperationRepository
         from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
-        # Current code writes account details and channels; r0028 and r0029
-        # later find them in place.
+        # Current code writes account details, channels and roles; r0028, r0029
+        # and r0035 later find them in place.
         with self.db.transaction() as conn:
             from db.migration_revisions.r0028_account_details import add_columns
             add_columns(conn)
             from db.migration_revisions.r0029_account_channels import create_schema
+            create_schema(conn)
+            from db.migration_revisions.r0035_roles import create_schema
             create_schema(conn)
         admin = bootstrap_admin(SQLIdentityRepository(self.db),101,self.db)
         profile = ProfileRepository(self.db).create_profile(runtime_name='peer',display_name='Peer')

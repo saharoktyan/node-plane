@@ -2,8 +2,9 @@
 from uuid import UUID, uuid4, uuid5
 import json
 
-from .authorization import (AccessDenied, Account, Actor, Principal, PrincipalKind,
+from .authorization import (AccessDenied, Actor, Principal, PrincipalKind,
                             ADMIN_PERMISSIONS, require_permission)
+from .identity_repository import actor_account
 from .node_settings import _key, _snapshot
 
 
@@ -172,7 +173,7 @@ class NodeBootstrapService:
             self._change(row, status='blocked', error='revision_conflict')
             return True
         actor = Actor(Principal(row['actor_id'], PrincipalKind.ACCOUNT, ADMIN_PERMISSIONS),
-                      Account(row['actor_id'], account['role'], account['status']))
+                      actor_account(self.db, row['actor_id'], account))
         if row['phase'] in {'agent', 'docker'}:
             try:
                 facts = self.driver.inspect_node_services(row['node_key'])

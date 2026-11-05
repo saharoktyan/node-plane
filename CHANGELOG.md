@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Permissions come from roles (migration r0035). The roles are fixed presets
+  for now: owner, administrator, operator and support; every active account
+  also manages its own profiles. Existing and first administrators are
+  owners, a promotion makes an administrator, only an owner changes an
+  owner's roles and an installation keeps at least one owner
+  (`last_owner_required`). Assignments carry a scope (only the whole
+  installation is used yet). `GET /api/v1/me` and accounts list `roles`.
+  Backups store the assignments (format v8; older snapshots make their
+  administrators owners) and a restore keeps the restoring administrator's
+  roles.
 - Work on a node names the service instances it touches: settings tasks
   record the engines a change affects (`services`, migration r0034) and node
   jobs list the engines they install or clean up. A change pending on one

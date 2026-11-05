@@ -59,6 +59,8 @@ class SQLIdentityRepository:
             upgrade(conn)
             from db.migration_revisions.r0029_account_channels import upgrade
             upgrade(conn)
+            from db.migration_revisions.r0035_roles import upgrade
+            upgrade(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
@@ -68,13 +70,15 @@ class SQLIdentityRepository:
         initialize_schema(self.db)
 
     @staticmethod
-    def _account(row) -> Account | None:
-        return Account(row['id'], row['role'], row['status']) if row is not None else None
+    def _account(row, conn=None) -> Account | None:
+        if row is None:
+            return None
+        return Account(row['id'], row['role'], row['status'], account_roles(conn, row) if conn else None)
 
     def get_account(self, account_id: str) -> Account | None:
         with self.db.connect() as conn:
             row = conn.execute("SELECT id, role, status FROM backend_accounts WHERE id = ?", (account_id,)).fetchone()
-        return self._account(row)
+            return self._account(row, conn)
 
     def create_account(self, *, status='approved') -> Account:
         """Create an account without requiring any external identity provider."""
@@ -109,7 +113,7 @@ class SQLIdentityRepository:
                     VALUES ('telegram', ?, ?)''', (str(user_id), account_id))
                 from .account_channels import attach
                 attach(conn, account_id, 'telegram', user_id)
-            return self._account(row)
+            return self._account(row, conn)
 
     def find_account(self, provider: str, subject: str) -> Account | None:
         """The account a sign-in identity of any provider belongs to."""
@@ -117,7 +121,7 @@ class SQLIdentityRepository:
             row = conn.execute("""SELECT a.id, a.role, a.status FROM backend_accounts a
                 JOIN backend_external_identities i ON i.account_id = a.id
                 WHERE i.provider = ? AND i.subject = ?""", (provider, subject)).fetchone()
-        return self._account(row)
+            return self._account(row, conn)
 
     def find_telegram_account(self, user_id: int) -> Account | None:
         return self.find_account('telegram', str(user_id))
@@ -152,7 +156,7 @@ class SQLIdentityRepository:
             backfill(conn, candidate)
             from .account_channels import attach
             attach(conn, candidate, 'telegram', user_id)
-        return self._account(row)
+        return self._account(row, conn)
 
     def resolve_telegram(self, user_id: int) -> Account:
         with self.db.transaction() as conn:
@@ -215,8 +219,36 @@ class SQLIdentityRepository:
             if command['account_id'] is not None:
                 row = conn.execute('SELECT id, role, status FROM backend_accounts WHERE id = ?',
                                    (command['account_id'],)).fetchone()
-                return self._account(row)
+                return self._account(row, conn)
             account = self._resolve(conn, user_id)
             conn.execute("""UPDATE backend_identity_commands SET account_id = ?
                 WHERE principal_id = ? AND command_key = ?""", (account.id, principal_id, command_key))
             return account
+
+
+def account_roles(conn, row):
+    """The installation-wide roles of an account row (`id`, `role`).
+
+    Roles count only while the mirror says `admin`, so a demotion written to
+    `role` takes them all. An administrator without assignments was made by
+    an older release or written directly; `role` then decides (None)."""
+    if row['role'] != 'admin':
+        return frozenset()
+    roles = frozenset(r['role_id'] for r in conn.execute(
+        """SELECT role_id FROM backend_role_assignments
+        WHERE account_id = ? AND scope_kind = 'installation' AND scope_id = ''""", (row['id'],)).fetchall())
+    return None if not roles and row['role'] == 'admin' else roles
+
+
+def load_account(conn, account_id):
+    """The account with its roles, read in this transaction."""
+    row = conn.execute('SELECT id, role, status FROM backend_accounts WHERE id = ?', (account_id,)).fetchone()
+    return SQLIdentityRepository._account(row, conn)
+
+
+def actor_account(db, account_id, row):
+    """An Account for work done on behalf of `account_id`, whose locked row
+    (`role`, `status`) the caller read; the roles are read here."""
+    with db.connect() as conn:
+        roles = account_roles(conn, {'id': account_id, 'role': row['role']})
+    return Account(account_id, row['role'], row['status'], roles)

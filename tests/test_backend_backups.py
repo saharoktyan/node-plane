@@ -248,7 +248,7 @@ class BackendBackupsTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_devices SET display_name='Phone',status='retired',revision=3")
         backup_id, _ = self.snapshot()
         payload = self.service._load(backup_id)
-        self.assertEqual(payload['format'], 'node-plane-backend-v7')
+        self.assertEqual(payload['format'], 'node-plane-backend-v8')
         saved = payload['tables']['backend_devices']['rows'][0]
         self.assertEqual(saved['profile_id'], profile_id)
         self.assertEqual(saved['runtime_name'], 'existing_awg')
@@ -296,12 +296,17 @@ class BackendBackupsTests(unittest.TestCase):
         raw = json.loads(path.read_bytes())
         del raw['tables']['backend_tariffs']
         del raw['tables']['backend_profile_tariffs']
+        # Older formats had no role assignments.
+        raw['tables'].pop('backend_role_assignments', None)
         raw['format'] = 'node-plane-backend-v6'
         raw['checksum'] = hashlib.sha256(encoded(raw['tables'])).hexdigest()
         path.write_bytes(encoded(raw))
         converted = self.service._load(backup_id)
         self.assertEqual((converted['tables']['backend_tariffs']['rows'],
                           converted['tables']['backend_profile_tariffs']['rows']), ([], []))
+        # Before roles, the administrators owned the installation.
+        self.assertEqual({(r['role_id'], r['scope_kind']) for r in converted['tables']['backend_role_assignments']['rows']},
+                         {('owner', 'installation')})
         self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
 
     def test_v2_snapshot_gains_regions_without_adopting_policy_access(self):
@@ -319,6 +324,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_quota_periods']
         del payload['tables']['backend_tariffs']
         del payload['tables']['backend_profile_tariffs']
+        # Older formats had no role assignments.
+        payload['tables'].pop('backend_role_assignments', None)
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -345,6 +352,8 @@ class BackendBackupsTests(unittest.TestCase):
         del payload['tables']['backend_quota_periods']
         del payload['tables']['backend_tariffs']
         del payload['tables']['backend_profile_tariffs']
+        # Older formats had no role assignments.
+        payload['tables'].pop('backend_role_assignments', None)
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -362,6 +371,8 @@ class BackendBackupsTests(unittest.TestCase):
         backup_id, _ = self.snapshot()
         path = self.service._path(backup_id)
         payload = json.loads(path.read_bytes())
+        # Older formats had no role assignments.
+        payload['tables'].pop('backend_role_assignments', None)
         payload['format'] = 'node-plane-backend-v1'
         del payload['tables']['backend_devices']
         from backend.grant_policies import TABLE_COLUMNS

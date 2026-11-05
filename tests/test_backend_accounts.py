@@ -103,6 +103,13 @@ class BackendAccountTests(unittest.TestCase):
                      'Idempotency-Key': str(uuid4())}, json={'status': 'disabled'})
         self.assertEqual(revoked.status_code, 409, revoked.text)
         self.assertEqual(revoked.json()['error']['code'], 'admin_block_forbidden')
+        # An administrator does not demote an owner; another owner does.
+        demoted = self.client.patch(f'/api/v1/accounts/{self.admin.id}',
+            headers={**member_admin_headers, 'If-Match': f'"{own["revision"]}"', 'Idempotency-Key': str(uuid4())}, json={'role':'member'})
+        self.assertEqual(demoted.status_code, 403, demoted.text)
+        with self.db.transaction() as conn:
+            from backend.roles import assign
+            assign(conn, member_id, {'owner'})
         demoted = self.client.patch(f'/api/v1/accounts/{self.admin.id}',
             headers={**member_admin_headers, 'If-Match': f'"{own["revision"]}"', 'Idempotency-Key': str(uuid4())}, json={'role':'member'})
         self.assertEqual(demoted.status_code, 200, demoted.text)
