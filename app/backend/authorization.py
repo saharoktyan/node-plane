@@ -36,7 +36,9 @@ class Principal:
 class Account:
     id: str
     role: str = "member"
-    status: str = "pending"
+    # An account is active (`approved`) or `disabled`; access to services
+    # belongs to profiles, and visitors have no account at all.
+    status: str = "approved"
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,7 @@ def resolve_actor(principal: Principal, identities: IdentityReader, *, telegram_
         raise AccessDenied("identity_not_registered", 401)
     if account.status == "disabled":
         raise AccessDenied("account_disabled")
-    if account.role not in {"member", "admin"} or account.status not in {"pending", "approved", "rejected"}:
+    if account.role not in {"member", "admin"} or account.status != "approved":
         raise AccessDenied("invalid_account_state")
     return Actor(principal, account)
 
@@ -104,15 +106,13 @@ def resolve_actor(principal: Principal, identities: IdentityReader, *, telegram_
 def require_permission(actor: Actor, permission: str) -> None:
     if actor.account.status == "disabled":
         raise AccessDenied("account_disabled")
-    if actor.account.role not in {"member", "admin"} or actor.account.status not in {"pending", "approved", "rejected"}:
+    if actor.account.role not in {"member", "admin"} or actor.account.status != "approved":
         raise AccessDenied("invalid_account_state")
     if permission not in actor.principal.scopes:
         raise AccessDenied("permission_denied")
-    permissions = SELF_PERMISSIONS
-    if actor.account.status == "approved":
-        permissions |= APPROVED_PERMISSIONS
-        if actor.account.role == "admin":
-            permissions |= ADMIN_PERMISSIONS
+    permissions = SELF_PERMISSIONS | APPROVED_PERMISSIONS
+    if actor.account.role == "admin":
+        permissions |= ADMIN_PERMISSIONS
     if permission not in permissions:
         raise AccessDenied("permission_denied")
 

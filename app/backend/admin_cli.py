@@ -80,7 +80,6 @@ def main():
     admin_identity.add_argument('--name', help='Administrator name; Workstation signs in to this account')
     create_account = commands.add_parser('create-account',
         help='Create a member account without Telegram identity')
-    create_account.add_argument('--status', choices=['pending', 'approved'], default='approved')
     link_telegram = commands.add_parser('link-telegram',
         help='Attach a Telegram login to an existing backend account')
     link_telegram.add_argument('--account-id', required=True)
@@ -192,7 +191,7 @@ def main():
             if not done:
                 raise SystemExit(1)
         elif args.command == 'create-account':
-            account = identities.create_account(status=args.status)
+            account = identities.create_account()
             ProfileRepository(db).ensure_account_profile(account.id)
             print(f'Account ID: {account.id}')
         elif args.command == 'link-telegram':

@@ -60,12 +60,35 @@ class AccessRequestServiceTests(unittest.TestCase):
     def test_rejected_account_can_reapply_without_reopening_old_request(self):
         first = self.requests.create(self.member_actor, str(uuid4()))
         self.requests.decide(self.admin_actor, first['id'], 'reject', str(uuid4()))
-        self.assertEqual(self.identities.get_account(self.member.id).status, 'rejected')
+        self.assertEqual(self.identities.get_account(self.member.id).status, 'approved')
         second = self.requests.create(self.member_actor, str(uuid4()))
         self.assertNotEqual(first['id'], second['id'])
         self.requests.decide(self.admin_actor, second['id'], 'approve', str(uuid4()))
         with self.assertRaises(AccessDenied):
             self.requests.decide(self.admin_actor, first['id'], 'approve', str(uuid4()))
+
+    def test_account_requests_vpn_only_while_it_has_no_vpn_profile(self):
+        from backend.profiles import ProfileRepository
+        first = self.requests.create(self.member_actor, str(uuid4()))
+        self.requests.decide(self.admin_actor, first['id'], 'approve', str(uuid4()))
+        with self.db.connect() as conn:
+            self.assertTrue(ProfileRepository.has_vpn_profile(conn, self.member.id))
+        with self.assertRaises(AccessDenied) as error:
+            self.requests.create(self.member_actor, str(uuid4()))
+        self.assertEqual(error.exception.code, 'request_not_allowed')
+        # Deleting the last profile leaves the account; it may ask again.
+        profile = self.db.connection.execute('SELECT id FROM backend_profiles WHERE owner_account_id=?',
+                                             (self.member.id,)).fetchone()['id']
+        self.db.connection.execute("INSERT INTO backend_profile_deletions(profile_id, requested_at) VALUES (?, 'now')",
+                                   (profile,))
+        self.assertEqual(self.identities.get_account(self.member.id).status, 'approved')
+        again = self.requests.create(self.member_actor, str(uuid4()))
+        self.assertEqual(again['status'], 'pending')
+
+    def test_administrators_do_not_request_vpn_access(self):
+        with self.assertRaises(AccessDenied) as error:
+            self.requests.create(self.admin_actor, str(uuid4()))
+        self.assertEqual(error.exception.code, 'request_not_allowed')
 
     def test_access_request_policy_is_public_read_and_admin_write(self):
         self.assertEqual(self.requests.policy(self.member_actor), {

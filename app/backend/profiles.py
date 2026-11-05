@@ -43,7 +43,8 @@ class ProfileRepository:
             return self.ensure_account_profile_in_transaction(conn, account_id)
 
     @staticmethod
-    def ensure_account_profile_in_transaction(conn, account_id):
+    def ensure_account_profile_in_transaction(conn, account_id, *, create=True):
+        """The account's default profile; `create=False` only renames an existing one."""
         conn.execute('UPDATE backend_accounts SET revision = revision WHERE id = ?', (account_id,))
         account = conn.execute('''SELECT a.role, a.display_name, i.subject, d.username
             FROM backend_accounts a LEFT JOIN backend_external_identities i
@@ -63,6 +64,8 @@ class ProfileRepository:
             if account['username'] and existing['display_name'] in automatic_names:
                 conn.execute('UPDATE backend_profiles SET display_name = ? WHERE id = ?', (name, existing['id']))
             return existing['id']
+        if not create:
+            return None
         profile_id = str(uuid4())
         conn.execute('''INSERT INTO backend_profiles
             (id, runtime_name, display_name, owner_account_id, created_at)
@@ -71,18 +74,11 @@ class ProfileRepository:
         return profile_id
 
     @staticmethod
-    def revoke_orphaned_members(conn, account_id=None):
-        """Require approval again after a member's last profile is deleted."""
-        owner_filter = ' AND id = ?' if account_id else ''
-        conn.execute("""UPDATE backend_accounts SET status = 'pending', revision = revision + 1
-            WHERE role = 'member' AND status = 'approved'
-            AND EXISTS (SELECT 1 FROM backend_profiles p
-                JOIN backend_profile_deletions d ON d.profile_id = p.id
-                WHERE p.owner_account_id = backend_accounts.id)
-            AND NOT EXISTS (SELECT 1 FROM backend_profiles p
-                WHERE p.owner_account_id = backend_accounts.id AND NOT EXISTS
-                    (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id))"""
-            + owner_filter, (account_id,) if account_id else ())
+    def has_vpn_profile(conn, account_id):
+        """Whether the account owns a VPN profile that is not being deleted."""
+        return conn.execute("""SELECT 1 FROM backend_profiles p WHERE p.owner_account_id = ?
+            AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id = p.id)""",
+            (account_id,)).fetchone() is not None
 
     def initialize_schema(self):
         from .alerts import AlertService
@@ -135,8 +131,6 @@ class ProfileRepository:
             create_vpn_policy_schema(conn)
             from db.migration_revisions.r0011_account_deletions import create_schema
             create_schema(conn)
-            # Repair accounts left approved by older profile-deletion commands.
-            self.revoke_orphaned_members(conn)
         from .node_lifecycle import NodeLifecycle
         NodeLifecycle(self.db).initialize_schema()
         from .node_operations import NodeOperations

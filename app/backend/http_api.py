@@ -120,7 +120,7 @@ class AccountProvisionInput(BaseModel):
 class AccountEditInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     role: Literal['member', 'admin'] | None = None
-    status: Literal['pending', 'approved', 'rejected', 'disabled'] | None = None
+    status: Literal['approved', 'disabled'] | None = None
 
 
 class AccountPreferencesInput(BaseModel):

@@ -58,7 +58,7 @@ class BackendIdentityTests(unittest.TestCase):
             call()
         self.assertEqual(error.exception.code, code)
 
-    def test_registration_is_pending_member_and_repeat_has_same_id(self):
+    def test_registration_is_a_visitor_and_repeat_has_same_id(self):
         accounts_before = self.db.connection.execute('SELECT COUNT(*) FROM backend_accounts').fetchone()[0]
         visitor = self.service.resolve_telegram(self.adapter, 201, username='charlie')
         self.assertIsInstance(visitor, TelegramVisitor)
@@ -72,6 +72,7 @@ class BackendIdentityTests(unittest.TestCase):
         self.assertIsNone(self.repository.find_telegram_account(201))
         repeat = self.service.resolve_telegram(self.adapter, 201, username='charlie')
         self.assertEqual(repeat.public(), public)
+        ProfileRepository(self.db).initialize_schema()
         self.assertEqual(self.service.resolve_telegram(self.adapter, 101), self.alice)
 
     def test_profile_owner_exists_without_telegram_and_can_link_later(self):
@@ -107,10 +108,10 @@ class BackendIdentityTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.denied('invalid_telegram_identity', lambda: self.service.resolve_telegram(self.adapter, value))
 
-    def test_pending_account_can_read_status_but_not_config(self):
+    def test_account_without_profile_can_read_itself_but_not_another_config(self):
         self.assertEqual(self.service.me(self.adapter, telegram_user_id=101), self.alice)
         actor = resolve_actor(self.adapter, self.repository, telegram_user_id=101)
-        self.denied('permission_denied', lambda: require_profile(actor, ProfileResource('p', self.alice.id), action='issue_config', grant_active=True))
+        self.denied('resource_not_found', lambda: require_profile(actor, ProfileResource('p', self.bob.id), action='issue_config', grant_active=True))
 
     def test_member_cannot_read_other_profile_or_execute_admin_action(self):
         actor = self.approve(self.alice)

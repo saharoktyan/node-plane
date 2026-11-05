@@ -84,13 +84,13 @@ class BackendAccountTests(unittest.TestCase):
     def test_last_admin_and_pending_request_protections(self):
         member_id = str(uuid4())
         with self.db.transaction() as conn:
-            conn.execute("INSERT INTO backend_accounts (id, role, status) VALUES (?, 'member', 'pending')", (member_id,))
+            conn.execute("INSERT INTO backend_accounts (id, role, status) VALUES (?, 'member', 'approved')", (member_id,))
             conn.execute("INSERT INTO backend_external_identities (provider, subject, account_id) VALUES ('telegram', '102', ?)", (member_id,))
         own = self.client.get(f'/api/v1/accounts/{self.admin.id}', headers=self.headers_for(101)).json()
         self.assertEqual(self.patch_account(self.admin.id, own['revision'], {'role': 'member'}).json()['error']['code'], 'self_admin_revocation')
         self.client.post('/api/v1/me/access-requests', headers={**self.headers_for(102),
             'Idempotency-Key': str(uuid4())})
-        result = self.patch_account(member_id, 1, {'status': 'approved'})
+        result = self.patch_account(member_id, 1, {'role': 'admin'})
         self.assertEqual(result.json()['error']['code'], 'request_pending')
         request_id = self.client.get('/api/v1/access-requests', headers=self.headers_for(101)).json()['items'][0]['id']
         self.client.post(f'/api/v1/access-requests/{request_id}/decision',
@@ -132,3 +132,10 @@ class BackendAccountTests(unittest.TestCase):
         row = self.db.connection.execute('SELECT expires_at, desired_revision FROM backend_profiles WHERE id = ?', (profile,)).fetchone()
         self.assertIsNone(row['expires_at'])
         self.assertEqual(row['desired_revision'], 3)
+
+    def test_accounts_are_only_active_or_disabled(self):
+        member = self.provision(102).json()['account']
+        for status in ('pending', 'rejected'):
+            self.assertEqual(self.patch_account(member['id'], member['revision'], {'status': status}).status_code, 422)
+        self.assertEqual(self.patch_account(member['id'], member['revision'], {'status': 'disabled'}).status_code, 200)
+

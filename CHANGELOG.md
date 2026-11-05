@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Accounts are active or disabled; access to services belongs to profiles.
+  Deleting a member's last VPN profile keeps the account (it may ask for VPN
+  access again), and the bot no longer recreates a VPN profile for an
+  account that has none. A rejected request changes only the request.
+  `PATCH /api/v1/accounts/{id}` accepts `approved` or `disabled`, and
+  `admin_cli create-account` no longer takes `--status`.
 - Announcements show who is reached only in the Inbox: the preview counts
   recipients in Telegram (`telegram` in `POST /api/v1/announcements/preview`)
   and delivery results show **Inbox only**. Workstation's installer no longer

@@ -157,8 +157,10 @@ class AccessRequestService:
                 return self.public(previous)
             if not self._policy(conn)['enabled']:
                 raise AccessDenied('access_requests_disabled', 403)
-            account = conn.execute('SELECT status FROM backend_accounts WHERE id = ?', (account_id,)).fetchone()
-            if account is None or account['status'] not in {'pending', 'rejected'}:
+            # A member asks for VPN access while it owns no VPN profile;
+            # administrators create their own profiles.
+            from .profiles import ProfileRepository
+            if actor.account.role == 'admin' or ProfileRepository.has_vpn_profile(conn, account_id):
                 raise AccessDenied('request_not_allowed', 409)
             pending = conn.execute('''SELECT id FROM backend_access_requests
                 WHERE account_id = ? AND status = 'pending' ''', (account_id,)).fetchone()
@@ -283,8 +285,8 @@ class AccessRequestService:
             if account_id:
                 conn.execute('UPDATE backend_accounts SET status=status WHERE id=?', (account_id,))
                 account = conn.execute('SELECT status FROM backend_accounts WHERE id=?', (account_id,)).fetchone()
-                if account is None or account['status'] not in {'pending', 'rejected'}:
-                    raise AccessDenied('request_not_allowed', 409)
+                if account is None or account['status'] == 'disabled':
+                    raise AccessDenied('account_disabled' if account else 'request_not_allowed', 409)
             elif not subject:
                 raise AccessDenied('invalid_request_state', 409)
             else:
@@ -306,7 +308,8 @@ class AccessRequestService:
                 decided_by = ?, decision_key = ? WHERE id = ?''',
                 (status, account_id, now, actor.account.id, key, request_id))
             if account_id:
-                conn.execute('UPDATE backend_accounts SET status=?,revision=revision+1 WHERE id=?', (status, account_id))
+                # The decision changes the request; the account stays active either way.
+                conn.execute('UPDATE backend_accounts SET revision=revision+1 WHERE id=?', (account_id,))
                 revision = conn.execute('SELECT revision FROM backend_accounts WHERE id=?', (account_id,)).fetchone()['revision']
                 conn.execute('INSERT INTO backend_account_menu_refresh(account_id,revision) VALUES (?,?) ON CONFLICT(account_id) DO UPDATE SET revision=excluded.revision', (account_id, revision))
                 if decision == 'approve':

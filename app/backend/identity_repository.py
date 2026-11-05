@@ -78,7 +78,7 @@ class SQLIdentityRepository:
 
     def create_account(self, *, status='approved') -> Account:
         """Create an account without requiring any external identity provider."""
-        if status not in {'pending', 'approved'}:
+        if status != 'approved':
             raise ValueError('invalid account status')
         account_id = str(uuid4())
         with self.db.transaction() as conn:
@@ -139,7 +139,7 @@ class SQLIdentityRepository:
 
     def _resolve(self, conn, user_id: int) -> Account:
         candidate = str(uuid4())
-        conn.execute("INSERT INTO backend_accounts(id) VALUES (?)", (candidate,))
+        conn.execute("INSERT INTO backend_accounts(id, status) VALUES (?, 'approved')", (candidate,))
         conn.execute("""INSERT INTO backend_external_identities(provider, subject, account_id)
             VALUES ('telegram', ?, ?) ON CONFLICT(provider, subject) DO NOTHING""", (str(user_id), candidate))
         row = conn.execute("""SELECT a.id, a.role, a.status FROM backend_accounts a

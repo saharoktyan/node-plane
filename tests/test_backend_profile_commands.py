@@ -222,18 +222,15 @@ class BackendProfileCommandTests(unittest.TestCase):
         self.assertEqual(self.client.patch(path, headers=self.headers_for(2), json={'frozen':False}).status_code, 200)
         self.assertEqual(self.identities.find_telegram_account(102).id, member.id)
 
-    def test_schema_repairs_legacy_orphan_approval_once(self):
+    def test_deleting_the_last_profile_keeps_the_account_active(self):
         from backend.profiles import ProfileRepository
         member = self.identities.resolve_telegram(102)
         profile_id = self.create(owner_account_id=member.id).json()['profile']['id']
-        self.db.connection.execute("INSERT INTO backend_profile_deletions(profile_id, requested_at) VALUES (?, 'legacy')", (profile_id,))
-        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))
+        self.db.connection.execute("INSERT INTO backend_profile_deletions(profile_id, requested_at) VALUES (?, 'now')", (profile_id,))
         ProfileRepository(self.db).initialize_schema()
-        self.assertEqual(self.identities.get_account(member.id).status, 'pending')
-        revision = self.db.connection.execute('SELECT revision FROM backend_accounts WHERE id = ?', (member.id,)).fetchone()[0]
-        ProfileRepository(self.db).initialize_schema()
-        self.assertEqual(self.db.connection.execute('SELECT revision FROM backend_accounts WHERE id = ?', (member.id,)).fetchone()[0], revision)
-        self.assertEqual(self.identities.get_account(self.admin.id).status, 'approved')
+        self.assertEqual(self.identities.get_account(member.id).status, 'approved')
+        with self.db.connect() as conn:
+            self.assertFalse(ProfileRepository.has_vpn_profile(conn, member.id))
 
 
     def test_admin_duration_is_permanent_and_combined_edit_is_atomic(self):

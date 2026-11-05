@@ -63,7 +63,7 @@ class BackendHTTPTests(unittest.TestCase):
 
     def test_workstation_can_read_own_and_other_profile_cards(self):
         from backend.workstation_cli import SCOPES
-        self.register(101, username='administrator')
+        ProfileRepository(self.db).ensure_account_profile(self.admin.id)
         member = self.provision(102).json()['account']
         _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=self.admin.id)
         headers = {'Authorization': 'Bearer ' + token}

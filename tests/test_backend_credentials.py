@@ -76,7 +76,7 @@ class BackendCredentialTests(unittest.TestCase):
         require_permission(actor, 'nodes.execute')
         self.assertEqual(actor.account.id, account.id)
         unknown = self.identities.resolve_telegram(102)
-        self.assertEqual((unknown.role, unknown.status), ('member', 'pending'))
+        self.assertEqual((unknown.role, unknown.status), ('member', 'approved'))
 
     def test_role_revocation_is_not_cached_in_token(self):
         account = bootstrap_admin(self.identities, 101)

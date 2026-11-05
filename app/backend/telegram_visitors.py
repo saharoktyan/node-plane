@@ -76,9 +76,11 @@ def observe(db, principal, user_id, key, **details):
             JOIN backend_external_identities i ON i.account_id=a.id
             WHERE i.provider='telegram' AND i.subject=?''', (str(user_id),)).fetchone()
         account = Account(row['id'], row['role'], row['status']) if row else None
-        if account and account.status == 'approved':
+        if account:
+            # A newly known username renames an automatically named profile.
+            # Access stays with profiles: none is created here.
             from .profiles import ProfileRepository
-            ProfileRepository.ensure_account_profile_in_transaction(conn, account.id)
+            ProfileRepository.ensure_account_profile_in_transaction(conn, account.id, create=False)
     return account or visitor(db, principal, user_id)
 
 

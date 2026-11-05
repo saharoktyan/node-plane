@@ -72,16 +72,11 @@ class BackendProfileTests(unittest.TestCase):
         self.assertEqual(self.get(f'/api/v1/profiles/{self.profile}/grants').json()['items'],
                          [{'node_key': 'n1', 'protocol': 'awg'}])
         self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
-        page = self.get('/api/v1/profiles').json()
-        self.assertEqual({item['id'] for item in page['items']},
-                         {self.profile, self.unowned})
-        self.assertNotIn(self.foreign, {item['id'] for item in page['items']})
-        self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (self.other.id,))
         approved_page = self.get('/api/v1/profiles').json()
         self.assertEqual({item['id'] for item in approved_page['items']},
                          {self.profile, self.foreign, self.unowned})
 
-    def test_admin_profile_pagination_and_search_filters_pending_before_limit(self):
+    def test_admin_profile_pagination_covers_active_and_disabled_accounts(self):
         self.prepare()
         self.headers['X-Node-Plane-Telegram-User-ID'] = '101'
         user_app = self.identities.resolve_telegram(201)
@@ -112,11 +107,7 @@ class BackendProfileTests(unittest.TestCase):
             if not cursor:
                 break
 
-        self.assertNotIn(self.foreign, seen)
-        self.assertNotIn(p_pending1, seen)
-        self.assertNotIn(p_pending2, seen)
-
-        expected = {self.profile, self.unowned, p_approved, p_disabled}
+        expected = {self.profile, self.foreign, self.unowned, p_approved, p_disabled, p_pending1, p_pending2}
         self.assertEqual(set(seen), expected)
 
         search_seen = []
@@ -133,12 +124,7 @@ class BackendProfileTests(unittest.TestCase):
             if not search_cursor:
                 break
 
-        self.assertEqual(set(search_seen), {p_approved, p_disabled})
-        self.assertNotIn(p_pending1, search_seen)
-        self.assertNotIn(p_pending2, search_seen)
-
-        pending_only = self.get('/api/v1/profiles', search='Pending1').json()
-        self.assertEqual(pending_only['items'], [])
+        self.assertEqual(set(search_seen), {p_approved, p_disabled, p_pending1, p_pending2})
 
     def test_pagination_filters_before_limit(self):
         self.prepare()
