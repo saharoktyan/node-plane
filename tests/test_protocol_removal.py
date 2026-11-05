@@ -536,7 +536,7 @@ class ProtocolRemovalRevocationTests(unittest.TestCase):
     def test_retained_protocol_and_other_nodes_intact(self):
         self.assertEqual(self.create_node('n1', protocols=['awg', 'xray']).status_code, 201)
         self.apply_settings('n1', 1)
-        self.assertEqual(self.create_node('n2', protocols=['xray'], settings={'public_host': 'n2.example.test', 'xray_tcp_port': 444}, transport='ssh', ssh_target='root@192.168.1.100').status_code, 201)
+        self.assertEqual(self.create_node('n2', protocols=['xray'], settings={'public_host': 'n2.example.test', 'xray_tcp_port': 444}, transport='remote', ssh_target='root@192.168.1.100').status_code, 201)
         self.apply_settings('n2', 1)
 
         provisioned = self.provision(102).json()['account']

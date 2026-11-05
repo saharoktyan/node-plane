@@ -20,6 +20,10 @@
   administrators manage it (`services.relay.manage`). Its port may not be
   one of the node's Xray ports, and a node with the relay is not removed.
   A backup restore drops the relay setting: set it up again.
+- A node is `local` or `remote`: the node transport `ssh` is now `remote`
+  in the API, the bot and Workstation (migration r0039; older controllers
+  cannot use the upgraded database). The controller reaches remote nodes
+  through their agents; SSH only installs an agent.
 - The relay is set up in Workstation and in the bot, from system settings
   or from the node (its settings add it, its card opens it); Back and the
   breadcrumbs follow the way in.

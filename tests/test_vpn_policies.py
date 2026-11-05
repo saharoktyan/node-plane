@@ -155,7 +155,7 @@ class VpnPolicyTests(unittest.TestCase):
         from backend.node_settings import NodeSettingsService
         from backend.nodes import NodeService
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'awg1', 'title': 'AWG', 'region': 'EU', 'transport': 'ssh', 'protocols': ['awg'],
+            'key': 'awg1', 'title': 'AWG', 'region': 'EU', 'transport': 'remote', 'protocols': ['awg'],
             'ssh_target': 'root@awg.example', 'settings': {'public_host': 'awg.example', 'awg_port': 51820}})
         def revisions():
             return {row['key']: row['desired_revision'] for row in
@@ -181,7 +181,7 @@ class VpnPolicyTests(unittest.TestCase):
     def test_a_node_bittorrent_override_wins_and_is_not_reapplied_by_global_changes(self):
         from backend.nodes import NodeService
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'n2', 'title': 'Second', 'region': 'EU', 'transport': 'ssh', 'protocols': ['xray'],
+            'key': 'n2', 'title': 'Second', 'region': 'EU', 'transport': 'remote', 'protocols': ['xray'],
             'ssh_target': 'root@n2.example', 'settings': {'public_host': 'n2.example'}})
         def revisions():
             return {row['key']: row['desired_revision'] for row in

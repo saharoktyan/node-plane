@@ -166,7 +166,7 @@ exit 0
     def test_a_remote_agent_is_never_installed_over_ssh(self):
         service = AgentRolloutService(None)
         row = {'id': str(uuid4()), 'node_key': 'node-remote-bravo', 'intent_json': json.dumps(
-            {'transport': 'ssh', 'ssh_target': 'operator@192.168.12.34', 'ssh_port': 22, 'self_update': True})}
+            {'transport': 'remote', 'ssh_target': 'operator@192.168.12.34', 'ssh_port': 22, 'self_update': True})}
         self.assertFalse(service._execute(row))
         self.assertEqual(service._failure_code, 'agent_update_requires_reinstall')
         self.assertFalse((self.records_dir / f"run-{row['id']}.json").exists())

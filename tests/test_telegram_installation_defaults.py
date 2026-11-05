@@ -89,7 +89,7 @@ class TelegramInstallationDefaultsTests(IsolatedAsyncioTestCase):
         await nodes.new_node_cb(self.query, self.bot, self.backend, self.state)
         draft = (await self.state.get_data())['wizard_data']
         self.assertEqual(draft['settings']['awg_i1_preset'], 'dns')
-        draft.update(key='ssh1', title='SSH', region='Europe', flag='', transport='ssh',
+        draft.update(key='ssh1', title='SSH', region='Europe', flag='', transport='remote',
             ssh_target='root@ssh.example', public_host='ssh.example')
         await self.state.update_data(wizard_data=draft)
         await nodes.render_wizard_summary(123, self.bot, self.state, 77)

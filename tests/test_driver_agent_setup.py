@@ -416,7 +416,7 @@ esac
                 fake_bin,
             ):
                 directory.mkdir(parents=True, exist_ok=True)
-            self.write_backend_registry(app_root, [{'key': 'node-one', 'transport': 'ssh',
+            self.write_backend_registry(app_root, [{'key': 'node-one', 'transport': 'remote',
                 'ssh_target': '203.0.113.10', 'settings_json': '{"public_host":"vpn.example.test"}'}])
             (shared_root / ".env").write_text("BOT_TOKEN=test\n", encoding="utf-8")
             ssh_log = root / "ssh.log"
@@ -490,7 +490,7 @@ esac
                 directory.mkdir(parents=True, exist_ok=True)
             self.write_backend_registry(app_root, [
                 {'key': 'msk1', 'transport': 'local', 'ssh_target': None, 'settings_json': '{}'},
-                {'key': 'lv1', 'transport': 'ssh', 'ssh_target': 'root@lv1.example.test',
+                {'key': 'lv1', 'transport': 'remote', 'ssh_target': 'root@lv1.example.test',
                  'settings_json': '{"public_host":"lv1.example.test"}'},
             ])
             (shared_root / ".env").write_text(

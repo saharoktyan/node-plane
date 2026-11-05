@@ -88,9 +88,9 @@ class RecoveryFollowupTests(unittest.TestCase):
         # Create two installed nodes
         with self.db.transaction() as conn:
             conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,applied_revision,desired_revision,protocols_json,xray_transports_json) VALUES ('n1','Node1','EU',0,1,1,'[]','[]')")
-            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','ssh','root@n1.example')")
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n1','remote','root@n1.example')")
             conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,applied_revision,desired_revision,protocols_json,xray_transports_json) VALUES ('n2','Node2','EU',0,1,1,'[]','[]')")
-            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n2','ssh','root@n2.example')")
+            conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('n2','remote','root@n2.example')")
 
         service.driver.inspect_node_services.return_value = {'agent_commit': 'old' * 10, 'runtime_commit': 'a' * 40}
         with patch('config.APP_COMMIT', 'a' * 40):

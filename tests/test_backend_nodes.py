@@ -99,7 +99,7 @@ class BackendNodeTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/nodes/key-availability?key=lv1').status_code, 401)
         # Read-only availability must not reserve the suggested key.
         self.assertEqual(self.create({'key': 'lv3', 'title': 'New', 'region': 'EU',
-            'protocols': [], 'transport': 'ssh', 'ssh_target': 'root@node.example'}).status_code, 201)
+            'protocols': [], 'transport': 'remote', 'ssh_target': 'root@node.example'}).status_code, 201)
 
     def test_field_validation_is_read_only_and_reuses_persistence_constraints(self):
         original = self.create().json()
@@ -294,10 +294,10 @@ class BackendNodeTests(unittest.TestCase):
     def test_minimal_creation_is_installable_and_preserves_explicit_parameters(self):
         from backend.node_overview import NodeOverviewService
         from backend.node_settings import _snapshot
-        for transport, key in (('local','local1'), ('ssh','remote1')):
+        for transport, key in (('local','local1'), ('remote','remote1')):
             body = {'key':key, 'title':'Node', 'region':'EU', 'transport':transport,
                     'protocols':['awg','xray'], 'settings':{'public_host':'node.example'}}
-            if transport == 'ssh':
+            if transport == 'remote':
                 body['ssh_target'] = 'root@node.example'
             created = self.create(body).json()
             self.assertEqual(created['xray_transports'], ['tcp','xhttp'])
@@ -310,7 +310,7 @@ class BackendNodeTests(unittest.TestCase):
             actor = Actor(self.credentials.authenticate(self.headers['Authorization']), self.admin)
             self.assertTrue(NodeOverviewService(self.db).get(actor, key)['settings_complete'])
         custom = self.create({'key':'custom','title':'Custom','region':'EU','protocols':['awg','xray'],
-            'transport': 'ssh', 'ssh_target': 'root@custom.example',
+            'transport': 'remote', 'ssh_target': 'root@custom.example',
             'settings':{'public_host':'node.example','awg_port':51111,'awg_i1_preset':'dns',
                         'xray_sni':'example.com','xray_xhttp_path':'/custom'}}).json()['settings']
         self.assertEqual((custom['awg_port'],custom['awg_i1_preset'],custom['xray_sni'],custom['xray_xhttp_path']), (51111,'dns','example.com','/custom'))
@@ -331,7 +331,7 @@ class BackendNodeTests(unittest.TestCase):
         definitions = [('a1', 'Zulu', 'Europe'), ('z1', 'Alpha', 'Asia'), ('b1', 'Alpha', 'Europe'), ('b2', 'Alpha', 'Europe')]
         for key, title, region in definitions:
             response = self.create({'key': key, 'title': title, 'region': region, 'protocols': ['awg'],
-                'transport': 'ssh', 'ssh_target': 'root@' + key + '.test', 'settings': {'public_host': key + '.test'}})
+                'transport': 'remote', 'ssh_target': 'root@' + key + '.test', 'settings': {'public_host': key + '.test'}})
             self.assertEqual(response.status_code, 201, response.text)
         seen, cursor = [], None
         while True:

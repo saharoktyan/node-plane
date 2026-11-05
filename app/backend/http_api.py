@@ -524,7 +524,7 @@ class NodeCreateInput(BaseModel):
     protocols: list[Literal['awg', 'xray']]
     xray_transports: list[Literal['tcp', 'xhttp']] = Field(default_factory=list)
     settings: NodeSettingsInput = Field(default_factory=NodeSettingsInput)
-    transport: Literal['local', 'ssh'] | None = None
+    transport: Literal['local', 'remote'] | None = None
     ssh_target: StrictStr | None = None
     notes: StrictStr = ''
 
@@ -558,7 +558,7 @@ class NodeEditInput(BaseModel):
     protocols: list[Literal['awg', 'xray']] | None = None
     xray_transports: list[Literal['tcp', 'xhttp']] | None = None
     settings: NodeSettingsInput | None = None
-    transport: Literal['local', 'ssh'] | None = None
+    transport: Literal['local', 'remote'] | None = None
     ssh_target: StrictStr | None = None
     notes: StrictStr | None = None
     confirm_access_change: StrictBool = False
@@ -785,7 +785,7 @@ class NodeRemovalInput(BaseModel):
 
 class AgentRolloutInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    transport: Literal['local', 'ssh']
+    transport: Literal['local', 'remote']
     ssh_target: str | None = None
     ssh_port: int = 22
     install_rust: StrictBool = False

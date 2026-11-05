@@ -2,7 +2,7 @@
 
 # Nodes
 
-A node is a Linux host running a Node Plane agent and optional VPN protocols. A local node runs on the controller; an SSH node runs on another host. An installation can have one local node and multiple remote nodes.
+A node is a Linux host running a Node Plane agent and optional VPN protocols. A local node runs on the controller; a remote node runs on any other host. An installation can have one local node and multiple remote nodes.
 
 ## Create a node
 

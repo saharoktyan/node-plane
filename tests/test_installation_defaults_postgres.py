@@ -76,7 +76,7 @@ class InstallationDefaultsPostgresTests(unittest.TestCase):
             barrier.wait(timeout=5)
             return NodeService(self.db).command(actor, action='create', command_key=str(uuid4()),
                 values={'template': 'lv', 'key': 'lv1', 'title': 'Latvia #1', 'region': 'Europe',
-                    'transport': 'ssh', 'ssh_target': 'root@vpn.example', 'protocols': ['awg'],
+                    'transport': 'remote', 'ssh_target': 'root@vpn.example', 'protocols': ['awg'],
                     'settings': {'public_host': 'vpn.example'}})
         with ThreadPoolExecutor(max_workers=2) as pool:
             first, second = pool.submit(create, self.actor), pool.submit(create, other_actor)

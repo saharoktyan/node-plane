@@ -48,7 +48,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         await nodes.wizard_template_cb(self.query, self.bot, self.backend, self.state)
 
     async def test_ssh_creation_only_requires_two_address_messages(self):
-        await self.choose('ssh')
+        await self.choose('remote')
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_target.state)
         await nodes.process_wizard_target(self.message('root@node.example.test:22'), self.bot, self.state)
         await nodes.process_wizard_host(self.message('vpn.example.test'), self.bot, self.backend, self.state)
@@ -98,14 +98,14 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertIsNone(original['ssh_target'])
 
     async def test_back_from_ssh_target_returns_to_templates_not_transport(self):
-        await self.choose('ssh')
+        await self.choose('remote')
         self.assertEqual(self.draw.call_args.args[3][0][0].callback_data, 'wizard_back:template')
         self.query.data = 'wizard_back:template'
         await nodes.wizard_back_cb(self.query, self.bot, self.state)
         self.assertEqual(self.draw.call_args.args[3][-1][0].callback_data, 'wizard_back:transport')
 
     async def test_manual_location_still_flows_from_type_to_addresses(self):
-        await self.choose('ssh', 'custom')
+        await self.choose('remote', 'custom')
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_key.state)
         self.backend.request.return_value = {'available': True, 'reason': None, 'suggestion': None}
         await nodes.process_wizard_key(self.message('custom1'), self.bot, self.state, self.backend)
@@ -119,7 +119,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual((await self.state.get_data())['wizard_data']['region'], 'Asia')
 
     async def test_key_conflict_is_shown_before_advancing_with_input_preserved(self):
-        await self.choose('ssh', 'custom')
+        await self.choose('remote', 'custom')
         for reason in ('node_key_retired', 'node_key_conflict'):
             self.backend.request.return_value = {'available': False, 'reason': reason, 'suggestion': 'lv10'}
             await nodes.process_wizard_key(self.message('lv9'), self.bot, self.state, self.backend)
@@ -171,7 +171,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
 
         # 2. Choose SSH transport -> renders SSH preparation screen
-        self.query.data = 'wizard_transport:ssh'
+        self.query.data = 'wizard_transport:remote'
         await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_ssh_preparation.state)
         screen, rows = self.draw.call_args.args[2:4]
@@ -198,7 +198,7 @@ class NodeTemplateTests(IsolatedAsyncioTestCase):
         self.backend.node_creation_options.return_value['ssh_preparation_required'] = False
         await nodes.new_node_cb(self.query, self.bot, self.backend, self.state)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_transport.state)
-        self.query.data = 'wizard_transport:ssh'
+        self.query.data = 'wizard_transport:remote'
         await nodes.wizard_transport_cb(self.query, self.bot, self.state, self.backend)
         self.assertEqual(await self.state.get_state(), NodeDraftState.waiting_for_template.state)
         screen, rows = self.draw.call_args.args[2:4]

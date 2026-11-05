@@ -1471,12 +1471,12 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             'rollout_command_key': 'rollout-key',
             'wizard_data': {'key': 'lv1', 'title': 'Latvia', 'region': 'EU',
                             'flag': '🇱🇻', 'public_host': 'lv1.example.com',
-                            'protocols': ['awg', 'xray'], 'transport': 'ssh',
+                            'protocols': ['awg', 'xray'], 'transport': 'remote',
                             'ssh_target': 'root@lv1.example.com'}})
         backend = SimpleNamespace(create_node=AsyncMock(return_value={
             'key': 'lv1', 'title': 'Latvia', 'region': 'EU', 'flag': '🇱🇻'}),
             rollout_agent=AsyncMock(return_value={'id': 'rollout-id'}),
-            request=AsyncMock(return_value={'key': 'lv1', 'title': 'Latvia', 'transport': 'ssh', 'desired_revision': 1,
+            request=AsyncMock(return_value={'key': 'lv1', 'title': 'Latvia', 'transport': 'remote', 'desired_revision': 1,
                 'ssh_target': 'root@lv1.example.com'}))
         from telegram_client.routers import admin_node_tools
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock), \
@@ -1492,7 +1492,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertEqual(args[0], 123)
         self.assertEqual(kwargs['command_key'], 'create-key')
         self.assertEqual(args[1]['xray_transports'], ['tcp', 'xhttp'])
-        self.assertEqual(args[1]['transport'], 'ssh')
+        self.assertEqual(args[1]['transport'], 'remote')
         self.assertEqual(args[1]['ssh_target'], 'root@lv1.example.com')
         # A remote server enrolls by command; the controller never rolls out over SSH.
         backend.rollout_agent.assert_not_awaited()
@@ -1941,7 +1941,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_node_wizard_navigation_has_back_and_paired_forward_buttons(self):
         self.state_data['wizard_data'] = {'key': 'lv1', 'title': 'Latvia',
-            'region': 'EU', 'flag': '🇱🇻', 'transport': 'ssh',
+            'region': 'EU', 'flag': '🇱🇻', 'transport': 'remote',
             'ssh_target': 'root@lv1.example.com', 'public_host': 'lv1.example.com',
             'protocols': ['awg']}
         with patch.object(admin_nodes, 'render', new_callable=AsyncMock) as render:

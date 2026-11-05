@@ -39,7 +39,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
 
     def test_invitations_are_listed_apart_from_nodes_until_the_agent_is_installed(self):
         self.assertEqual(self.create_node('n1', protocols=[]).status_code, 201)
-        self.assertEqual(self.create_node('n2', protocols=[], transport='ssh', ssh_target='root@n2.example').status_code, 201)
+        self.assertEqual(self.create_node('n2', protocols=[], transport='remote', ssh_target='root@n2.example').status_code, 201)
         with self.db.transaction() as conn:
             from backend.agent_installations import record
             record(conn, 'n2', 'token')
@@ -154,7 +154,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key='n1'").fetchone())
 
     def test_metadata_and_ssh_edits_on_a_vpn_node_do_not_deploy_services(self):
-        created = self.create_node('n1', protocols=['awg'], transport='ssh', ssh_target='root@old.example')
+        created = self.create_node('n1', protocols=['awg'], transport='remote', ssh_target='root@old.example')
         self.assertEqual(created.status_code, 201, created.text)
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_nodes SET applied_revision=1,enabled=1 WHERE key='n1'")

@@ -156,7 +156,7 @@ class ForceRecoveryTests(TestCase):
     def test_profile_force_recovery_success_and_scoped_requeue(self):
         from backend.nodes import NodeService
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'n2', 'title': 'Node 2', 'region': 'US', 'transport': 'ssh', 'ssh_target': 'root@n2.example',
+            'key': 'n2', 'title': 'Node 2', 'region': 'US', 'transport': 'remote', 'ssh_target': 'root@n2.example',
             'protocols': ['awg'], 'xray_transports': [], 'settings': self.settings})
         self.db.connection.execute("UPDATE backend_nodes SET enabled=1, applied_revision=1 WHERE key='n2'")
 
@@ -329,7 +329,7 @@ class ForceRecoveryTests(TestCase):
 
         # Unrelated node n2 with its own unclaimed settings task to verify it is NOT superseded
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'n2', 'title': 'Node 2', 'region': 'US', 'transport': 'ssh', 'ssh_target': 'root@n2.example',
+            'key': 'n2', 'title': 'Node 2', 'region': 'US', 'transport': 'remote', 'ssh_target': 'root@n2.example',
             'protocols': ['awg'], 'xray_transports': [], 'settings': self.settings
         })
         self.db.connection.execute("UPDATE backend_nodes SET enabled=1, applied_revision=0 WHERE key='n2'")

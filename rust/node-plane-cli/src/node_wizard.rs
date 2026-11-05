@@ -70,7 +70,7 @@ impl Wizard {
             options,
             step: Step::Transport,
             selected: 0,
-            transport: "ssh".into(),
+            transport: "remote".into(),
             template: None,
             key: String::new(),
             title: String::new(),
@@ -107,9 +107,9 @@ impl Wizard {
         match self.step {
             Step::Transport => {
                 if self.options.local_available {
-                    vec!["Local node".into(), "SSH node".into()]
+                    vec!["Local node".into(), "Remote node".into()]
                 } else {
-                    vec!["SSH node".into()]
+                    vec!["Remote node".into()]
                 }
             }
             Step::Template => self
@@ -188,7 +188,7 @@ impl Wizard {
                 self.transport = if self.options.local_available && index == 0 {
                     "local"
                 } else {
-                    "ssh"
+                    "remote"
                 }
                 .into();
                 self.set_step(Step::Template);
@@ -211,7 +211,7 @@ impl Wizard {
                         self.flag = t.flag.clone();
                     }
                     self.template = Some(index);
-                    self.set_step(if self.transport == "ssh" {
+                    self.set_step(if self.transport == "remote" {
                         Step::Target
                     } else {
                         Step::Host
@@ -283,7 +283,7 @@ impl Wizard {
             }
             Step::Flag => {
                 ensure!(self.flag.chars().count() <= 16, "The flag is too long");
-                self.set_step(if self.transport == "ssh" {
+                self.set_step(if self.transport == "remote" {
                     Step::Target
                 } else {
                     Step::Host
@@ -334,7 +334,7 @@ impl Wizard {
                     Step::Flag
                 }
             }
-            Step::Host if self.transport == "ssh" => Step::Target,
+            Step::Host if self.transport == "remote" => Step::Target,
             Step::Host => {
                 if self.template.is_some() {
                     Step::Template
@@ -352,7 +352,7 @@ impl Wizard {
         let mut settings = self.settings.clone();
         settings["public_host"] = json!(self.host);
         let mut body = json!({"key":self.key, "title":self.title, "region":self.region, "flag":self.flag,
-            "transport":self.transport, "ssh_target":if self.transport == "ssh" { Some(&self.target) } else { None },
+            "transport":self.transport, "ssh_target":if self.transport == "remote" { Some(&self.target) } else { None },
             "protocols":self.protocols,"xray_transports":if self.protocols.iter().any(|p| p == "xray") { if self.transports.is_empty() { vec!["tcp".into(), "xhttp".into()] } else { self.transports.clone() } } else { vec![] }, "settings":settings});
         if let Some(index) = self.template {
             body["template"] = json!(self.options.templates[index].code);
@@ -375,7 +375,7 @@ impl Wizard {
                 ""
             },
             self.transport,
-            if self.transport == "ssh" {
+            if self.transport == "remote" {
                 &self.target
             } else {
                 "—"
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn existing_local_is_not_offered_and_ssh_template_needs_only_addresses() {
         let mut wizard = Wizard::new(options(false)).unwrap();
-        assert_eq!(wizard.choices(), vec!["SSH node"]);
+        assert_eq!(wizard.choices(), vec!["Remote node"]);
         wizard.choose(0).unwrap();
         wizard.choose(0).unwrap();
         assert_eq!(wizard.step, Step::Target);

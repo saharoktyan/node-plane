@@ -31,7 +31,7 @@ An isolated IPv6 lab subsequently passed six scenarios using the alpha.19 runtim
 The list below is the original inventory, not a request to repeat checks covered by the owner update. Stable-channel installation and final candidate CI/artifact verification still require the actual release candidate.
 
 - [ ] Install a fresh controller from the stable channel on the supported clean host; complete Quick Start through both Telegram and NPW, close/reopen it midway and verify progress resumes.
-- [ ] Create local and SSH nodes; issue VLESS TCP, VLESS XHTTP and AWG 3.1 configurations, import them into real clients and confirm traffic.
+- [ ] Create local and remote nodes; issue VLESS TCP, VLESS XHTTP and AWG 3.1 configurations, import them into real clients and confirm traffic.
 - [ ] Change the public address and protocol overrides; verify newly issued configurations use the intended endpoints.
 - [ ] Paste a complete manual AWG profile in both interfaces, apply it, issue a configuration and confirm traffic; return to automatic generation.
 - [ ] Check Telegram profile Details, breadcrumbs, every Back button in Updates/Backups and highlight only Updates when a release is available.

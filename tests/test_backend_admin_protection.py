@@ -51,7 +51,7 @@ class AdminProtectionTests(unittest.TestCase):
             conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision, enabled=1 WHERE key='lv1'")
             reconcile(conn,self.actor())
         self.assertEqual({tuple(row) for row in self.db.connection.execute('SELECT node_key,protocol FROM backend_grants WHERE profile_id=?',(profile,))}, {('lv1','awg'),('lv1','xray')})
-        body={'key':'future','title':'Future','region':'Other','protocols':['xray'],'xray_transports':['tcp'], 'transport':'ssh','ssh_target':'root@future.example.test','settings':{'public_host':'future.example.test'}}
+        body={'key':'future','title':'Future','region':'Other','protocols':['xray'],'xray_transports':['tcp'], 'transport':'remote','ssh_target':'root@future.example.test','settings':{'public_host':'future.example.test'}}
         self.assertEqual(self.create_node(body).status_code,201)
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision, enabled=1 WHERE key='future'")

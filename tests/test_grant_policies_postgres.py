@@ -57,7 +57,7 @@ class GrantPoliciesPostgresTests(unittest.TestCase):
     def test_policy_racing_with_confirmed_bootstrap_cannot_miss_new_server(self):
         profile = self.profile()
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'n1', 'title': 'Node', 'region': 'Europe', 'transport': 'ssh', 'ssh_target': 'root@n1.example',
+            'key': 'n1', 'title': 'Node', 'region': 'Europe', 'transport': 'remote', 'ssh_target': 'root@n1.example',
             'protocols': ['awg'], 'settings': {'public_host': 'n1.example'}})
         with self.assertRaises(AccessDenied) as error:
             NodeOperations(self.db).queue(self.actor, 'n1', 'bootstrap', revision=1, command_key=str(uuid4()))
@@ -99,7 +99,7 @@ class GrantPoliciesPostgresTests(unittest.TestCase):
     def test_backup_restores_policies_regions_and_separate_manual_sources(self):
         profile = self.profile()
         NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()), values={
-            'key': 'n1', 'title': 'Node', 'region': 'Europe', 'transport': 'ssh', 'ssh_target': 'root@n1.example',
+            'key': 'n1', 'title': 'Node', 'region': 'Europe', 'transport': 'remote', 'ssh_target': 'root@n1.example',
             'protocols': ['awg'], 'settings': {'public_host': 'n1.example'}})
         original = self.policy(profile)
         region_id = NodeService(self.db).get(self.actor, 'n1')['region_id']

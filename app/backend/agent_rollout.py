@@ -67,7 +67,7 @@ class AgentRolloutService:
             key = str(UUID(command_key))
         except (TypeError, ValueError, AttributeError):
             raise AccessDenied('invalid_idempotency_key', 422) from None
-        if transport not in {'local', 'ssh'} or type(ssh_port) is not int or not 1 <= ssh_port <= 65535:
+        if transport not in {'local', 'remote'} or type(ssh_port) is not int or not 1 <= ssh_port <= 65535:
             raise AccessDenied('invalid_input', 422)
         if transport == 'local':
             if ssh_target is not None or ssh_port != 22:

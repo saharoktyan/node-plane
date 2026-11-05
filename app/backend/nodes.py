@@ -134,14 +134,14 @@ def _validate(values, *, create):
     if create and 'xray' not in values['protocols'] and values.get('xray_transports'):
         raise AccessDenied('invalid_input', 422)
     if 'transport' in values and (not isinstance(values['transport'], str)
-                                  or values['transport'] not in {'local', 'ssh'}):
+                                  or values['transport'] not in {'local', 'remote'}):
         raise AccessDenied('invalid_input', 422)
     if 'ssh_target' in values and values['ssh_target'] is not None and (
             not isinstance(values['ssh_target'], str)
             or len(values['ssh_target']) > 255
             or not _SSH_TARGET.fullmatch(values['ssh_target'])):
         raise AccessDenied('invalid_input', 422)
-    if create and (values.get('transport') == 'ssh') != bool(values.get('ssh_target')):
+    if create and (values.get('transport') == 'remote') != bool(values.get('ssh_target')):
         raise AccessDenied('invalid_input', 422)
     return values
 
@@ -213,7 +213,7 @@ class NodeService:
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,
-                transport TEXT NOT NULL CHECK(transport IN ('local', 'ssh')),
+                transport TEXT NOT NULL CHECK(transport IN ('local', 'remote')),
                 ssh_target TEXT
             )''')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_commands (
@@ -493,7 +493,7 @@ class NodeService:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' not in values['protocols']:
                     next_values['xray_transports'] = []
-                if (next_values['transport'] == 'ssh') != bool(next_values['ssh_target']):
+                if (next_values['transport'] == 'remote') != bool(next_values['ssh_target']):
                     raise AccessDenied('invalid_input', 422)
                 if 'xray' not in next_values['protocols'] and next_values['xray_transports']:
                     raise AccessDenied('invalid_input', 422)

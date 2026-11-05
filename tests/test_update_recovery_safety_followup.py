@@ -104,10 +104,10 @@ class UpdateRecoverySafetyFollowupTests(unittest.TestCase):
             # Insert another node 'lv2'
             with self.db.transaction() as conn:
                 conn.execute("INSERT INTO backend_nodes(key,title,region,enabled,applied_revision,desired_revision,protocols_json,xray_transports_json) VALUES ('lv2','Node2','EU',0,1,1,'[]','[]')")
-                conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv2','ssh','root@lv2.example')")
+                conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv2','remote','root@lv2.example')")
 
             # Create an orphan rollout having the same command_key BUT bound to colliding wrong node 'lv2'
-            wrong_child = AgentRolloutService(self.db).request(self.actor, 'lv2', expected_key, transport='ssh', ssh_target='root@lv2.example', self_update=True)
+            wrong_child = AgentRolloutService(self.db).request(self.actor, 'lv2', expected_key, transport='remote', ssh_target='root@lv2.example', self_update=True)
             with self.db.transaction() as conn:
                 conn.execute("UPDATE backend_agent_rollouts SET status='succeeded' WHERE id=?", (wrong_child['id'],))
                 conn.execute("UPDATE backend_update_jobs SET status='blocked' WHERE id=?", (job['id'],))

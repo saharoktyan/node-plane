@@ -1340,7 +1340,7 @@ mod tests {
                             return;
                         }
                         let path = request_line.split_whitespace().nth(1).unwrap();
-                        let node = serde_json::json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"", "enabled":true,"protocols":["awg"],"xray_transports":[],"desired_revision":1,"applied_revision":1,"transport":"ssh","ssh_target":"root@node.example"});
+                        let node = serde_json::json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"", "enabled":true,"protocols":["awg"],"xray_transports":[],"desired_revision":1,"applied_revision":1,"transport":"remote","ssh_target":"root@node.example"});
                         let (status, body) = if fixture_home.join("deny-api").exists() {
                             (
                                 401,

@@ -420,7 +420,7 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
     previous = _WIZARD_PREVIOUS.get(step)
     if step in {'target', 'public_host'} and data.get('wizard_data', {}).get('template') == 'custom':
         previous = 'flag'
-    if step == 'public_host' and data.get('wizard_data', {}).get('transport') == 'ssh':
+    if step == 'public_host' and data.get('wizard_data', {}).get('transport') == 'remote':
         previous = 'target'
     if previous:
         navigation.append(InlineKeyboardButton(text=tr(locale, 'back'),
@@ -563,7 +563,7 @@ async def render_wizard_transport(chat_id: int, bot: Bot, state: FSMContext, mes
     locale = normalize_locale(data.get('locale'))
     selected = data.get('wizard_data', {}).get('transport')
     rows = [
-        [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.ssh'), callback_data="wizard_transport:ssh", style='primary' if selected == 'ssh' else None),
+        [InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.remote'), callback_data="wizard_transport:remote", style='primary' if selected == 'remote' else None),
          InlineKeyboardButton(text=tr(locale, 'node.wizard.transport.local'), callback_data="wizard_transport:local", style='primary' if selected == 'local' else None)],
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AdminNodesCallback().pack())]
     ]
@@ -580,7 +580,7 @@ async def wizard_transport_cb(query: CallbackQuery, bot: Bot, state: FSMContext,
     if await state.get_state() != NodeDraftState.waiting_for_transport.state:
         return
     transport = query.data.split(":")[1]
-    if transport not in {'local', 'ssh'}:
+    if transport not in {'local', 'remote'}:
         return
     data = await state.get_data()
     if data.get('wizard_saved'):
@@ -628,7 +628,7 @@ async def wizard_ssh_continue_cb(query: CallbackQuery, bot: Bot, state: FSMConte
     await query.answer()
     data = await state.get_data()
     if (await state.get_state() != NodeDraftState.waiting_for_ssh_preparation.state
-            or data.get('wizard_saved') or data.get('wizard_data', {}).get('transport') != 'ssh'):
+            or data.get('wizard_saved') or data.get('wizard_data', {}).get('transport') != 'remote'):
         return
     await render_wizard_templates(query.message.chat.id, bot, state, query.message.message_id)
 
@@ -652,7 +652,7 @@ async def render_wizard_templates(chat_id, bot, state, message_id=None):
                 callback_data='wizard_template:custom')],
             [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=
                 'wizard_back:ssh_preparation' if data.get('wizard_ssh_preparation_required') and
-                data.get('wizard_data', {}).get('transport') == 'ssh' else 'wizard_back:transport')]]
+                data.get('wizard_data', {}).get('transport') == 'remote' else 'wizard_back:transport')]]
     await render(bot, chat_id, Screen(tr(locale, 'node.wizard.template.title'),
         (tr(locale, 'node.wizard.template.prompt'),), sections=tuple(sections),
         embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -660,7 +660,7 @@ async def render_wizard_templates(chat_id, bot, state, message_id=None):
 
 async def render_wizard_address(chat_id, bot, state, message_id=None):
     data = await state.get_data()
-    step = 'target' if data.get('wizard_data', {}).get('transport') == 'ssh' else 'public_host'
+    step = 'target' if data.get('wizard_data', {}).get('transport') == 'remote' else 'public_host'
     await render_wizard_step(chat_id, bot, state, step, message_id)
 
 
@@ -672,7 +672,7 @@ async def wizard_template_cb(query: CallbackQuery, bot: Bot, backend: BackendCli
     data = await state.get_data()
     w = dict(data.get('wizard_data', {}))
     token = query.data.split(':', 1)[1]
-    if w.get('transport') not in {'local', 'ssh'} or data.get('wizard_saved'):
+    if w.get('transport') not in {'local', 'remote'} or data.get('wizard_saved'):
         return
     if token == 'custom':
         w['template'] = 'custom'
@@ -787,7 +787,7 @@ async def render_wizard_summary(chat_id: int, bot: Bot, state: FSMContext,
         tr(locale, 'node.wizard.summary.name', value=w.get('title', '—')),
         tr(locale, 'node.wizard.summary.region', value=w.get('region', '—'), flag=w.get('flag', '')),
         tr(locale, 'node.wizard.summary.transport', value=tr(locale,
-            'node.wizard.transport.value.' + w['transport']) if w.get('transport') in {'local', 'ssh'} else '—'),
+            'node.wizard.transport.value.' + w['transport']) if w.get('transport') in {'local', 'remote'} else '—'),
         tr(locale, 'node.wizard.summary.target', value=w.get('ssh_target') or '—'),
         tr(locale, 'node.wizard.summary.host', value=w.get('public_host', '—')),
         tr(locale, 'node.wizard.summary.protocols', value=', '.join(w.get('protocols', [])) or '—'),
@@ -861,7 +861,7 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     locale = normalize_locale(data.get('locale'))
     required = {'key', 'title', 'region', 'flag', 'transport', 'public_host', 'protocols'}
     if not required.issubset(w) or (
-            w['transport'] == 'ssh' and not w.get('ssh_target')):
+            w['transport'] == 'remote' and not w.get('ssh_target')):
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'node.wizard.summary.title'),
                 (tr(locale, 'node.wizard.incomplete'),), embedded_buttons=True, navigation=True),
@@ -929,7 +929,7 @@ async def wizard_setup_agent_cb(query: CallbackQuery, bot: Bot,
         return
     node = await backend.request('GET', f"/api/v1/nodes/{w['key']}", telegram_user_id=query.from_user.id)
     await remember_node(state, node)
-    if node.get('transport') == 'ssh':
+    if node.get('transport') == 'remote':
         from .admin_node_tools import show_agent_setup
         await show_agent_setup(query.message.chat.id, query.from_user.id,
             query.message.message_id, node, bot, backend, state)
@@ -1089,7 +1089,8 @@ async def node_technical_cb(query: CallbackQuery, bot: Bot, backend: BackendClie
             query.message.message_id, node_key, bot, backend, state)
     overview = await backend.node_overview(query.from_user.id, node_key)
     locale = normalize_locale((await state.get_data()).get('locale'))
-    lines = (tr(locale, 'nodes.card.agent_transport', value=node.get('transport') or '—'),
+    lines = (tr(locale, 'nodes.card.agent_transport', value=tr(locale, 'node.wizard.transport.value.' + node['transport'])
+        if node.get('transport') in {'local', 'remote'} else '—'),
         tr(locale, 'nodes.card.ssh_target', value=node.get('ssh_target') or '—'))
     if node['protocols'] or pending_settings(node):
         lines += (tr(locale, 'nodes.card.revisions', applied=node['applied_revision'], desired=node['desired_revision']),)
@@ -1150,7 +1151,7 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
     await state.update_data(node_settings_view='channel')
     transport = node.get('transport')
     rows = []
-    if transport == 'ssh':
+    if transport == 'remote':
         rows.append([InlineKeyboardButton(text=tr(locale, 'nodes.connection.edit_target'),
             callback_data=EditNodeFieldCallback(node_key=node_key, field='ssh_target').pack())])
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -1159,7 +1160,7 @@ async def show_node_connection(chat_id, user_id, message_id, node_key, bot, back
     await render(bot, chat_id, Screen(tr(locale, 'nodes.connection.title'),
         sections=(Section(tr(locale, 'nodes.rich.connection'), tables=(Table(
             (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value')),
-            ((tr(locale, 'nodes.settings.field.transport'), tr(locale, 'node.wizard.transport.value.' + transport) if transport in {'ssh', 'local'} else '—'),
+            ((tr(locale, 'nodes.settings.field.transport'), tr(locale, 'node.wizard.transport.value.' + transport) if transport in {'remote', 'local'} else '—'),
              (tr(locale, 'nodes.settings.field.ssh_target'), node.get('ssh_target') or '—'))),),
             rows=tuple(tuple(row) for row in rows[:-1])),
             Section(tr(locale, 'nodes.rich.about_connection'), collapsed=True,
@@ -1399,7 +1400,7 @@ async def process_node_edit(message: Message, bot: Bot, backend: BackendClient, 
             return
         body = {'ssh_target': value}
         if data.get('edit_switch_transport'):
-            body['transport'] = 'ssh'
+            body['transport'] = 'remote'
     else:
         body = ({field: parsed} if field in {'title', 'region', 'flag', 'notes'} else {'settings': {**settings, field: parsed}})
         if field == 'awg_port':

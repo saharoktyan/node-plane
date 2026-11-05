@@ -166,7 +166,7 @@ class AgentEnrollmentService:
                                       (node_key,)).fetchone()
         if node is None:
             raise AccessDenied('resource_not_found', 404)
-        if over_ssh and (connection is None or connection['transport'] != 'ssh' or not connection['ssh_target']):
+        if over_ssh and (connection is None or connection['transport'] != 'remote' or not connection['ssh_target']):
             raise AccessDenied('node_connection_mismatch', 409)
         host = agent_host or json.loads(node['settings_json'] or '{}').get('public_host')
         if not host:

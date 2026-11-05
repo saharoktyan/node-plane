@@ -318,7 +318,7 @@ class BackendAgentRolloutTests(TestCase):
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
                    'Idempotency-Key': str(uuid4())}
         response = self.client.post('/api/v1/nodes/lv1/agent-rollouts', headers=headers,
-            json={'transport': 'ssh', 'ssh_target': 'root@lv1.example'})
+            json={'transport': 'remote', 'ssh_target': 'root@lv1.example'})
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['error']['code'], 'agent_install_command_required')
         with self.db.connect() as conn:
@@ -330,7 +330,7 @@ class BackendAgentRolloutTests(TestCase):
         headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101',
                    'Idempotency-Key': str(uuid4())}
         response = self.client.post(path, headers=headers,
-            json={'transport': 'ssh', 'ssh_target': 'root@host;id'})
+            json={'transport': 'remote', 'ssh_target': 'root@host;id'})
         self.assertEqual(response.status_code, 422)
         member = self.identities.resolve_telegram(102)
         self.db.connection.execute("UPDATE backend_accounts SET status = 'approved' WHERE id = ?", (member.id,))

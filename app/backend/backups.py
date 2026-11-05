@@ -792,6 +792,9 @@ class BackupService:
                             )
                             + 1,
                         )
+                    if table == "backend_node_connections" and row["transport"] == "ssh":
+                        # Backups made before r0039 name a remote node's transport `ssh`.
+                        row["transport"] = "remote"
                     if table == "backend_profiles":
                         row["desired_revision"] = (
                             max(

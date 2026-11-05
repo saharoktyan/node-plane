@@ -207,7 +207,7 @@ class AgentSshInstallTests(unittest.TestCase):
     issue = AgentEnrollmentTests.issue
     row = AgentEnrollmentTests.row
 
-    def connect(self, transport='ssh', target='root@node.example'):
+    def connect(self, transport='remote', target='root@node.example'):
         with self.db.transaction() as conn:
             conn.execute('INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES (?,?,?)',
                          ('n1', transport, target))

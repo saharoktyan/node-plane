@@ -4428,7 +4428,7 @@ fn node_card_arrows_follow_button_geometry_after_resize() {
     app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
-    node.transport = Some("ssh".into());
+    node.transport = Some("remote".into());
     node.overview.as_mut().unwrap()["state"] = serde_json::json!("installed");
     node.applied_revision = 1;
     node.agent = crate::nodes::AgentState::Missing;
@@ -4550,7 +4550,7 @@ fn agent_setup_requires_confirmed_absence_and_ssh_status_keeps_layout_fixed() {
     app.activate(Control::Action(Action::Nodes));
     app.nodes_requested = None;
     let mut node = browser_node("lv1", "Europe");
-    node.transport = Some("ssh".into());
+    node.transport = Some("remote".into());
     node.overview.as_mut().unwrap()["state"] = serde_json::json!("installed");
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     for state in [

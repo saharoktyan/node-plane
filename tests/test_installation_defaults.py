@@ -22,7 +22,7 @@ class InstallationDefaultsTests(unittest.TestCase):
         settings = created.json()['settings']
         for key in ('public_host','awg_public_host','xray_host'):
             self.assertEqual(settings[key], '203.0.113.19')
-        remote = self.create({'key':'remote','title':'Remote','region':'EU','transport':'ssh',
+        remote = self.create({'key':'remote','title':'Remote','region':'EU','transport':'remote',
             'ssh_target':'root@remote.example','protocols':['awg'], 'settings':{'public_host':'.'}})
         self.assertEqual(remote.status_code, 422)
         invalid = self.client.patch('/api/v1/system/controller-address', headers=self.admin_headers(), json={'host':'bad/host'})
@@ -54,7 +54,7 @@ class InstallationDefaultsTests(unittest.TestCase):
         response = self.create(body)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['error']['code'], 'local_node_exists')
-        body.update(transport='ssh', ssh_target='root@second.example')
+        body.update(transport='remote', ssh_target='root@second.example')
         response = self.create(body)
         self.assertEqual(response.status_code, 201, response.text)
         conversion = self.client.patch('/api/v1/nodes/second',
@@ -71,11 +71,11 @@ class InstallationDefaultsTests(unittest.TestCase):
         self.assertEqual(self.update(body).json(), response.json())
         self.assertEqual(self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json(), original)
         future = self.create({'key': 'future', 'title': 'Future', 'region': 'EU', 'protocols': ['awg', 'xray'],
-            'transport': 'ssh', 'ssh_target': 'root@future.example', 'settings': {'public_host': 'future.example'}}).json()
+            'transport': 'remote', 'ssh_target': 'root@future.example', 'settings': {'public_host': 'future.example'}}).json()
         self.assertEqual(future['xray_transports'], ['xhttp'])
         self.assertEqual((future['settings']['awg_i1_preset'], future['settings']['awg_port']), ('dns', 53))
         override = self.create({'key': 'override', 'title': 'Override', 'region': 'EU', 'protocols': ['awg'],
-            'transport': 'ssh', 'ssh_target': 'root@override.example',
+            'transport': 'remote', 'ssh_target': 'root@override.example',
             'settings': {'public_host': 'override.example', 'awg_i1_preset': 'chaos', 'awg_port': 51111}}).json()
         self.assertEqual((override['settings']['awg_port'], override['settings']['awg_port_mode']), (51111, 'manual'))
 
@@ -106,7 +106,7 @@ class InstallationDefaultsTests(unittest.TestCase):
         options = self.client.get('/api/v1/nodes/creation-options', headers=self.admin_headers()).json()
         template = next(t for t in options['templates'] if t['code'] == 'lv')
         self.assertEqual(template['draft']['key'], 'lv1')
-        body = {**template['draft'], 'protocols': ['awg'], 'transport': 'ssh',
+        body = {**template['draft'], 'protocols': ['awg'], 'transport': 'remote',
             'ssh_target': 'root@vpn.example', 'settings': {'public_host': 'vpn.example'}}
         identity = str(uuid4())
         first = self.create(body, key=identity)
@@ -147,7 +147,7 @@ class InstallationDefaultsTests(unittest.TestCase):
         self.assertTrue(options['ssh_preparation_required'])
 
         # 3. Once ANY SSH node exists, ssh_preparation_required is suppressed (False)
-        ssh_node = self.create({'key': 'rem1', 'title': 'Remote', 'region': 'EU', 'transport': 'ssh',
+        ssh_node = self.create({'key': 'rem1', 'title': 'Remote', 'region': 'EU', 'transport': 'remote',
             'ssh_target': 'root@rem1.example', 'protocols': ['awg'], 'settings': {'public_host': 'rem1.example'}})
         self.assertEqual(ssh_node.status_code, 201, ssh_node.text)
         options = self.client.get('/api/v1/nodes/creation-options', headers=self.admin_headers()).json()

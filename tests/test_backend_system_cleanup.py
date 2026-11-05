@@ -242,7 +242,7 @@ class SystemCleanupTests(unittest.TestCase):
         with self.db.transaction() as conn:
             for key in ("one", "two"):
                 conn.execute("INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES (?,?,'EU','[]')", (key, key))
-                conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES (?,'ssh',?)", (key, f"root@{key}.example"))
+                conn.execute("INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES (?,'remote',?)", (key, f"root@{key}.example"))
         self.service.removals = Mock()
         job = self.queue("remove", nodes=True)
         def request(*args):
@@ -329,7 +329,7 @@ class SystemCleanupTests(unittest.TestCase):
                 "INSERT INTO backend_nodes(key,title,region,protocols_json) VALUES ('lv1','Latvia','EU','[]')"
             )
             conn.execute(
-                "INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','ssh','root@lv1.example')"
+                "INSERT INTO backend_node_connections(node_key,transport,ssh_target) VALUES ('lv1','remote','root@lv1.example')"
             )
         removals = Mock()
         removals.request.return_value = {

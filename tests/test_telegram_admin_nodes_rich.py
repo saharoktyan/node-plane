@@ -264,7 +264,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.query = SimpleNamespace(data='', answer=AsyncMock(), from_user=SimpleNamespace(id=123),
             message=SimpleNamespace(message_id=77, chat=SimpleNamespace(id=123)))
         self.node = {'key': 'msk1', 'title': 'Moscow #1', 'region': 'Europe', 'flag': '🇷🇺',
-            'protocols': ['awg', 'xray'], 'xray_transports': ['tcp', 'xhttp'], 'transport': 'ssh',
+            'protocols': ['awg', 'xray'], 'xray_transports': ['tcp', 'xhttp'], 'transport': 'remote',
             'ssh_target': 'root@private.example.test', 'notes': '', 'desired_revision': 3,
             'applied_revision': 2, 'settings': {'public_host': 'node.example.test', 'awg_port': 51820}}
         self.overview = {'state': 'changes_pending', 'ready': 2, 'pending': 1, 'failed': 0,
@@ -441,7 +441,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
                 await nodes.render_wizard_transport(123, self.bot, self.state, 77)
             self.assertEqual([b.callback_data for b in draw.call_args.args[3][0]],
-                             ['wizard_transport:ssh', 'wizard_transport:local'])
+                             ['wizard_transport:remote', 'wizard_transport:local'])
             with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
                 await nodes.render_wizard_protocols(123, self.bot, self.state, 77)
             rows = draw.call_args.args[3]

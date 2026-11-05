@@ -59,7 +59,7 @@ class AdminNavigationSectionsTests(IsolatedAsyncioTestCase):
         from telegram_client.routers import admin_nodes
         self.state_data['locale'] = 'en'
         uninstalled_node = {
-            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'ssh',
+            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'remote',
             'ssh_target': 'root@n1.example', 'protocols': ['awg'], 'settings': {'public_host': 'n1.example'},
             'applied_revision': 0, 'desired_revision': 1, 'enabled': False
         }
@@ -85,7 +85,7 @@ class AdminNavigationSectionsTests(IsolatedAsyncioTestCase):
         from telegram_client.routers import admin_nodes
         self.state_data['locale'] = 'en'
         node_data = {
-            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'ssh',
+            'key': 'n1', 'title': 'Node 1', 'region': 'Europe', 'transport': 'remote',
             'ssh_target': 'root@n1.example', 'protocols': ['awg'], 'settings': {'public_host': 'n1.example'},
             'applied_revision': 1, 'desired_revision': 1, 'enabled': True
         }

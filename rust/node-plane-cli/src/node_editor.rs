@@ -163,7 +163,7 @@ impl Editor {
             .filter(|(_, field)| match self.tab {
                 Tab::General => {
                     (!field.setting || field.key == "public_host")
-                        && (field.key != "ssh_target" || self.source["transport"] == "ssh")
+                        && (field.key != "ssh_target" || self.source["transport"] == "remote")
                 }
                 Tab::Protocols => false,
                 Tab::AwgParameters => {
@@ -501,7 +501,7 @@ fn same_selection(items: &[String], source: &Value) -> bool {
 mod tests {
     use super::*;
     fn source() -> Value {
-        json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"LV","notes":"", "transport":"ssh", "ssh_target":"root@host.test", "desired_revision":9,"applied_revision":9,"protocols":["awg"],"xray_transports":[],"settings":{"public_host":"vpn.test", "awg_port":443,"awg_port_mode":"auto","awg_i1_preset":"quic","awg_public_host":"vpn.test","awg_interface":"wg0"}})
+        json!({"key":"lv1","title":"Latvia","region":"Europe","flag":"LV","notes":"", "transport":"remote", "ssh_target":"root@host.test", "desired_revision":9,"applied_revision":9,"protocols":["awg"],"xray_transports":[],"settings":{"public_host":"vpn.test", "awg_port":443,"awg_port_mode":"auto","awg_i1_preset":"quic","awg_public_host":"vpn.test","awg_interface":"wg0"}})
     }
     fn defaults() -> Value {
         json!({"settings":{"xray_sni":"www.cloudflare.com","xray_tcp_port":443,"xray_xhttp_port":8443,"xray_xhttp_path":"/assets","xray_fingerprint":"chrome"}})

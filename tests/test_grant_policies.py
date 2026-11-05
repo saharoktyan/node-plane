@@ -36,7 +36,7 @@ class GrantPolicyTests(unittest.TestCase):
     def new_node(self, key='n2', region='EU', protocols=None):
         return NodeService(self.db).command(self.actor, action='create', command_key=str(uuid4()),
             values={'key': key, 'title': key, 'region': region, 'protocols': protocols or ['awg'],
-                    'transport': 'ssh', 'ssh_target': 'root@' + key + '.example',
+                    'transport': 'remote', 'ssh_target': 'root@' + key + '.example',
                     'settings': {'public_host': key + '.example'}})
 
     def bootstrap(self, key):
