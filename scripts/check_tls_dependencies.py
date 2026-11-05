@@ -32,7 +32,7 @@ def check(root=ROOT):
     ci_pins = re.findall(r'pip install uv==([^\s]+)', workflow)
     if not ci_pins or any(pin != UV_VERSION for pin in ci_pins):
         errors.append('CI uv pins differ from the approved version')
-    for component in ('node-agent', 'node-driver', 'node-plane-cli'):
+    for component in ('node-agent', 'node-driver', 'node-plane-cli', 'node-plane-relay'):
         path = root / 'rust' / component / 'Cargo.lock'
         locked = tomllib.loads(path.read_text())['package']
         webpki = [p for p in locked if p['name'] == 'rustls-webpki']

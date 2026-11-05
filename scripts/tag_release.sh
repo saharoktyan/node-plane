@@ -178,6 +178,9 @@ run_preflight_checks() {
   (cd rust/node-agent && cargo test --locked)
   set_step "cargo test workstation assistant"
   (cd rust/node-plane-cli && cargo test --locked)
+  set_step "cargo test relay"
+  (cd rust/node-plane-api && cargo test --locked)
+  (cd rust/node-plane-relay && cargo test --locked)
 }
 
 build_release_artifacts() {

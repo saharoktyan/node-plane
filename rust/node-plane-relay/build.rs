@@ -1,0 +1,37 @@
+fn main() {
+    binary_metadata();
+    println!("cargo:rerun-if-changed=../../proto/relay/v1/link.proto");
+    tonic_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .compile_protos(&["../../proto/relay/v1/link.proto"], &["../../proto"])
+        .expect("failed to compile relay protobufs");
+}
+
+fn binary_metadata() {
+    use std::{path::PathBuf, process::Command};
+    let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    println!("cargo:rerun-if-changed=../../VERSION");
+    println!("cargo:rerun-if-changed=../../BUILD_COMMIT");
+    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    println!("cargo:rerun-if-changed=../../.git/refs");
+    let version =
+        std::fs::read_to_string(root.join("VERSION")).unwrap_or_else(|_| "unknown".into());
+    let commit = std::fs::read_to_string(root.join("BUILD_COMMIT"))
+        .ok()
+        .or_else(|| {
+            Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&root)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        })
+        .unwrap_or_else(|| "unknown".into());
+    println!(
+        "cargo:rustc-env=NODE_PLANE_BINARY_VERSION={}",
+        version.trim()
+    );
+    println!("cargo:rustc-env=NODE_PLANE_BINARY_COMMIT={}", commit.trim());
+}

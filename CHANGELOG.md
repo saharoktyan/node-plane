@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A relay for the coming web cabinet: `node-plane-relay serve` runs on a
+  public server and `node-plane-relay link` on the controller, which dials
+  out to it, so the controller stays unreachable from outside. The relay
+  passes `/api/v1/*` over the link with header allowlists and limits, and
+  the API refuses adapter credentials, Telegram delegation, integrations
+  and system operations on relayed requests (`not_available_through_relay`).
+  Not installed yet: pairing, TLS and the installer come next.
 - The API contract is part of the repository: `api/openapi.json` (written by
   `scripts/export_openapi.py`, checked by a test) with its own version, and
   the shared rules for errors, idempotency, revisions and pagination in

@@ -1,5 +1,6 @@
 """The committed API contract matches the application."""
 import unittest
+from pathlib import Path
 
 from backend import api_contract
 
@@ -22,3 +23,5 @@ class ApiContractTests(unittest.TestCase):
 
     def test_the_contract_has_its_own_version(self):
         self.assertEqual(self.document['info']['version'], api_contract.VERSION)
+        rust = (Path(__file__).resolve().parents[1] / 'rust/node-plane-api/src/lib.rs').read_text()
+        self.assertIn(f'pub const CONTRACT_VERSION: &str = "{api_contract.VERSION}";', rust)

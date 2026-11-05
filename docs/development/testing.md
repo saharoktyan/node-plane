@@ -54,6 +54,8 @@ cargo test --locked --manifest-path rust/node-plane-cli/Cargo.toml
 cargo clippy --locked --manifest-path rust/node-plane-cli/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path rust/node-driver/Cargo.toml
 cargo test --locked --manifest-path rust/node-agent/Cargo.toml
+cargo test --locked --manifest-path rust/node-plane-api/Cargo.toml
+cargo test --locked --manifest-path rust/node-plane-relay/Cargo.toml
 ```
 
 Socket/wire tests need permission to create local listeners. A restricted environment may prevent those tests; record exclusions rather than describing a partial run as full integration acceptance.

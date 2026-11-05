@@ -91,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [node-driver, node-agent]
+        crate: [node-driver, node-agent, node-plane-relay, node-plane-api]
     defaults:
       run:
         working-directory: rust/${{ matrix.crate }}

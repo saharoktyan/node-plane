@@ -1,0 +1,10 @@
+[package]
+name = "node-plane-api"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+description = "Shared conventions of the Node Plane controller API"
+
+[dependencies]
+serde_json = "1.0"

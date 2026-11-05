@@ -1,0 +1,22 @@
+[package]
+name = "node-plane-relay"
+version = "1.0.0-beta.1"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+
+[dependencies]
+# tonic 0.12 routes through axum 0.7, so both share one port.
+axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+node-plane-api = { path = "../node-plane-api" }
+prost = "0.13"
+serde_json = "1.0"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "process"] }
+tokio-stream = "0.1"
+tonic = { version = "0.12", features = ["transport", "tls", "tls-webpki-roots"] }
+uuid = { version = "1.18", features = ["v4"] }
+
+[build-dependencies]
+tonic-build = "0.12"

@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package nodeplane.relay.v1;
+
+// The controller's outgoing connection to its relay. The controller dials
+// out and holds one Attach stream; the relay sends HTTP requests from the
+// web cabinet over it and the controller answers each by id.
+service Link {
+  // The caller proves itself with `authorization: Bearer <token>` metadata.
+  // The first message the controller sends is Hello.
+  rpc Attach(stream LinkMessage) returns (stream RelayMessage);
+}
+
+message Header {
+  string name = 1;
+  bytes value = 2;
+}
+
+// Relay to controller.
+message RelayMessage {
+  oneof message {
+    Request request = 1;
+  }
+}
+
+message Request {
+  uint64 id = 1;
+  string method = 2;
+  string path_and_query = 3;
+  // Only the headers the relay passes on; never X-Node-Plane-*.
+  repeated Header headers = 4;
+  bytes body = 5;
+}
+
+// Controller to relay.
+message LinkMessage {
+  oneof message {
+    Hello hello = 1;
+    Response response = 2;
+  }
+}
+
+message Hello {
+  string version = 1;
+}
+
+message Response {
+  uint64 id = 1;
+  uint32 status = 2;
+  repeated Header headers = 3;
+  bytes body = 4;
+}

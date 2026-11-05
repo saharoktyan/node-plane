@@ -18,6 +18,7 @@ def setup_mock_repo(root: pathlib.Path) -> None:
         "rust/node-agent/Cargo.lock",
         "rust/node-driver/Cargo.lock",
         "rust/node-plane-cli/Cargo.lock",
+        "rust/node-plane-relay/Cargo.lock",
     ]
     for rel_path in tracked_files:
         src = REPO_ROOT / rel_path
@@ -118,7 +119,7 @@ class TlsDependencyPolicyTests(unittest.TestCase):
             self.assertIn("node-plane-cli: outdated webpki-root-certs root bundle", errors)
 
     def test_each_component_old_rustls_webpki_rejects(self):
-        for component in ("node-agent", "node-driver", "node-plane-cli"):
+        for component in ("node-agent", "node-driver", "node-plane-cli", "node-plane-relay"):
             with self.subTest(component=component):
                 with tempfile.TemporaryDirectory() as temp_dir:
                     root = pathlib.Path(temp_dir)
