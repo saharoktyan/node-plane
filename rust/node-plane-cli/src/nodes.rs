@@ -41,6 +41,9 @@ pub struct Node {
     pub overview: Option<Value>,
     #[serde(default)]
     pub services: Option<Value>,
+    /// Services on the node: the VPN engines and system services such as the relay.
+    #[serde(default)]
+    pub service_instances: Option<Value>,
     #[serde(skip)]
     pub agent: AgentState,
     /// How the agent was installed and what it last reported (backend record).
@@ -89,6 +92,12 @@ impl Node {
             );
         }
         parts.join(" · ")
+    }
+    pub fn has_service(&self, service: &str) -> bool {
+        self.service_instances
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item["service"] == service))
     }
     pub fn installed_agent(&self) -> bool {
         self.stage

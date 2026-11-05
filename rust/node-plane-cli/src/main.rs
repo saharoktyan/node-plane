@@ -14,6 +14,7 @@ mod nodes;
 mod operation_store;
 mod policy_scope;
 mod progress;
+mod relay;
 mod self_manage;
 mod ssh;
 mod state_layout;

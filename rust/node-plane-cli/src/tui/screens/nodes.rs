@@ -237,6 +237,19 @@ pub(in crate::tui) fn draw_node_editor(
                     Control::NodesEditTab(Tab::AwgParameters) => {
                         draw_button(frame, rect, "Manual AWG parameters", selected(control));
                     }
+                    Control::NodesRelay => {
+                        let label = if app
+                            .nodes
+                            .card
+                            .as_ref()
+                            .is_some_and(|n| n.has_service("relay"))
+                        {
+                            "Relay service: settings"
+                        } else {
+                            "Relay service: add"
+                        };
+                        draw_button(frame, rect, label, selected(control));
+                    }
                     Control::NodesEditToggle(transport, index) => {
                         let (value, name) = if transport {
                             [("tcp", "TCP"), ("xhttp", "XHTTP")][index]
@@ -893,6 +906,10 @@ pub(in crate::tui) fn node_card_actions(
     if node.installed_agent() {
         if node.applied_revision > 0 && !node.protocols.is_empty() {
             actions.push(("Temporary configs", Control::NodeTemporary));
+        }
+        // A node with the relay; others add it under Settings › Protocols.
+        if node.has_service("relay") {
+            actions.push(("Relay settings", Control::NodesRelay));
         }
         actions.push(("Maintenance", Control::NodesMaintenance));
     } else {
@@ -1698,6 +1715,10 @@ pub(in crate::tui) fn node_editor_rows(
             3,
         ));
     }
+    if editor.tab == crate::node_editor::Tab::Protocols {
+        // System services of the node sit with its protocols.
+        rows.push((vec![Control::NodesRelay], 3));
+    }
     rows
 }
 
@@ -1719,6 +1740,9 @@ pub(in crate::tui) fn node_editor_controls(editor: &crate::node_editor::Editor) 
         controls.push(Control::NodesEditTab(
             crate::node_editor::Tab::AwgParameters,
         ));
+    }
+    if editor.tab == crate::node_editor::Tab::Protocols {
+        controls.push(Control::NodesRelay);
     }
     if editor.dirty() {
         controls.extend([Control::NodesEditSave, Control::NodesEditReset]);

@@ -9578,3 +9578,97 @@ fn role_picker_promotes_with_role_and_assigns_presets_with_roles() {
         ))
     ));
 }
+
+#[test]
+fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    // Settings › Basic › Relay: no relay yet, set it up on a chosen node.
+    app.open_controller();
+    app.activate(Control::ControllerSection(ControllerSection::Installation));
+    assert!(
+        app.controller_root_controls(false)
+            .iter()
+            .any(|(_, control)| *control == Control::ControllerRelay)
+    );
+    app.activate(Control::ControllerRelay);
+    assert!(matches!(scoped_request(&mut app), Command::Relay));
+    app.controller
+        .apply(Command::Relay, serde_json::json!({"relay": null}));
+    let (text, controls) = app.relay_view();
+    assert!(text.starts_with("Settings › Basic › Relay\n"));
+    assert!(controls[0] == ("Set up relay".into(), Control::ControllerRelaySetup));
+    app.activate(Control::ControllerRelaySetup);
+    assert!(matches!(scoped_request(&mut app), Command::RelayNodes));
+    app.controller.apply(
+        Command::RelayNodes,
+        serde_json::json!({"items":[{"key":"de1","title":"Berlin","flag":"","stage":"node"},
+                                    {"key":"new","title":"New","stage":"invitation"}]}),
+    );
+    app.activate(Control::ControllerRelaySave);
+    assert_eq!(app.error, "Choose a node with an installed agent.");
+    app.activate(Control::ControllerRelayNode);
+    app.activate(Control::ControllerRelayField("domain"));
+    app.controller.defaults_input.as_mut().unwrap().1 = "Cab.Example.com".into();
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(app.controller.defaults_input.is_none());
+    app.activate(Control::ControllerRelaySave);
+    assert!(matches!(scoped_request(&mut app), Command::RelaySave(body)
+        if body == serde_json::json!({"node_key":"de1","domain":"cab.example.com","port":443,"tls":"acme"})));
+    let relay = serde_json::json!({"relay":{"node_key":"de1","domain":"cab.example.com","port":443,
+        "tls":"acme","status":"applying","url":"https://cab.example.com","link":null}});
+    app.controller
+        .apply(Command::RelaySave(serde_json::json!({})), relay.clone());
+    assert!(app.controller.relay_draft.is_none());
+    let (text, _) = app.relay_view();
+    assert!(text.contains("Address: https://cab.example.com") && text.contains("Status: Applying"));
+    // Removal needs a second press.
+    app.activate(Control::ControllerRelayRemove);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::ControllerRelayRemove);
+    assert!(matches!(scoped_request(&mut app), Command::RelayRemove));
+    // Back from Settings stays in Settings › Basic.
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Controller));
+    assert!(app.controller.relay.is_none());
+    assert!(app.controller_section == Some(ControllerSection::Installation));
+
+    // From the node card the same page names the node, and Back returns to the card.
+    app.screen = Screen::Nodes;
+    let mut node = browser_node("de1", "Europe");
+    node.stage = Some("node".into());
+    node.service_instances = Some(serde_json::json!([{"service":"relay","state":"active"}]));
+    app.nodes.card = Some(node);
+    assert!(
+        crate::tui::node_card_actions(app.nodes.card.as_ref().unwrap(), None)
+            .contains(&("Relay settings", Control::NodesRelay))
+    );
+    app.activate(Control::NodesRelay);
+    assert!(matches!(scoped_request(&mut app), Command::Relay));
+    app.controller.apply(Command::Relay, relay);
+    let (text, _) = app.relay_view();
+    assert!(text.starts_with("Nodes › de1 › Relay settings\n"));
+    app.activate(Control::ControllerRelaySetup);
+    assert!(app.nodes_requested.is_none(), "the node of a relay stays");
+    app.activate(Control::ControllerRelayTls);
+    let (_, controls) = app.relay_view();
+    assert!(controls.iter().any(|(label, _)| label == "Port: 443"));
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.relay_draft.is_none() && matches!(app.screen, Screen::Controller));
+    app.activate(Control::ControllerBack);
+    assert!(matches!(app.screen, Screen::Nodes));
+
+    // A node without the relay adds it under Settings › Protocols.
+    let mut other = browser_node("lv1", "Europe");
+    other.stage = Some("node".into());
+    assert!(
+        !crate::tui::node_card_actions(&other, None)
+            .iter()
+            .any(|(_, control)| *control == Control::NodesRelay)
+    );
+    let mut editor = node_settings_editor();
+    editor.tab = crate::node_editor::Tab::Protocols;
+    assert!(crate::tui::node_editor_controls(&editor).contains(&Control::NodesRelay));
+    editor.tab = crate::node_editor::Tab::General;
+    assert!(!crate::tui::node_editor_controls(&editor).contains(&Control::NodesRelay));
+}

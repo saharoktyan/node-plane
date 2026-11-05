@@ -33,6 +33,12 @@ impl App {
                 }
                 None
             }
+            Control::NodesRelay => {
+                if let Some(node) = &self.nodes.card {
+                    self.open_relay(Some((node.key.clone(), node.title.clone())));
+                }
+                None
+            }
             Control::NodesEditTab(tab) => {
                 if let Some(editor) = &mut self.nodes.editor {
                     if tab == crate::node_editor::Tab::AwgParameters {

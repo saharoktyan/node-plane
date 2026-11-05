@@ -25,7 +25,7 @@ impl App {
             self.screen = Screen::Controller;
             self.controller_sidebar = false;
         }
-        if self.activate_tariff(control) {
+        if self.activate_tariff(control) || self.activate_relay(control) {
             return None;
         }
         match control {
@@ -600,7 +600,7 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
-                    if self.tariff_input(key, &input) {
+                    if self.tariff_input(key, &input) || self.relay_input(key, &input) {
                         return None;
                     }
                     if key == "quota_anchor" {
@@ -1276,7 +1276,9 @@ impl App {
                     self.controller.text_confirmation = false;
                     return None;
                 }
-                if self.controller.defaults_input.is_none() && self.tariff_back() {
+                if self.controller.defaults_input.is_none()
+                    && (self.relay_back() || self.tariff_back())
+                {
                     return None;
                 }
                 if self.controller.defaults_input.is_none()
@@ -1535,6 +1537,11 @@ impl App {
         self.controller.bot_title = None;
         self.controller.telegram_settings = None;
         self.controller.ssh_key = None;
+        self.controller.relay = None;
+        self.controller.relay_draft = None;
+        self.controller.relay_nodes = None;
+        self.controller.relay_origin = None;
+        self.controller.relay_confirm_remove = false;
         self.controller.alerts = None;
         self.controller.workstation_audit = None;
         self.controller.recovery_history = None;
@@ -1658,6 +1665,9 @@ impl App {
         }
         if state.alerts.is_some() {
             return alert_controls(state);
+        }
+        if self.relay_view_open() {
+            return self.relay_view().1.into_iter().map(|(_, c)| c).collect();
         }
         if self.tariff_view_open() {
             return self.tariff_view().1.into_iter().map(|(_, c)| c).collect();
@@ -1910,6 +1920,7 @@ impl App {
                 ("Installation defaults".into(), Control::ControllerDefaults),
                 ("Telegram".into(), Control::ControllerTelegram),
                 ("SSH key".into(), Control::ControllerSshKey),
+                ("Relay".into(), Control::ControllerRelay),
                 ("New installation".into(), Control::ControllerNew),
             ],
             Some(Policies) if self.controller.scope.is_some() => self.scoped_policy_controls(),

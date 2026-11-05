@@ -66,6 +66,8 @@ Automatic check, backup and alert preferences appear when the corresponding feat
 
 Open **Node Plane Settings → Basic → Telegram** to change the bot token or add/remove administrators by Telegram ID. Known usernames appear in the list. The token is hidden, verified before saving and never included in local operation journals. Changing the token restarts the Telegram service; administrator changes apply immediately. Your own administrator rights cannot be removed here.
 
+**Node Plane Settings → Basic → Relay** sets up the web cabinet's relay: the node it runs on, the cabinet's domain and how it gets TLS (Let's Encrypt on port 443, certificate files on the node, or a reverse proxy in front of it). The page shows the relay's address, status and whether the controller is connected to it; changes are applied by the node's agent. The same page opens from a node: **Settings → Protocols → Relay service** adds the relay to that node, and a node with the relay has **Relay settings** on its card. The first line names the way you came, and **Back** returns there. One relay per installation; owners and administrators manage it.
+
 Server notes and announcements support **Enter** for newlines and wrap long lines automatically. Manual AWG settings have their own **Manual AWG parameters** tab in the node editor.
 
 In profile access settings, **Duration → Custom duration** accepts whole-number values with H (hours), D (days), M (30 days) or Y (365 days), such as `12H` or `1M`. User devices are managed by their owner in the Telegram bot. Server **Maintenance** groups diagnostics, reinstall and reset/removal; diagnostics also check configured TCP and UDP ports.

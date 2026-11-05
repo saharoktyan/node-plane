@@ -152,6 +152,17 @@ pub(super) enum Control {
     ControllerTelegramAdminRemove(usize),
     ControllerSshKey,
     ControllerSshKeyCopy,
+    /// The web cabinet's relay, from Settings › Basic.
+    ControllerRelay,
+    /// Set the relay up, or change its settings.
+    ControllerRelaySetup,
+    /// Next node for a new relay.
+    ControllerRelayNode,
+    ControllerRelayTls,
+    ControllerRelayField(&'static str),
+    ControllerRelaySave,
+    ControllerRelayRemove,
+    ControllerRelayRefresh,
     ControllerPolicyToggle(&'static str),
     ControllerDefaultsToggle(&'static str),
     ControllerDefaultsPreset,
@@ -209,6 +220,8 @@ pub(super) enum Control {
     NodesEdit,
     /// Limits of the installation on the open node.
     NodesLimits,
+    /// The relay page, opened from the node card.
+    NodesRelay,
     NodesEditTab(crate::node_editor::Tab),
     NodesEditField(usize),
     NodesEditChoice(usize),

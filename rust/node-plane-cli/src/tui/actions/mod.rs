@@ -1,6 +1,7 @@
 mod access;
 mod controller;
 mod nodes;
+mod relay;
 mod settings;
 mod tariffs;
 mod temporary;
@@ -366,6 +367,14 @@ impl App {
             | Control::ControllerTelegramAdminAdd
             | Control::ControllerTelegramAdminRemove(_)
             | Control::ControllerSshKeyCopy
+            | Control::ControllerRelay
+            | Control::ControllerRelaySetup
+            | Control::ControllerRelayNode
+            | Control::ControllerRelayTls
+            | Control::ControllerRelayField(_)
+            | Control::ControllerRelaySave
+            | Control::ControllerRelayRemove
+            | Control::ControllerRelayRefresh
             | Control::ControllerPolicies
             | Control::ControllerScopedPolicy(..)
             | Control::ControllerQuotaReset
@@ -474,6 +483,7 @@ impl App {
             }
             Control::NodesEdit
             | Control::NodesLimits
+            | Control::NodesRelay
             | Control::NodesEditTab(..)
             | Control::NodesEditField(..)
             | Control::NodesEditChoice(..)

@@ -841,6 +841,11 @@ pub(in crate::tui) fn draw_controller(
             "quota_timezone" => "Quota time zone from the IANA database, for example Europe/Moscow or America/New_York.".into(),
             "tariff_new" => "New tariff · name up to 64 characters".into(),
             "tariff_title" => "Tariff name · up to 64 characters".into(),
+            "relay_domain" => "Relay · the cabinet's domain, pointed at the relay's node".into(),
+            "relay_port" => "Relay · port on the node (with a reverse proxy: the local port it passes to)".into(),
+            "relay_acme_contact" => "Relay · email for Let's Encrypt notices; may be empty".into(),
+            "relay_certificate_path" => "Relay · certificate chain (PEM) path on the node, readable by node-plane-relay".into(),
+            "relay_key_path" => "Relay · private key (PEM) path on the node, readable by node-plane-relay".into(),
             _ => format!("Installation defaults · {key}"),
         };
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
@@ -862,6 +867,8 @@ pub(in crate::tui) fn draw_controller(
             ));
         }
         controls.push(("Cancel".into(), Control::ControllerBack));
+    } else if app.relay_view_open() {
+        (text, controls) = app.relay_view();
     } else if app.tariff_view_open() {
         (text, controls) = app.tariff_view();
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
@@ -2023,6 +2030,10 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
+    if key.starts_with("relay_") {
+        // The relay page checks each field; an empty contact clears it.
+        return true;
+    }
     if key.starts_with("backup_")
         || key.starts_with("telegram_")
         || key.starts_with("quota_")

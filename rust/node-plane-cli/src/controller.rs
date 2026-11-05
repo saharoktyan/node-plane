@@ -81,6 +81,13 @@ pub enum Command {
     /// Extends by days at the profile revision seen in the request.
     RenewalApprove(Uuid, u64, u64, Uuid),
     RenewalReject(Uuid),
+    /// The web cabinet's relay, with its link as the driver sees it.
+    Relay,
+    /// The nodes a new relay can run on.
+    RelayNodes,
+    /// Sets the relay up or changes it (`PUT /api/v1/relay`).
+    RelaySave(Value),
+    RelayRemove,
     Backups,
     BackupCatalog(usize),
     BackupDetail(Uuid),
@@ -164,6 +171,20 @@ impl Command {
                 None,
             ),
             Self::Backups => (Method::GET, "/api/v1/system/backups".into(), None, None),
+            Self::Relay => (Method::GET, "/api/v1/relay".into(), None, None),
+            Self::RelayNodes => (
+                Method::GET,
+                "/api/v1/nodes?stage=node&limit=100".into(),
+                None,
+                None,
+            ),
+            Self::RelaySave(body) => (
+                Method::PUT,
+                "/api/v1/relay".into(),
+                Some(body.clone()),
+                None,
+            ),
+            Self::RelayRemove => (Method::DELETE, "/api/v1/relay".into(), None, None),
             Self::Tariffs | Self::TariffChoices(_) => {
                 (Method::GET, "/api/v1/tariffs".into(), None, None)
             }
@@ -520,6 +541,15 @@ pub struct Browser {
     pub telegram_role_pending: Option<bool>,
     pub telegram_settings: Option<Value>,
     pub ssh_key: Option<Value>,
+    /// The relay page: `{"relay": …}` as the controller reports it.
+    pub relay: Option<Value>,
+    /// Nodes a new relay can run on, while one is being set up.
+    pub relay_nodes: Option<Value>,
+    pub relay_draft: Option<crate::relay::Draft>,
+    /// The node card the relay page was opened from; None for Settings.
+    pub relay_origin: Option<(String, String)>,
+    /// Removal waits for a second press.
+    pub relay_confirm_remove: bool,
     pub notice: String,
     pub defaults_advanced: bool,
     pub text_confirmation: bool,
@@ -613,6 +643,25 @@ impl Browser {
                 self.bot_title = Some(value);
                 self.defaults_input = None;
                 self.selected = 0;
+            }
+            Command::Relay | Command::RelaySave(_) | Command::RelayRemove => {
+                // A late answer after the relay page was left.
+                if self.relay.is_none() {
+                    return;
+                }
+                if !matches!(command, Command::Relay) {
+                    self.relay_draft = None;
+                    self.relay_nodes = None;
+                    self.relay_confirm_remove = false;
+                    self.selected = 0;
+                }
+                self.relay = Some(value);
+                self.defaults_input = None;
+            }
+            Command::RelayNodes => {
+                if self.relay_draft.is_some() {
+                    self.relay_nodes = Some(value);
+                }
             }
             Command::SshKey => {
                 self.ssh_key = Some(value);
