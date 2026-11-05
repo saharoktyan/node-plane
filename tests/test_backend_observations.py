@@ -31,7 +31,7 @@ class ObservationTests(TestCase):
         driver = SimpleNamespace(inspect_node_services=Mock(return_value={'agent_version': 'test'}))
         with TestClient(create_app(self.db, node_driver=driver)) as client:
             node = client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()
-            self.assertTrue(node['agent_installed'])
+            self.assertEqual(node['stage'], 'node')
             self.assertEqual(node['applied_revision'], 0)
             self.assertEqual(node['agent']['method'], 'rollout')
             self.assertIsNone(node['agent']['version'])
@@ -48,7 +48,7 @@ class ObservationTests(TestCase):
                 self.assertEqual(next(c['status'] for c in checks if c['id'] == 'agent'), 'error' if fails else 'ok')
                 self.assertFalse(any(c['id'] == 'installation' for c in checks))
                 self.assertNotIn('PRIVATE', response.text)
-            self.assertTrue(client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['agent_installed'])
+            self.assertEqual(client.get('/api/v1/nodes/lv1', headers=self.admin_headers()).json()['stage'], 'node')
 
     def test_unsuccessful_rollout_does_not_claim_agent_installed(self):
         self.create()
@@ -57,7 +57,7 @@ class ObservationTests(TestCase):
             conn.execute("INSERT INTO backend_agent_rollouts (id,node_key,actor_account_id,command_key,intent_json,status) VALUES (?,'lv1',?,?,'{}','blocked')",
                          (str(uuid4()), self.admin.id, str(uuid4())))
         response = self.client.get('/api/v1/nodes/lv1', headers=self.admin_headers())
-        self.assertFalse(response.json()['agent_installed'])
+        self.assertEqual(response.json()['stage'], 'invitation')
 
     def test_overview_publishes_actual_alert_and_request_policy_switches(self):
         with self.db.transaction() as conn:

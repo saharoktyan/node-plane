@@ -146,8 +146,13 @@ def _validate(values, *, create):
 
 
 def agent_installed(node):
-    """Persisted installation evidence, independent of a live connection."""
-    return bool(node['agent_installed'] if 'agent_installed' in node.keys() else node['applied_revision'] > 0)
+    """Whether the record is a node (its agent is installed) rather than an
+    invitation; persisted evidence, independent of a live connection."""
+    if 'agent_installed' in node.keys():
+        return bool(node['agent_installed'])
+    if 'stage' in node.keys():
+        return node['stage'] == 'node'
+    return node['applied_revision'] > 0
 
 
 def applied_protocols(node):
@@ -219,7 +224,9 @@ class NodeService:
                 'flag': row['flag'], 'enabled': bool(row['enabled']),
                 'policy_eligible': bool(row['policy_eligible']),
                 'setup_attempted': bool(row['setup_attempted']),
-                'agent_installed': bool(row['agent_installed']),
+                # A server is a node once its agent is installed; before that
+                # the record is an invitation to install it.
+                'stage': 'node' if row['agent_installed'] else 'invitation',
                 'agent': ({'method': row['agent_method'], 'installed_at': row['agent_installed_at'],
                            'version': row['agent_version'], 'checked_at': row['agent_checked_at']}
                           if row['agent_method'] else None),
@@ -257,8 +264,11 @@ class NodeService:
             LEFT JOIN backend_node_regions r ON r.node_key = n.key
             LEFT JOIN backend_agent_installations ai ON ai.node_key = n.key'''
 
-    def list(self, actor, *, limit=25, cursor=None, search=None, order="key"):
+    def list(self, actor, *, limit=25, cursor=None, search=None, order="key", stage=None):
+        """Nodes and invitations; `stage` keeps one of them."""
         require_permission(actor, 'nodes.manage')
+        if stage not in {None, 'node', 'invitation'}:
+            raise AccessDenied('invalid_input', 422)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise AccessDenied('invalid_input', 422)
         if search is not None and (not isinstance(search, str) or not 1 <= len(search.strip()) <= 128):
@@ -269,6 +279,8 @@ class NodeService:
         kind = 'admin_nodes_search:' + term if term else 'admin_nodes'
         if order == 'region':
             kind += ':region'
+        if stage:
+            kind += ':' + stage
         after = _cursor(cursor, kind)
         if order == 'region':
             try:
@@ -279,6 +291,8 @@ class NodeService:
                 raise AccessDenied('invalid_cursor', 422) from None
         columns = 'n.region, n.title, n.key' if order == 'region' else 'n.key'
         condition = ' WHERE (n.region, n.title, n.key) > (?, ?, ?)' if order == 'region' else ' WHERE n.key > ?'
+        if stage:
+            condition += f" AND {'' if stage == 'node' else 'NOT '}{AGENT_INSTALLED_SQL}"
         def parameters(position, count):
             return (*position, count) if order == 'region' else (position, count)
         with self.db.connect() as conn:

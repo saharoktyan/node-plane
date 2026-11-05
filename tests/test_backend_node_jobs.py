@@ -69,7 +69,7 @@ class BackendNodeJobTests(unittest.TestCase):
         self.assertEqual(NodeOverviewService(self.db).get(self.actor, 'n1')['state'], 'not_installed')
         node = NodeService(self.db).get(self.actor, 'n1')
         self.assertEqual(node['applied_revision'], 0)
-        self.assertTrue(node['agent_installed'])
+        self.assertEqual(node['stage'], 'node')
         task = NodeSettingsService(self.db).queue(self.actor, 'n1', revision=node['desired_revision'], command_key=str(uuid4()))
         self.assertTrue(NodeSettingsExecutor(self.db, driver).run_one())
         result = NodeSettingsService(self.db).get(self.actor, task['id'])

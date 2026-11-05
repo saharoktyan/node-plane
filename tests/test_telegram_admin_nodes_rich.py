@@ -10,7 +10,7 @@ from telegram_client.i18n import tr
 
 class AdminNodeRichTests(IsolatedAsyncioTestCase):
     async def test_agent_only_technical_menu_has_host_diagnostics_without_vpn_actions(self):
-        self.node.update(protocols=[], applied_revision=0, agent_installed=True)
+        self.node.update(protocols=[], applied_revision=0, stage='node')
         self.query.data = 'node_tools:msk1'
         with patch.object(tools, 'render', new_callable=AsyncMock) as draw:
             await tools.tools_cb(self.query, self.bot, self.backend, self.state)
@@ -27,7 +27,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.backend.node_services.assert_not_awaited()
 
     async def test_legacy_diagnostics_do_not_show_missing_vpn_as_an_agent_only_failure(self):
-        self.node.update(protocols=[], applied_revision=0, agent_installed=True)
+        self.node.update(protocols=[], applied_revision=0, stage='node')
         self.backend.node_diagnostics = AsyncMock(return_value={
             'docker': 'missing', 'runtime_root': 'missing', 'xray_config': 'missing', 'awg_config': 'missing'})
         self.query.data = 'node_diagnostics:msk1'
@@ -37,7 +37,7 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
                          (tr('en', 'nodes.diagnostics.agent_only'),))
 
     async def test_installed_agent_only_card_keeps_probe_and_management_without_setup(self):
-        self.node.update(protocols=[], xray_transports=[], applied_revision=0, agent_installed=True)
+        self.node.update(protocols=[], xray_transports=[], applied_revision=0, stage='node')
         with patch.object(nodes, 'render', new_callable=AsyncMock) as draw:
             await nodes.show_admin_node(123, 123, 77, 'msk1', self.bot, self.backend, self.state)
             callbacks = self.callbacks(draw)
@@ -1092,3 +1092,11 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(flat_buttons), 1)
         self.assertEqual(flat_buttons[0].callback_data, nodes.AdminNodeCallback(node_key='msk1').pack())
         self.assertEqual(flat_buttons[0].text, tr('en', 'setup.close'))
+
+
+class InvitationLabelTests(IsolatedAsyncioTestCase):
+    def test_server_without_agent_is_shown_as_an_invitation(self):
+        self.assertEqual(nodes.node_state_key({'stage': 'invitation'}, 'not_installed'), 'invitation')
+        self.assertEqual(nodes.node_state_key({'stage': 'node'}, 'not_installed'), 'not_installed')
+        self.assertEqual(nodes.node_state_key({'stage': 'invitation'}, 'deleting'), 'deleting')
+        self.assertEqual(tr('en', 'nodes.card.state.invitation'), 'waiting for the agent')

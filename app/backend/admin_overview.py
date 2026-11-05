@@ -20,7 +20,10 @@ class AdminOverviewService:
             alerts_enabled = bool(AlertService._policy(conn)['enabled'])
             from .access_requests import AccessRequestService
             requests_enabled = AccessRequestService._policy(conn)['enabled']
-            nodes = conn.execute('SELECT key, title, region, flag, enabled FROM backend_nodes ORDER BY region, title, key').fetchall()
+            from .nodes import AGENT_INSTALLED_SQL
+            nodes = conn.execute(f'''SELECT key, title, region, flag, enabled,
+                CASE WHEN {AGENT_INSTALLED_SQL} THEN 1 ELSE 0 END AS installed
+                FROM backend_nodes n ORDER BY region, title, key''').fetchall()
             from .quotas import BLOCKED_SQL
             profiles = conn.execute(f'''SELECT p.frozen, p.expires_at, d.profile_id AS deleting,
                 {BLOCKED_SQL} AS quota_blocked
@@ -65,8 +68,10 @@ class AdminOverviewService:
                         'last_checked_at': meta.get('updates_last_checked_at') or None,
                         'status': meta.get('updates_last_status', 'never'),
                         'branch': meta.get('updates_branch', UPDATE_BRANCH)},
-            'nodes_total': len(nodes),
-            'nodes_enabled': sum(bool(node['enabled']) for node in nodes),
+            # Invitations are servers still waiting for their agent.
+            'nodes_total': sum(bool(node['installed']) for node in nodes),
+            'nodes_enabled': sum(bool(node['installed'] and node['enabled']) for node in nodes),
+            'invitations_total': sum(not node['installed'] for node in nodes),
             'profiles_total': sum(not p['deleting'] for p in profiles),
             'profiles_active': active,
             'profiles_frozen': sum(not p['deleting'] and bool(p['frozen']) for p in profiles),

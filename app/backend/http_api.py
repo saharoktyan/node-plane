@@ -342,6 +342,7 @@ class AdminOverviewOutput(BaseModel):
     version: str
     nodes_total: int
     nodes_enabled: int
+    invitations_total: int = 0
     profiles_total: int
     profiles_active: int
     profiles_frozen: int
@@ -552,7 +553,8 @@ class AdminNodeOutput(BaseModel):
     enabled: bool
     policy_eligible: bool = False
     setup_attempted: bool = True
-    agent_installed: bool = False
+    # `node` once the agent is installed, `invitation` before.
+    stage: Literal['node', 'invitation'] = 'invitation'
     # How the agent was installed and what it last reported; None before.
     agent: dict | None = None
     settings_apply_pending: bool = False
@@ -1778,8 +1780,9 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def list_nodes(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
                    cursor: Annotated[str | None, Query(max_length=8192)] = None,
                    search: Annotated[str | None, Query(max_length=128)] = None,
-                   include_summary: bool = False, order: Literal['key', 'region'] = 'key'):
-        result = nodes.list(current, limit=limit, cursor=cursor, search=search, order=order)
+                   include_summary: bool = False, order: Literal['key', 'region'] = 'key',
+                   stage: Literal['node', 'invitation'] | None = None):
+        result = nodes.list(current, limit=limit, cursor=cursor, search=search, order=order, stage=stage)
         if include_summary:
             for node in result['items']:
                 node['overview'] = node_overview.get(current, node['key'])

@@ -31,8 +31,9 @@ pub struct Node {
     pub xray_transports: Vec<String>,
     pub desired_revision: u64,
     pub applied_revision: u64,
+    /// `node` once the agent is installed, `invitation` before.
     #[serde(default)]
-    pub agent_installed: Option<bool>,
+    pub stage: Option<String>,
     #[serde(default)]
     pub settings_apply_pending: Option<bool>,
     pub transport: Option<String>,
@@ -90,7 +91,9 @@ impl Node {
         parts.join(" · ")
     }
     pub fn installed_agent(&self) -> bool {
-        self.agent_installed.unwrap_or(self.applied_revision > 0)
+        self.stage
+            .as_deref()
+            .map_or(self.applied_revision > 0, |stage| stage == "node")
     }
     pub fn pending_settings(&self) -> bool {
         self.settings_apply_pending.unwrap_or(
@@ -114,6 +117,10 @@ impl Node {
             })
     }
     pub fn state_label(&self) -> &str {
+        // Before its agent is installed the server is only an invitation.
+        if !self.installed_agent() && !matches!(self.state(), "deleting" | "deletion_blocked") {
+            return "Invitation · waiting for the agent";
+        }
         match self.state() {
             "not_installed" => "VPN not installed",
             "agent_only" => "Agent-only server",
@@ -1404,7 +1411,7 @@ async fn execute_inner(
                     let (method,path,body,key) = match &command {
                         Temporary::List { node,page,page_size } => (Method::GET,
                             format!("{root}?page={page}&page_size={page_size}{}",node.as_ref().map(|n|format!("&node_key={}",encode(n))).unwrap_or_default()),None,None),
-                        Temporary::Servers => (Method::GET,"/api/v1/nodes?limit=100&order=region&include_summary=true".into(),None,None),
+                        Temporary::Servers => (Method::GET,"/api/v1/nodes?limit=100&order=region&stage=node&include_summary=true".into(),None,None),
                         Temporary::Card(id) => (Method::GET,format!("{root}/{id}"),None,None),
                         Temporary::Artifact(id) => (Method::GET,format!("{root}/{id}/artifact"),None,None),
                         Temporary::Create { id,body } => (Method::POST,root.into(),Some(body.clone()),Some(*id)),
@@ -1416,7 +1423,7 @@ async fn execute_inner(
                         while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {
                             ensure!(cursors.insert(cursor.clone()),"Node pagination did not advance");
                             let next = backend::request(session,&credential,Method::GET,
-                                &format!("/api/v1/nodes?limit=100&order=region&include_summary=true&cursor={}",encode(&cursor)),None,None).await?;
+                                &format!("/api/v1/nodes?limit=100&order=region&stage=node&include_summary=true&cursor={}",encode(&cursor)),None,None).await?;
                             let extra = next["items"].as_array().context("Missing nodes")?;
                             let items = value["items"].as_array_mut().context("Missing nodes")?;
                             ensure!(items.len()+extra.len()<20_000,"Too many nodes");
@@ -1819,6 +1826,11 @@ mod tests {
         );
         node.installation = None;
         assert_eq!(node.agent_line(), "Ready");
+        // Before its agent is installed the server is an invitation.
+        node.stage = Some("invitation".into());
+        assert_eq!(node.state_label(), "Invitation · waiting for the agent");
+        node.stage = Some("node".into());
+        assert_eq!(node.state_label(), "VPN not installed");
     }
 
     #[test]

@@ -7315,7 +7315,7 @@ fn installed_agent_only_keeps_maintenance_when_unreachable_and_can_drop_all_prot
     let mut node = browser_node("de1", "Europe");
     node.protocols.clear();
     node.applied_revision = 0;
-    node.agent_installed = Some(true);
+    node.stage = Some("node".into());
     node.agent = crate::nodes::AgentState::Unavailable;
     let actions = node_card_actions(&node, None);
     assert!(

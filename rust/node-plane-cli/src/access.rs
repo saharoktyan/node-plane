@@ -81,7 +81,8 @@ impl Command {
             ),
             Self::EditContext { .. } => (
                 hyper::Method::GET,
-                "/api/v1/nodes?limit=100".into(),
+                // Access is granted on nodes, not on invitations.
+                "/api/v1/nodes?limit=100&stage=node".into(),
                 None,
                 None,
             ),

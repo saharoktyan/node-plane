@@ -81,7 +81,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             backend.admin_nodes.assert_not_awaited()
             await user.show_home(123, 123, self.bot, backend, self.state, 77,
                                  quick_start=True)
-            backend.admin_nodes.assert_awaited_once_with(123, limit=1)
+            backend.admin_nodes.assert_awaited_once_with(123, limit=1, stage='node')
             self.assertIn(user.tr('en', 'home.admin_quick_start'),
                           draw.call_args.args[2].lines)
             self.assertEqual(user.tr('en', 'home.admin_quick_start'), 'Welcome to Node Plane!')

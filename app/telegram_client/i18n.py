@@ -2780,6 +2780,7 @@ CATALOG['en'].update({
     'node_tools.setup_agent': 'Setup agent',
     'nodes.rollout.agent_ready': 'Agent installed',
     'nodes.card.state.agent_only': 'agent-only server',
+    'nodes.card.state.invitation': 'waiting for the agent',
     'node_tools.protocols_stage_button': 'Install protocols',
     'node.wizard.protocols.prompt': 'Select protocols, or continue with the agent only.',
 })
@@ -2787,6 +2788,7 @@ CATALOG['ru'].update({
     'node_tools.setup_agent': 'Установить агент',
     'nodes.rollout.agent_ready': 'Агент установлен',
     'nodes.card.state.agent_only': 'сервер без VPN-протоколов',
+    'nodes.card.state.invitation': 'ждёт установки агента',
     'node_tools.protocols_stage_button': 'Установить протоколы',
     'node.wizard.protocols.prompt': 'Выберите протоколы или продолжите только с агентом.',
 })

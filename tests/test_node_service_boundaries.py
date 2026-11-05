@@ -37,12 +37,28 @@ class NodeServiceBoundariesTests(unittest.TestCase):
             json=body,
         )
 
+    def test_invitations_are_listed_apart_from_nodes_until_the_agent_is_installed(self):
+        self.assertEqual(self.create_node('n1', protocols=[]).status_code, 201)
+        self.assertEqual(self.create_node('n2', protocols=[], transport='ssh', ssh_target='root@n2.example').status_code, 201)
+        with self.db.transaction() as conn:
+            from backend.agent_installations import record
+            record(conn, 'n2', 'token')
+        def keys(stage=None):
+            query = '?stage=' + stage if stage else ''
+            return [n['key'] for n in self.client.get('/api/v1/nodes' + query, headers=self.admin_headers()).json()['items']]
+        self.assertEqual(keys(), ['n1', 'n2'])
+        self.assertEqual(keys('node'), ['n2'])
+        self.assertEqual(keys('invitation'), ['n1'])
+        self.assertEqual(self.client.get('/api/v1/nodes?stage=other', headers=self.admin_headers()).status_code, 422)
+        overview = self.client.get('/api/v1/admin/overview', headers=self.admin_headers()).json()
+        self.assertEqual((overview['nodes_total'], overview['invitations_total']), (1, 1))
+
     def test_base_node_creation_and_metadata_edits_do_not_trigger_runtime_settings_apply(self):
         created = self.create_node('n1', protocols=[])
         self.assertEqual(created.status_code, 201, created.text)
         node = created.json()
         self.assertFalse(node['enabled'])
-        self.assertFalse(node['agent_installed'])
+        self.assertEqual(node['stage'], 'invitation')
         self.assertFalse(node['settings_apply_pending'])
         self.assertEqual(node['desired_revision'], 1)
         self.assertEqual(node['applied_revision'], 0)
@@ -59,7 +75,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         self.assertEqual(updated['desired_revision'], 2)
         self.assertEqual(updated['applied_revision'], 0)
         self.assertFalse(updated['settings_apply_pending'])
-        self.assertFalse(updated['agent_installed'])
+        self.assertEqual(updated['stage'], 'invitation')
 
         # Applying settings on an uninstalled node must be rejected before creating any task
         apply_response = self.client.post(
@@ -84,7 +100,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         self.assertEqual((node['applied_revision'], node['desired_revision']), (2, 2))
         self.assertFalse(node['settings_apply_pending'])
         self.assertEqual(node['protocols'], ['awg'])
-        self.assertTrue(node['agent_installed'])
+        self.assertEqual(node['stage'], 'node')
         with self.db.connect() as conn:
             self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_settings_tasks WHERE node_key='n1'").fetchone())
             self.assertIsNone(conn.execute("SELECT 1 FROM backend_node_jobs WHERE node_key='n1'").fetchone())
@@ -102,7 +118,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
             record(conn, 'n1', 'rollout')
 
         node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
-        self.assertTrue(node['agent_installed'])
+        self.assertEqual(node['stage'], 'node')
         self.assertEqual(node['applied_revision'], 0)
         self.assertFalse(node['settings_apply_pending'])
 
@@ -154,7 +170,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
 
             # Durable state remains installed
             node_read = client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
-            self.assertTrue(node_read['agent_installed'])
+            self.assertEqual(node_read['stage'], 'node')
 
         # Successful driver probe on agent-only node returns empty protocol list and no settings pending
         facts = {
@@ -193,7 +209,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         )
         self.assertEqual(add_patch.status_code, 200, add_patch.text)
         self.assertTrue(add_patch.json()['settings_apply_pending'])
-        self.assertTrue(add_patch.json()['agent_installed'])
+        self.assertEqual(add_patch.json()['stage'], 'node')
 
         # Queue apply task
         apply_queue = self.client.post(
@@ -215,7 +231,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         self.assertEqual(applied_node['applied_revision'], 2)
         self.assertFalse(applied_node['settings_apply_pending'])
         self.assertEqual(applied_node['protocols'], ['awg'])
-        self.assertTrue(applied_node['agent_installed'])
+        self.assertEqual(applied_node['stage'], 'node')
 
         # 2. Remove all protocols
         remove_patch = self.client.patch(
@@ -225,7 +241,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         )
         self.assertEqual(remove_patch.status_code, 200, remove_patch.text)
         self.assertTrue(remove_patch.json()['settings_apply_pending'])
-        self.assertTrue(remove_patch.json()['agent_installed'])
+        self.assertEqual(remove_patch.json()['stage'], 'node')
 
         # Queue removal apply task
         remove_queue = self.client.post(
@@ -245,7 +261,7 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         self.assertEqual(final_node['applied_revision'], 3)
         self.assertFalse(final_node['settings_apply_pending'])
         self.assertEqual(final_node['protocols'], [])
-        self.assertTrue(final_node['agent_installed'])
+        self.assertEqual(final_node['stage'], 'node')
 
     def test_vpn_specific_node_operations_rejected_on_agent_only_node(self):
         self.assertEqual(self.create_node('n1', protocols=[]).status_code, 201)

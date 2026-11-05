@@ -300,7 +300,7 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         if quick_start and account['role'] == 'admin' and not account.get('onboarding_completed', False):
             try:
                 async with asyncio.timeout(3.0):
-                    nodes_page = await backend.admin_nodes(user_id, limit=1)
+                    nodes_page = await backend.admin_nodes(user_id, limit=1, stage='node')
                     if not nodes_page['items']:
                         lines = (tr(locale, 'home.admin_quick_start'),)
             except Exception:

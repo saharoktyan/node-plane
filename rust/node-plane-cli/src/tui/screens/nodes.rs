@@ -130,14 +130,14 @@ pub(in crate::tui) fn draw_node_editor(
             ));
         }
         lines.push(Line::from(
-            if editor.source["agent_installed"]
-                .as_bool()
-                .unwrap_or(editor.source["applied_revision"].as_u64().unwrap_or(0) > 0)
-                && (!editor.protocols.is_empty()
-                    || editor.source["protocols"]
-                        .as_array()
-                        .is_some_and(|p| !p.is_empty())
-                    || editor.source["settings_apply_pending"] == true)
+            if editor.source["stage"].as_str().map_or(
+                editor.source["applied_revision"].as_u64().unwrap_or(0) > 0,
+                |stage| stage == "node",
+            ) && (!editor.protocols.is_empty()
+                || editor.source["protocols"]
+                    .as_array()
+                    .is_some_and(|p| !p.is_empty())
+                || editor.source["settings_apply_pending"] == true)
             {
                 "Save and apply these changes?"
             } else {

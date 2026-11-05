@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A server is a node once its agent is installed; before that it is an
+  invitation to install the agent. Nodes in the API carry `stage` (`node` or
+  `invitation`) instead of `agent_installed`, `GET /api/v1/nodes` takes
+  `stage=` to list one of them, and the admin overview counts invitations
+  apart (`invitations_total`). Access and temporary-configuration pickers in
+  the bot and Workstation offer only nodes; the bot and Workstation show an
+  invitation as waiting for the agent.
 - Each installed node agent has one record (migration r0032): how it was
   installed (token, SSH, controller rollout, controller host or an earlier
   setup) and the version it last reported in a probe. Nodes in the API carry

@@ -168,7 +168,7 @@ async def temporary_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, s
         elif action=='new':
             items, cursor, seen = [], None, set()
             while True:
-                path = '/api/v1/nodes?limit=100&order=region'+('&cursor='+quote(cursor,safe='') if cursor else '')
+                path = '/api/v1/nodes?limit=100&order=region&stage=node'+('&cursor='+quote(cursor,safe='') if cursor else '')
                 page = await backend.request('GET',path,telegram_user_id=query.from_user.id)
                 items.extend(n for n in page['items'] if n['enabled'] and n['applied_revision']>0 and n['applied_revision']==n['desired_revision'] and n['protocols'])
                 cursor = page.get('next_cursor')

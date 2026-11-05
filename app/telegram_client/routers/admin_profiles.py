@@ -33,7 +33,8 @@ router = Router()
 async def _all_nodes(backend, user_id):
     nodes, cursor, seen = [], None, set()
     while True:
-        page = await backend.admin_nodes(user_id, cursor=cursor)
+        # Access is granted on nodes, not on invitations waiting for an agent.
+        page = await backend.admin_nodes(user_id, cursor=cursor, stage='node')
         nodes.extend(page['items'])
         cursor = page.get('next_cursor')
         if not cursor:

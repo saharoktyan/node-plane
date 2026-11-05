@@ -24,7 +24,7 @@ class BackendNodeSettingsTests(unittest.TestCase):
             record(conn, 'n1', 'rollout')
         for _ in range(2):
             node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
-            self.assertTrue(node['agent_installed'])
+            self.assertEqual(node['stage'], 'node')
             self.assertFalse(node['settings_apply_pending'])
             self.assertEqual((node['desired_revision'], node['applied_revision']), (1, 0))
         self.assertEqual(self.queue().status_code, 409)
@@ -130,7 +130,7 @@ class BackendNodeSettingsTests(unittest.TestCase):
             headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
             json={'protocols': [], 'xray_transports': []})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue(response.json()['agent_installed'])
+        self.assertEqual(response.json()['stage'], 'node')
         self.assertEqual(self.queue(revision=2).status_code, 202)
         from unittest.mock import Mock
         driver = Mock()
@@ -144,7 +144,7 @@ class BackendNodeSettingsTests(unittest.TestCase):
         node = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()
         self.assertEqual(node['applied_revision'], 2)
         self.assertEqual(node['protocols'], [])
-        self.assertTrue(node['agent_installed'])
+        self.assertEqual(node['stage'], 'node')
 
         # Re-enable a protocol on the same managed runtime and journal, without
         # attempting PrepareNode (which intentionally rejects managed journals).

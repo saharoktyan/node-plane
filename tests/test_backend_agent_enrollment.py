@@ -124,7 +124,7 @@ class AgentEnrollmentTests(unittest.TestCase):
     def test_an_enrolled_agent_counts_as_installed(self):
         self.issue()
         from backend.nodes import NodeService
-        installed = lambda: NodeService(self.db).get(self.actor, 'n1')['agent_installed']
+        installed = lambda: NodeService(self.db).get(self.actor, 'n1')['stage'] == 'node'
         self.assertFalse(installed())
         self.driver.failure = None
         self.assertTrue(self.service.run_one())

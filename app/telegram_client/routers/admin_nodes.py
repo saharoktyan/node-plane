@@ -95,8 +95,15 @@ async def change_node_draft(user_id, node_key, values, backend, state, *, baseli
     await state.update_data(node_settings_draft=draft, node_region_confirmation=None)
 
 
+def node_state_key(node, state):
+    """Before its agent is installed the server is only an invitation."""
+    return 'invitation' if state == 'not_installed' and not installed_agent(node) else state
+
+
+
 def installed_agent(node):
-    return bool(node.get('agent_installed', node.get('applied_revision', 0) > 0))
+    """A node has its agent; an invitation is still waiting for it."""
+    return node.get('stage', 'node' if node.get('applied_revision', 0) > 0 else 'invitation') == 'node'
 
 
 def pending_settings(node):
@@ -270,7 +277,7 @@ async def show_admin_nodes(chat_id, user_id, message_id, bot, backend, state, pa
             summary = node.get('overview')
             label = server_label(node)
             if summary and summary['state'] != 'applied_unverified':
-                label += ' · ' + tr(locale, 'nodes.card.state.' + summary['state'])
+                label += ' · ' + tr(locale, 'nodes.card.state.' + node_state_key(node, summary['state']))
             entries.append(Section('', rows=((InlineKeyboardButton(text=label,
                 callback_data=AdminNodeCallback(node_key=node['key']).pack()),),)))
         sections.append(Section(region, sections=tuple(entries)))
@@ -989,7 +996,7 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     if overview:
         state_key = overview.get('state', 'unknown')
         if state_key != 'applied_unverified':
-            lines.append(tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + state_key)))
+            lines.append(tr(locale, 'nodes.card.state', value=tr(locale, 'nodes.card.state.' + node_state_key(node, state_key))))
         rollout = overview.get('agent_rollout')
         bootstrap = overview.get('bootstrap')
         if bootstrap:
