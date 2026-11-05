@@ -54,6 +54,7 @@ CLEAR = (
     "backend_account_channels",
     # Rebuilt from the restored nodes.
     "backend_agent_installations",
+    "backend_service_instances",
     "backend_renewal_requests",
     "backend_agent_ssh_installs",
     "backend_agent_enrollments",
@@ -786,6 +787,8 @@ class BackupService:
             backfill(conn)
             from db.migration_revisions.r0032_agent_installations import backfill
             backfill(conn)
+            from .service_instances import sync_all
+            sync_all(conn)
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
             )

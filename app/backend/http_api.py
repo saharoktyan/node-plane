@@ -555,6 +555,8 @@ class AdminNodeOutput(BaseModel):
     setup_attempted: bool = True
     # `node` once the agent is installed, `invitation` before.
     stage: Literal['node', 'invitation'] = 'invitation'
+    # Services on the node (`vpn` for now), each with its own state.
+    service_instances: list[dict] = []
     # How the agent was installed and what it last reported; None before.
     agent: dict | None = None
     settings_apply_pending: bool = False

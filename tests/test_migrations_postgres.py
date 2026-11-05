@@ -352,12 +352,15 @@ class MigrationsPostgresTests(unittest.TestCase):
             conn.execute("""INSERT INTO backend_access_requests(id,account_id,create_key,status,created_at)
                 VALUES ('r1','a2','k1','pending','2026-11-05')""")
             conn.execute("""INSERT INTO backend_nodes(key,title,region,protocols_json,applied_revision)
-                VALUES ('n1','N1','EU','[]',1),('n2','N2','EU','[]',0)""")
+                VALUES ('n1','N1','EU','[]',1),('n2','N2','EU','[]',0),('n3','N3','EU','["awg"]',0)""")
         self.assertEqual(migrate(self.db)['applied'], [r.number for r in REVISIONS if r.number >= 28])
         with self.db.connect() as conn:
             # r0032: a node whose VPN configuration was applied has an agent.
             installations = conn.execute('SELECT node_key,method FROM backend_agent_installations').fetchall()
             self.assertEqual([tuple(r.values()) for r in installations], [('n1','task')])
+            # r0033: a node with VPN protocols has a VPN service instance.
+            services = conn.execute('SELECT node_key,service FROM backend_service_instances').fetchall()
+            self.assertEqual([tuple(r.values()) for r in services], [('n3','vpn')])
             # r0031: earlier requests ask for VPN access.
             self.assertEqual(conn.execute("SELECT service FROM backend_access_requests WHERE id='r1'").fetchone()['service'], 'vpn')
             rows = conn.execute('SELECT id,display_name,locale,locale_selected FROM backend_accounts ORDER BY id').fetchall()

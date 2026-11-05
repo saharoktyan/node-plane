@@ -278,6 +278,9 @@ class NodeSettingsExecutor:
             AND NOT EXISTS (SELECT 1 FROM backend_node_drains WHERE node_key = ?)''',
             (intent['revision'], intent['revision'], row['node_key'],
              intent['revision'], intent['revision'], row['node_key']))
+        # Removed protocols are gone from the server now.
+        from .service_instances import sync_vpn
+        sync_vpn(conn, row['node_key'])
         from types import SimpleNamespace
         from .grant_policies import reconcile
         actor = SimpleNamespace(account=SimpleNamespace(id=row['actor_account_id']))

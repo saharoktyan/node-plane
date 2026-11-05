@@ -53,6 +53,39 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         overview = self.client.get('/api/v1/admin/overview', headers=self.admin_headers()).json()
         self.assertEqual((overview['nodes_total'], overview['invitations_total']), (1, 1))
 
+    def test_vpn_service_instance_follows_the_node_protocols(self):
+        def instances():
+            return self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()['service_instances']
+        self.assertEqual(self.create_node('n1', protocols=[]).status_code, 201)
+        self.assertEqual(instances(), [])
+        edited = self.client.patch('/api/v1/nodes/n1',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
+            json={'protocols': ['awg'], 'settings': {'public_host': 'node.example', 'awg_port': 51820}})
+        self.assertEqual(edited.status_code, 200, edited.text)
+        [vpn] = instances()
+        self.assertEqual((vpn['service'], vpn['state'], vpn['protocols']), ('vpn', 'planned', ['awg']))
+        with self.db.transaction() as conn:
+            from backend.agent_installations import record
+            record(conn, 'n1', 'token')
+            # The server applied the configuration with AmneziaWG.
+            conn.execute("""INSERT INTO backend_node_settings_tasks(id,node_key,actor_account_id,command_key,revision,intent_json,status)
+                VALUES (?,'n1',?,?,2,'{"protocols": ["awg"]}','succeeded')""", (str(uuid4()), self.admin.id, str(uuid4())))
+            conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision, enabled=1 WHERE key='n1'")
+        self.assertEqual(instances()[0]['state'], 'active')
+        self.assertEqual(instances()[0]['id'], vpn['id'])
+        # Removing the last protocol keeps the instance until the server applies it.
+        revision = self.client.get('/api/v1/nodes/n1', headers=self.admin_headers()).json()['desired_revision']
+        removed = self.client.patch('/api/v1/nodes/n1',
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': f'"{revision}"'}),
+            json={'protocols': [], 'confirm_access_change': True})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual([i['state'] for i in instances()], ['removing'])
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_nodes SET applied_revision=desired_revision WHERE key='n1'")
+            from backend.service_instances import sync_vpn
+            sync_vpn(conn, 'n1')
+        self.assertEqual(instances(), [])
+
     def test_access_is_not_granted_on_an_invitation(self):
         self.assertEqual(self.create_node('n1', protocols=['awg'], settings={'public_host': 'node.example', 'awg_port': 51820}).status_code, 201)
         profile = self.client.post('/api/v1/profiles', headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
