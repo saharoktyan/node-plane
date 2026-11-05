@@ -8,11 +8,11 @@ from .announcements import AnnouncementService
 def recipients(db, principal):
     AnnouncementService._transport(principal)
     with db.connect() as conn:
-        rows = conn.execute("""SELECT i.subject FROM backend_accounts a
-            JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+        rows = conn.execute("""SELECT i.address AS subject FROM backend_accounts a
+            JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             LEFT JOIN backend_system_settings s ON s.key='admin_request_notifications:' || a.id
             WHERE a.role='admin' AND a.status='approved' AND (s.value IS NULL OR s.value!='0')
-            ORDER BY i.subject""").fetchall()
+            ORDER BY i.address""").fetchall()
     return {'items': [int(row['subject']) for row in rows]}
 
 

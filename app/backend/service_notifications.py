@@ -91,12 +91,12 @@ def queue(conn, *, kind, profile_id, dedup_key, timestamp, payload=None, device_
     spec = KINDS[kind]
     if conn.execute('SELECT 1 FROM backend_system_notifications WHERE dedup_key=?', (dedup_key,)).fetchone():
         return None
-    recipients = conn.execute("""SELECT a.id AS account_id,i.subject FROM backend_profiles p
+    recipients = conn.execute("""SELECT a.id AS account_id,i.address AS subject FROM backend_profiles p
         JOIN backend_accounts a ON a.id=p.owner_account_id
-        JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+        JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
         WHERE p.id=? AND a.status='approved'
         AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
-        ORDER BY i.subject""", (profile_id,)).fetchall()
+        ORDER BY i.address""", (profile_id,)).fetchall()
     if not recipients:
         return None
     payload = payload or {}
@@ -122,8 +122,8 @@ def current(conn, system, delivery):
         return False
     owner = conn.execute("""SELECT 1 FROM backend_profiles p
         JOIN backend_accounts a ON a.id=p.owner_account_id
-        JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
-        WHERE p.id=? AND a.id=? AND a.status='approved' AND i.subject=?
+        JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
+        WHERE p.id=? AND a.id=? AND a.status='approved' AND i.address=?
         AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)""",
         (system['profile_id'], delivery['account_id'], delivery['telegram_subject'])).fetchone()
     return bool(owner) and spec.current(conn, system, delivery)

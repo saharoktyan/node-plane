@@ -63,5 +63,20 @@ class AccountDetailsTests(unittest.TestCase):
         self.assertEqual(self.identities.find_telegram_account(105), account)
         self.assertIsNone(self.identities.find_account('workstation', '105'))
 
+    def test_telegram_logins_attach_the_telegram_channel(self):
+        from db.migration_revisions import r0029_account_channels
+        resolved = self.identities.resolve_telegram(106)
+        plain = self.identities.create_account()
+        self.identities.link_telegram(plain.id, 107)
+        rows = self.db.connection.execute(
+            'SELECT account_id, channel, address FROM backend_account_channels ORDER BY address').fetchall()
+        self.assertEqual([tuple(row) for row in rows], [(resolved.id, 'telegram', '106'), (plain.id, 'telegram', '107')])
+        self.db.connection.execute('DELETE FROM backend_account_channels')
+        r0029_account_channels.upgrade(self.db.connection)
+        self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_account_channels').fetchone()[0], 2)
+        self.assertIsNone(self.db.connection.execute(
+            'SELECT 1 FROM backend_account_channels WHERE account_id=?',
+            (self.identities.create_account().id,)).fetchone())
+
 if __name__ == '__main__':
     unittest.main()

@@ -33,6 +33,23 @@ class AnnouncementTests(unittest.TestCase):
         self.db.connection.execute("DELETE FROM backend_account_menu_refresh")
         self.db.connection.commit()
 
+    def test_recipients_are_reached_through_their_telegram_channel(self):
+        channel = self.db.connection.execute(
+            "SELECT channel,address,enabled FROM backend_account_channels WHERE account_id=?",
+            (self.member['id'],)).fetchone()
+        self.assertEqual(tuple(channel), ('telegram', '102', 1))
+        self.db.connection.execute("UPDATE backend_account_channels SET enabled=0 WHERE account_id=?",
+                                   (self.member['id'],))
+        self.db.connection.commit()
+        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 0)
+        self.db.connection.execute("UPDATE backend_account_channels SET enabled=1, address='555' WHERE account_id=?",
+                                   (self.member['id'],))
+        self.db.connection.commit()
+        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.assertEqual(self.db.connection.execute(
+            "SELECT telegram_subject FROM backend_announcement_deliveries WHERE account_id=?",
+            (self.member['id'],)).fetchone()[0], '555')
+
     def test_approved_orphan_account_is_not_a_recipient(self):
         resp = fixture.BackendHTTPTests.provision(self, 103)
         self.assertIn(resp.status_code, (200, 201))

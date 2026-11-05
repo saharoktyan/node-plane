@@ -57,6 +57,8 @@ class SQLIdentityRepository:
             upgrade(conn)
             from db.migration_revisions.r0028_account_details import upgrade
             upgrade(conn)
+            from db.migration_revisions.r0029_account_channels import upgrade
+            upgrade(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
@@ -105,6 +107,8 @@ class SQLIdentityRepository:
             else:
                 conn.execute('''INSERT INTO backend_external_identities(provider, subject, account_id)
                     VALUES ('telegram', ?, ?)''', (str(user_id), account_id))
+                from .account_channels import attach
+                attach(conn, account_id, 'telegram', user_id)
             return self._account(row)
 
     def find_account(self, provider: str, subject: str) -> Account | None:
@@ -146,6 +150,8 @@ class SQLIdentityRepository:
         else:
             from db.migration_revisions.r0028_account_details import backfill
             backfill(conn, candidate)
+            from .account_channels import attach
+            attach(conn, candidate, 'telegram', user_id)
         return self._account(row)
 
     def resolve_telegram(self, user_id: int) -> Account:

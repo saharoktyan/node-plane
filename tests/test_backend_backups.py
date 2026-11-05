@@ -279,6 +279,8 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual(self.service.get(self.actor, job['id'])['status'], 'succeeded')
         self.assertEqual(self.db.connection.execute("SELECT display_name FROM backend_accounts WHERE id=?",
                                                     (self.admin.id,)).fetchone()[0], 'Ann Lee')
+        self.assertEqual(self.db.connection.execute("SELECT channel FROM backend_account_channels WHERE account_id=?",
+                                                    (self.admin.id,)).fetchone()[0], 'telegram')
 
     def test_tariffs_and_assignments_are_backed_up_and_older_formats_have_none(self):
         profile_id = self.device_profile()

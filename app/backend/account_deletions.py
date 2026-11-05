@@ -33,6 +33,7 @@ def settle(conn):
         # Concurrent identity resolution locks this account before using its profile.
         conn.execute('UPDATE backend_accounts SET revision=revision+1 WHERE id=?', (account_id,))
         conn.execute('DELETE FROM backend_external_identities WHERE account_id=?', (account_id,))
+        conn.execute('DELETE FROM backend_account_channels WHERE account_id=?', (account_id,))
         conn.execute('UPDATE backend_identity_commands SET account_id=NULL WHERE account_id=?', (account_id,))
         conn.execute("UPDATE backend_devices SET status='retired' WHERE profile_id IN (SELECT id FROM backend_profiles WHERE owner_account_id=?)", (account_id,))
         conn.execute('UPDATE backend_account_deletions SET completed_at=? WHERE account_id=? AND completed_at IS NULL', (timestamp,account_id))

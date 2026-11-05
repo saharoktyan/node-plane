@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reach accounts through their channels instead of their sign-in identity.
+  Each account's Telegram login becomes its Telegram channel on upgrade;
+  announcements, service notifications, alerts and access-request messages
+  go to enabled channels. Restore rebuilds channels from the restored logins.
 - Create an administrator without Telegram: `admin_cli bootstrap-admin
   --name NAME` makes (or, with the same name again, finds) an administrator
   account that has no Telegram login; Workstation signs in to it from the

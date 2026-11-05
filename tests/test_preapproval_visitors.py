@@ -260,6 +260,7 @@ class PreapprovalVisitorTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_accounts WHERE id=?", (account_id,)).fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_profiles WHERE owner_account_id=?", (account_id,)).fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_external_identities WHERE subject='205' AND account_id=?", (account_id,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_account_channels WHERE address='205' AND account_id=?", (account_id,)).fetchone()[0], 1)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM backend_telegram_menu_refresh WHERE subject='205'").fetchone()[0], 0)
 
         # Replay same decision key returns identical result without duplicates
@@ -375,6 +376,7 @@ class PreapprovalVisitorTests(unittest.TestCase):
         self.assertEqual(me_guest['status'], 'pending')
         with self.db.connect() as conn:
             self.assertIsNone(conn.execute("SELECT account_id FROM backend_external_identities WHERE subject='208'").fetchone())
+            self.assertIsNone(conn.execute("SELECT account_id FROM backend_account_channels WHERE address='208'").fetchone())
 
         # Acknowledge deletion menu refresh
         self.client.post(f"/api/v1/integrations/telegram/menu-refresh/{acc_1}/ack?revision={claim['revision']}", headers=self.headers)

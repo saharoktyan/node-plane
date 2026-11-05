@@ -354,8 +354,8 @@ class AlertService:
                 timestamp,
             ),
         )
-        for admin in conn.execute("""SELECT a.id,i.subject FROM backend_accounts a
-            JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+        for admin in conn.execute("""SELECT a.id,i.address AS subject FROM backend_accounts a
+            JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             WHERE a.role='admin' AND a.status='approved' """).fetchall():
             conn.execute(
                 "INSERT INTO backend_alert_deliveries (id,event_id,account_id,telegram_subject,status) VALUES (?,?,?,?,?)",
@@ -715,8 +715,8 @@ class AlertService:
                     conn.execute("UPDATE backend_alert_deliveries SET status='skipped' WHERE id=?", (row['id'],))
                     continue
                 admin = conn.execute(
-                    """SELECT 1 FROM backend_accounts a JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
-                    WHERE a.id=? AND a.role='admin' AND a.status='approved' AND i.subject=?""",
+                    """SELECT 1 FROM backend_accounts a JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
+                    WHERE a.id=? AND a.role='admin' AND a.status='approved' AND i.address=?""",
                     (row["account_id"], row["telegram_subject"]),
                 ).fetchone()
                 node = conn.execute(

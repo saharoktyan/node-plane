@@ -70,6 +70,8 @@ class QuotaServiceTests(unittest.TestCase):
                                            (self.profile,)).fetchone()[0]
         self.db.connection.execute("INSERT INTO backend_external_identities(provider,subject,account_id) "
                                    "VALUES ('telegram','202',?)", (owner,))
+        self.db.connection.execute("INSERT INTO backend_account_channels(account_id,channel,address) "
+                                   "VALUES (?,'telegram','202')", (owner,))
         self.grants(self.profile, 1, [{'node_key': 'node', 'protocol': 'awg'}])
         self.add(self.profile, 'Phone', 2)
         self.now = datetime(2026, 3, 10, 12, tzinfo=UTC)

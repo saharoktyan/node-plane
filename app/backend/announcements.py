@@ -64,7 +64,7 @@ class AnnouncementService:
         rows = conn.execute("""SELECT p.id,p.expires_at FROM backend_profiles p
             JOIN backend_accounts a ON a.id=p.owner_account_id
             WHERE a.status='approved'
-            AND EXISTS (SELECT 1 FROM backend_external_identities i WHERE i.account_id=a.id AND i.provider='telegram')
+            AND EXISTS (SELECT 1 FROM backend_account_channels i WHERE i.account_id=a.id AND i.channel='telegram' AND i.enabled=1)
             AND p.expires_at IS NOT NULL AND p.expires_at<=?
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)
             AND NOT EXISTS (SELECT 1 FROM backend_system_notifications s
@@ -103,10 +103,10 @@ class AnnouncementService:
     @staticmethod
     def _recipients(conn, sender):
         return conn.execute(
-            f"""SELECT a.id,i.subject FROM backend_accounts a
-            JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+            f"""SELECT a.id,i.address AS subject FROM backend_accounts a
+            JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             WHERE a.status='approved' AND a.id<>? AND {RECIPIENT_PROFILE}
-            ORDER BY a.id,i.subject""",
+            ORDER BY a.id,i.address""",
             (sender,),
         ).fetchall()
 
@@ -304,10 +304,10 @@ class AnnouncementService:
             return current(conn, system, row)
         return conn.execute(
             f"""SELECT 1 FROM backend_accounts a
-            JOIN backend_external_identities i ON i.account_id=a.id AND i.provider='telegram'
+            JOIN backend_account_channels i ON i.account_id=a.id AND i.channel='telegram' AND i.enabled=1
             JOIN backend_announcements c ON c.id=?
             JOIN backend_accounts sender ON sender.id=c.actor_id
-            WHERE a.id=? AND a.status='approved' AND i.subject=?
+            WHERE a.id=? AND a.status='approved' AND i.address=?
             AND sender.status='approved' AND sender.role='admin'
             AND a.id<>sender.id AND {RECIPIENT_PROFILE} """,
             (row["announcement_id"], row["account_id"], row["telegram_subject"]),
