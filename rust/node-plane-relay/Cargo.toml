@@ -9,16 +9,24 @@ license = "Apache-2.0"
 # tonic 0.12 routes through axum 0.7, so both share one port.
 axum = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
 http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "http2", "server", "server-auto", "service", "tokio"] }
 node-plane-api = { path = "../node-plane-api" }
 prost = "0.13"
+# ring instead of the default aws-lc-rs: one crypto provider in the tree.
+rustls-acme = { version = "0.15", default-features = false, features = ["ring", "tls12", "tokio", "webpki-roots"] }
+rustls-pemfile = "2"
 # Already in the tree through rustls; Ed25519 keys of both sides.
 ring = "0.17"
 serde_json = "1.0"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "process"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", features = ["transport", "tls", "tls-webpki-roots"] }
 uuid = { version = "1.18", features = ["v4"] }
+
+[dev-dependencies]
+rcgen = "0.13"
 
 [build-dependencies]
 tonic-build = "0.12"

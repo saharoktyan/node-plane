@@ -18,7 +18,7 @@ use axum::{
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use node_plane_relay::{keys, link, serve};
+use node_plane_relay::{keys, link, serve, tls};
 use ring::signature::Ed25519KeyPair;
 use serde_json::{Value, json};
 
@@ -116,6 +116,7 @@ fn link_config(pair: &Pair, relay: SocketAddr, api: SocketAddr) -> link::Config 
         relay_key: pair.relay_key.clone(),
         key: pair.link_key.clone(),
         api: format!("http://{api}"),
+        ca: None,
         limits: link::Limits {
             response_body: 16 << 10,
             ..link::Limits::default()
@@ -436,4 +437,92 @@ async fn a_forged_hello_does_not_attach() {
     let ended = tokio::time::timeout(Duration::from_secs(5), inbound.message()).await;
     assert!(matches!(ended, Ok(Ok(None)) | Ok(Err(_))), "{ended:?}");
     assert_eq!(get_json(relay, "/health").await.2["link"], "disconnected");
+}
+
+/// `files` mode: the cabinet and the link share one TLS port.
+#[tokio::test]
+async fn the_relay_serves_tls_from_files() {
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+    use tokio_rustls::{
+        TlsConnector,
+        rustls::{
+            ClientConfig, RootCertStore, crypto::ring::default_provider, pki_types::ServerName,
+        },
+    };
+
+    let pair = Pair::new();
+    let mut authority = CertificateParams::new(Vec::<String>::new()).unwrap();
+    authority.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let authority_key = KeyPair::generate().unwrap();
+    let authority = authority.self_signed(&authority_key).unwrap();
+    let key = KeyPair::generate().unwrap();
+    let certificate = CertificateParams::new(vec!["localhost".to_string()])
+        .unwrap()
+        .signed_by(&key, &authority, &authority_key)
+        .unwrap();
+    std::fs::write(pair.dir.join("tls.crt"), certificate.pem()).unwrap();
+    std::fs::write(pair.dir.join("tls.key"), key.serialize_pem()).unwrap();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = serve::router(serve::Config {
+        key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
+        link_key_path: pair.dir.join("link.pub"),
+        limits: serve::Limits::default(),
+    });
+    let mode = tls::Mode::Files {
+        certificate: pair.dir.join("tls.crt"),
+        key: pair.dir.join("tls.key"),
+    };
+    tokio::spawn(async move { tls::serve(listener, router, mode).await.unwrap() });
+
+    let api = listen(fake_api()).await;
+    let mut config = link_config(&pair, "127.0.0.1:1".parse().unwrap(), api);
+    config.relay = format!("https://localhost:{port}");
+    config.ca = Some(authority.pem().into_bytes());
+    tokio::spawn(link::run(config));
+
+    // A browser: HTTP/1.1 over TLS, trusting the same authority.
+    let mut roots = RootCertStore::empty();
+    roots.add(authority.der().clone()).unwrap();
+    let client = ClientConfig::builder_with_provider(Arc::new(default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(client));
+    let get = |path: &'static str| {
+        let connector = connector.clone();
+        async move {
+            let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            let name = ServerName::try_from("localhost").unwrap();
+            let tls = connector.connect(name, tcp).await.unwrap();
+            let (mut sender, connection) =
+                hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(tls))
+                    .await
+                    .unwrap();
+            tokio::spawn(connection);
+            let request = Request::get(path)
+                .header("host", "localhost")
+                .body(Full::<Bytes>::default())
+                .unwrap();
+            let response = sender.send_request(request).await.unwrap();
+            let status = response.status();
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            (status, serde_json::from_slice::<Value>(&body).unwrap())
+        }
+    };
+    for _ in 0..100 {
+        if get("/health").await.1["link"] == "connected" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (status, body) = get("/api/v1/me").await;
+    assert_eq!(
+        (status, &body["headers"]["x-node-plane-via"]),
+        (StatusCode::OK, &json!("relay"))
+    );
 }

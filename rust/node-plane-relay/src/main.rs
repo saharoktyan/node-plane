@@ -1,15 +1,20 @@
 use std::{env, path::PathBuf, sync::Arc};
 
-use node_plane_relay::{keys, link, serve};
+use node_plane_relay::{keys, link, serve, tls};
 
 const USAGE: &str = "usage: node-plane-relay serve | link | key PATH | --version
 
 serve     NODE_PLANE_RELAY_LISTEN (default 127.0.0.1:8443),
           NODE_PLANE_RELAY_STATE_DIR (default /var/lib/node-plane-relay):
-          relay.key (created when missing), link.pub (the controller's key)
+          relay.key (created when missing), link.pub (the controller's key),
+          NODE_PLANE_RELAY_TLS: proxy (default), files
+          (NODE_PLANE_RELAY_TLS_CERT, NODE_PLANE_RELAY_TLS_KEY) or acme
+          (NODE_PLANE_RELAY_DOMAIN, NODE_PLANE_RELAY_ACME_CONTACT,
+          NODE_PLANE_RELAY_ACME_STAGING=1; certificates in STATE_DIR/acme)
 link      NODE_PLANE_RELAY_URL, NODE_PLANE_RELAY_KEY (the relay's key, hex),
           NODE_PLANE_RELAY_LINK_KEY_FILE (created when missing),
-          NODE_PLANE_API_URL (default http://127.0.0.1:8080)
+          NODE_PLANE_API_URL (default http://127.0.0.1:8080),
+          NODE_PLANE_RELAY_CA_FILE (a PEM root instead of the WebPKI roots)
 key PATH  prints the public half of the key at PATH, creating it when missing";
 
 fn setting(name: &str) -> Result<String, String> {
@@ -52,10 +57,26 @@ async fn run_serve() -> Result<(), String> {
             .unwrap_or_else(|_| "/var/lib/node-plane-relay".to_string()),
     );
     let key = keys::load_or_create(&state.join("relay.key"))?;
+    let tls = match env::var("NODE_PLANE_RELAY_TLS").as_deref() {
+        Err(_) | Ok("proxy") => tls::Mode::Proxy,
+        Ok("files") => tls::Mode::Files {
+            certificate: setting("NODE_PLANE_RELAY_TLS_CERT")?.into(),
+            key: setting("NODE_PLANE_RELAY_TLS_KEY")?.into(),
+        },
+        Ok("acme") => tls::Mode::Acme {
+            domain: setting("NODE_PLANE_RELAY_DOMAIN")?,
+            contact: env::var("NODE_PLANE_RELAY_ACME_CONTACT")
+                .ok()
+                .filter(|v| !v.is_empty()),
+            cache: state.join("acme"),
+            staging: env::var("NODE_PLANE_RELAY_ACME_STAGING").as_deref() == Ok("1"),
+        },
+        Ok(other) => return Err(format!("NODE_PLANE_RELAY_TLS: unknown mode {other}")),
+    };
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
         .map_err(|e| format!("{listen}: {e}"))?;
-    eprintln!("relay listening on {listen}");
+    eprintln!("relay listening on {listen} ({tls:?})");
     let router = serve::router(serve::Config {
         key,
         link_key_path: state.join("link.pub"),
@@ -63,7 +84,7 @@ async fn run_serve() -> Result<(), String> {
     });
     // The link stream never ends by itself, so stop without draining it.
     tokio::select! {
-        result = axum::serve(listener, router) => result.map_err(|e| e.to_string()),
+        result = tls::serve(listener, router, tls) => result,
         _ = tokio::signal::ctrl_c() => Ok(()),
     }
 }
@@ -77,6 +98,10 @@ async fn run_link() -> Result<(), String> {
         key: Arc::new(keys::load_or_create(
             setting("NODE_PLANE_RELAY_LINK_KEY_FILE")?.as_ref(),
         )?),
+        ca: match env::var("NODE_PLANE_RELAY_CA_FILE") {
+            Ok(path) => Some(std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?),
+            Err(_) => None,
+        },
         api: env::var("NODE_PLANE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
         limits: link::Limits::default(),
     };

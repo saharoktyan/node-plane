@@ -15,7 +15,7 @@ use node_plane_api::{codes, error_body, headers as api_headers};
 use ring::signature::Ed25519KeyPair;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::{ClientTlsConfig, Endpoint};
+use tonic::transport::{Certificate, ClientTlsConfig, Endpoint};
 use uuid::Uuid;
 
 use crate::{
@@ -54,6 +54,9 @@ pub struct Config {
     pub key: Arc<Ed25519KeyPair>,
     /// The controller API, `http://127.0.0.1:8080`.
     pub api: String,
+    /// A PEM root to trust instead of the WebPKI roots, for a relay with a
+    /// certificate of its own CA. The pinned relay key is checked either way.
+    pub ca: Option<Vec<u8>>,
     pub limits: Limits,
 }
 
@@ -86,7 +89,10 @@ pub async fn session(config: &Config, established: &mut bool) -> Result<(), Stri
         .keep_alive_while_idle(true);
     if config.relay.starts_with("https://") {
         endpoint = endpoint
-            .tls_config(ClientTlsConfig::new().with_webpki_roots())
+            .tls_config(match &config.ca {
+                Some(pem) => ClientTlsConfig::new().ca_certificate(Certificate::from_pem(pem)),
+                None => ClientTlsConfig::new().with_webpki_roots(),
+            })
             .map_err(|e| e.to_string())?;
     }
     let channel = endpoint.connect().await.map_err(|e| e.to_string())?;

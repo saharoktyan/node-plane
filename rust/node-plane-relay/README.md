@@ -31,6 +31,21 @@ NODE_PLANE_RELAY_URL=https://cab.example.com NODE_PLANE_RELAY_KEY=<relay key> \
 | `NODE_PLANE_RELAY_LINK_KEY_FILE` | `link`: the controller's key (made when missing) |
 | `NODE_PLANE_API_URL` | `link`: the controller API; default `http://127.0.0.1:8080` |
 
+## TLS
+
+`NODE_PLANE_RELAY_TLS` picks how browsers reach the relay; the controller's
+link uses the same port and certificate.
+
+| Mode | Settings | Notes |
+| --- | --- | --- |
+| `proxy` (default) | — | Plain HTTP/1.1 and h2c; the reverse proxy holds TLS and must pass gRPC (h2c) through |
+| `files` | `NODE_PLANE_RELAY_TLS_CERT`, `NODE_PLANE_RELAY_TLS_KEY` | PEM chain and key, read at start; restart after renewal |
+| `acme` | `NODE_PLANE_RELAY_DOMAIN`, `NODE_PLANE_RELAY_ACME_CONTACT`, `NODE_PLANE_RELAY_ACME_STAGING=1` | Let's Encrypt over TLS-ALPN-01, so the relay must answer on port 443; certificates and account in `STATE_DIR/acme`, renewed in the background |
+
+`link` checks the relay's certificate against the WebPKI roots, or against
+`NODE_PLANE_RELAY_CA_FILE` for a certificate of one's own CA, and checks the
+pinned relay key in every case.
+
 ## Keys
 
 Each side has an Ed25519 key and pins the other's public key. The relay is
