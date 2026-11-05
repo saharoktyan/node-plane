@@ -16,9 +16,35 @@ from .profiles import ProfileRepository
 from .node_lifecycle import NodeLifecycle
 
 
-def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int, db=None):
-    validate_telegram_id(telegram_user_id)
-    account = repository.resolve_telegram(telegram_user_id)
+def named_admin_account(repository: SQLIdentityRepository, name: str):
+    """An administrator known only by name, for installations without Telegram.
+
+    Running it again with the same name returns the same account.
+    """
+    if not isinstance(name, str) or not 0 < len(name.strip()) <= 128 or any(c < ' ' for c in name):
+        raise AccessDenied('invalid_input', 422)
+    name = name.strip()
+    with repository.db.connect() as conn:
+        row = conn.execute("""SELECT id FROM backend_accounts WHERE role = 'admin' AND display_name = ?
+            ORDER BY id LIMIT 1""", (name,)).fetchone()
+    if row is not None:
+        return repository.get_account(row['id'])
+    account = repository.create_account(status='approved')
+    with repository.db.transaction() as conn:
+        conn.execute('UPDATE backend_accounts SET display_name = ? WHERE id = ?', (name, account.id))
+    return account
+
+
+def bootstrap_admin(repository: SQLIdentityRepository, telegram_user_id: int | None = None, db=None, *,
+                    name: str | None = None):
+    """Make the first administrator: by Telegram ID, or by name with no Telegram at all."""
+    if (telegram_user_id is None) == (name is None):
+        raise AccessDenied('invalid_input', 422)
+    if name is not None:
+        account = named_admin_account(repository, name)
+    else:
+        validate_telegram_id(telegram_user_id)
+        account = repository.resolve_telegram(telegram_user_id)
     with repository.db.transaction() as conn:
         conn.execute('UPDATE backend_account_guard SET revision = revision + 1 WHERE id = 1')
         conn.execute("""UPDATE backend_accounts SET role = 'admin', status = 'approved',
@@ -47,8 +73,11 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('init-schema', help='Apply pending versioned database migrations')
     commands.add_parser('schema-status', help='Read database migration history and compatibility')
-    bootstrap = commands.add_parser('bootstrap-admin')
-    bootstrap.add_argument('--telegram-id', type=int, required=True)
+    bootstrap = commands.add_parser('bootstrap-admin',
+        help='Make an administrator by Telegram ID, or by name without Telegram')
+    admin_identity = bootstrap.add_mutually_exclusive_group(required=True)
+    admin_identity.add_argument('--telegram-id', type=int)
+    admin_identity.add_argument('--name', help='Administrator name; Workstation signs in to this account')
     create_account = commands.add_parser('create-account',
         help='Create a member account without Telegram identity')
     create_account.add_argument('--status', choices=['pending', 'approved'], default='approved')
@@ -128,7 +157,7 @@ def main():
             import json
             print(json.dumps(schema_status(db)))
         elif args.command == 'bootstrap-admin':
-            account = bootstrap_admin(identities, args.telegram_id, db)
+            account = bootstrap_admin(identities, args.telegram_id, db, name=args.name)
             print(f'Administrator account: {account.id}')
         elif args.command == 'create-account':
             account = identities.create_account(status=args.status)

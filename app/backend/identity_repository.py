@@ -107,12 +107,16 @@ class SQLIdentityRepository:
                     VALUES ('telegram', ?, ?)''', (str(user_id), account_id))
             return self._account(row)
 
-    def find_telegram_account(self, user_id: int) -> Account | None:
+    def find_account(self, provider: str, subject: str) -> Account | None:
+        """The account a sign-in identity of any provider belongs to."""
         with self.db.connect() as conn:
             row = conn.execute("""SELECT a.id, a.role, a.status FROM backend_accounts a
                 JOIN backend_external_identities i ON i.account_id = a.id
-                WHERE i.provider = 'telegram' AND i.subject = ?""", (str(user_id),)).fetchone()
+                WHERE i.provider = ? AND i.subject = ?""", (provider, subject)).fetchone()
         return self._account(row)
+
+    def find_telegram_account(self, user_id: int) -> Account | None:
+        return self.find_account('telegram', str(user_id))
 
     def account_details(self, account_id: str) -> dict:
         """The account's own name and language, with its Telegram details if it has them."""

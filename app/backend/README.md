@@ -12,7 +12,7 @@ PYTHONPATH=app .venv/bin/python -m backend.admin_cli init-schema
 PYTHONPATH=app .venv/bin/python -m uvicorn backend.http_api:application --factory --host 127.0.0.1 --port 8080 --no-access-log
 ```
 
-Use `backend.admin_cli --help` for trusted administration. Bootstrap an administrator with `bootstrap-admin --telegram-id ID`. Token issuance writes credentials to a private file; do not place secrets in logs or arguments.
+Use `backend.admin_cli --help` for trusted administration. Bootstrap an administrator with `bootstrap-admin --telegram-id ID`, or without Telegram with `bootstrap-admin --name NAME` (running it again with the same name keeps the same account; Workstation then signs in to it by choosing it from the administrator list). Token issuance writes credentials to a private file; do not place secrets in logs or arguments.
 
 `/health/live` checks process liveness. `/health/ready` validates schema compatibility. `/openapi.json` exposes the schema. The service factory does not apply deployment migrations.
 

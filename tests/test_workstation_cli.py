@@ -234,6 +234,20 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.assertEqual(self.db.connection.execute('SELECT COUNT(*) FROM backend_credentials').fetchone()[0], 0)
         self.assertEqual(self.authenticate(account_id=second.id)['account_id'], second.id)
 
+    def test_administrator_without_telegram_is_chosen_by_name(self):
+        named = bootstrap_admin(self.identities, name='Ops team')
+        self.assertEqual(bootstrap_admin(self.identities, name=' Ops team ').id, named.id)
+        self.assertEqual((named.role, named.status), ('admin', 'approved'))
+        with self.assertRaises(WorkstationError) as caught:
+            self.service.handle({'version': 1, 'action': 'authenticate',
+                'session_id': self.session_id, 'attribution': self.attribution})
+        choice = next(choice for choice in caught.exception.choices if choice['account_id'] == named.id)
+        self.assertEqual((choice['label'], choice['telegram_id']), ('Ops team · ' + named.id, None))
+        self.assertEqual(self.authenticate(account_id=named.id)['account_id'], named.id)
+        for bad in ({}, {'telegram_user_id': 101, 'name': 'x'}, {'name': ''}, {'name': 'a\nb'}):
+            with self.subTest(bad=bad), self.assertRaises(AccessDenied):
+                bootstrap_admin(self.identities, bad.get('telegram_user_id'), name=bad.get('name'))
+
     def test_explicit_telegram_selection_does_not_create_unknown_identity(self):
         self.assert_denied('approved_admin_required', lambda: self.authenticate(telegram_id=999))
         self.assertIsNone(self.identities.find_telegram_account(999))

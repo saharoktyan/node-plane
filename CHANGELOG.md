@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Create an administrator without Telegram: `admin_cli bootstrap-admin
+  --name NAME` makes (or, with the same name again, finds) an administrator
+  account that has no Telegram login; Workstation signs in to it from the
+  administrator list. Accounts are found by any sign-in provider, not only
+  Telegram.
 - Keep the display name and language on the account instead of reading them
   from its Telegram identity. Existing accounts get them from Telegram on
   upgrade, a new account takes them from its Telegram details when they are

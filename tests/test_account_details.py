@@ -57,5 +57,11 @@ class AccountDetailsTests(unittest.TestCase):
         self.assertEqual(self.account(account.id), {'display_name': 'Bo', 'locale': 'ru', 'locale_selected': 1})
 
 
+    def test_accounts_are_found_by_any_provider_identity(self):
+        account = self.identities.resolve_telegram(105)
+        self.assertEqual(self.identities.find_account('telegram', '105'), account)
+        self.assertEqual(self.identities.find_telegram_account(105), account)
+        self.assertIsNone(self.identities.find_account('workstation', '105'))
+
 if __name__ == '__main__':
     unittest.main()
