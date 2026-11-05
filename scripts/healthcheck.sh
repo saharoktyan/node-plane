@@ -398,7 +398,11 @@ print_mode_readiness() {
   section "Readiness"
   if [[ $SIMPLE_LOCAL_READY -eq 1 ]]; then
     ok "This host is ready for Simple Mode and local node deployment"
-    info "Next: open the bot as admin, add a node, install its agent, then open Bootstrap"
+    if bot_configured; then
+      info "Next: open the bot as admin, add a node, install its agent, then open Bootstrap"
+    else
+      info "Next: connect Workstation as the administrator, add a node and install its agent"
+    fi
   else
     info "Local node deployment prerequisites are incomplete; a controller can manage remote nodes without local VPN support"
     info "Goal: active systemd services, reachable Docker daemon, and /dev/net/tun on the same host"
