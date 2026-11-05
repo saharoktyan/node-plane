@@ -754,6 +754,7 @@ CATALOG = {
         'operation.blocked': 'ошибка', 'operation.superseded': 'заменено новой операцией',
         'operation.failed': 'не выполнено',
         'role.member': 'пользователь', 'role.admin': 'администратор',
+        'role.support': 'поддержка', 'role.operator': 'оператор', 'role.owner': 'владелец',
     },
     'en': {
         'temporary.title': 'Temporary configurations',
@@ -1507,6 +1508,7 @@ CATALOG = {
         'operation.blocked': 'blocked', 'operation.superseded': 'superseded',
         'operation.failed': 'failed',
         'role.member': 'member', 'role.admin': 'admin',
+        'role.support': 'support', 'role.operator': 'operator', 'role.owner': 'owner',
     },
 }
 
@@ -2258,27 +2260,43 @@ CATALOG['ru']['profile.create.telegram_failed'] = 'Не удалось доба�
 CATALOG['en'].update({
     'profile.role.title': 'Account permissions',
     'profile.role.account': 'Account: {name}',
-    'profile.role.promote': 'Make administrator',
-    'profile.role.confirm_title': 'Confirm administrator rights',
-    'profile.role.warning': 'Full control of servers, profiles and settings, including deletion. Grant only to someone you trust.',
-    'profile.role.confirm': 'Confirm: grant full administrator rights',
-    'profile.role.approve_first': 'Approve access before granting administrator rights.',
-    'profile.role.unavailable': 'Administrator rights cannot be granted to this account in its current state.',
+    'profile.role.set': 'Make {role}',
+    'profile.role.confirm_title': 'Confirm role change',
+    'profile.role.warning.member': 'Removes every management right; the account keeps only its own profiles.',
+    'profile.role.warning.support': 'Access requests, profiles and configurations for people. No servers or settings.',
+    'profile.role.warning.operator': 'Servers and their services: setup, settings, diagnostics, maintenance. No accounts or profiles.',
+    'profile.role.warning.admin': 'Full control of servers, profiles and settings, including deletion. Grant only to someone you trust.',
+    'profile.role.warning.owner': 'Everything an administrator can do, plus assigning roles and changing other owners. Grant only to someone you fully trust.',
+    'profile.role.confirm': 'Confirm: make {role}',
+    'profile.role.approve_first': 'Unblock the account before changing its role.',
+    'profile.role.unavailable': 'This role cannot be set for the account in its current state.',
     'profile.role.stale': 'This confirmation is no longer valid. Open account permissions again.',
-    'profile.role.promoted': 'Administrator rights granted.',
+    'profile.role.changed': 'Role changed: {role}.',
+    'profile.role.error.last_owner_required': 'At least one owner must remain. Make another account an owner first.',
+    'profile.role.error.last_admin_required': 'At least one administrator must remain.',
+    'profile.role.error.self_admin_revocation': 'You cannot revoke your own administrator rights.',
+    'profile.role.error.owner_only': 'Only owners assign this role or change owners.',
 })
 
 CATALOG['ru'].update({
     'profile.role.title': 'Права аккаунта',
     'profile.role.account': 'Аккаунт: {name}',
-    'profile.role.promote': 'Сделать администратором',
-    'profile.role.confirm_title': 'Подтверждение прав администратора',
-    'profile.role.warning': 'Полный доступ к серверам, профилям и настройкам, включая удаление. Выдавайте только тем, кому доверяете.',
-    'profile.role.confirm': 'Подтвердить: выдать полные права администратора',
-    'profile.role.approve_first': 'Сначала одобрите доступ, затем выдайте права администратора.',
-    'profile.role.unavailable': 'В текущем состоянии этому аккаунту нельзя выдать права администратора.',
+    'profile.role.set': 'Сделать: {role}',
+    'profile.role.confirm_title': 'Подтверждение смены роли',
+    'profile.role.warning.member': 'Снимает все права управления; у аккаунта остаются только свои профили.',
+    'profile.role.warning.support': 'Заявки на доступ, профили и конфигурации для людей. Без серверов и настроек.',
+    'profile.role.warning.operator': 'Серверы и их сервисы: установка, настройки, диагностика, обслуживание. Без аккаунтов и профилей.',
+    'profile.role.warning.admin': 'Полный доступ к серверам, профилям и настройкам, включая удаление. Выдавайте только тем, кому доверяете.',
+    'profile.role.warning.owner': 'Всё, что может администратор, плюс назначение ролей и смена других владельцев. Выдавайте только тем, кому полностью доверяете.',
+    'profile.role.confirm': 'Подтвердить: {role}',
+    'profile.role.approve_first': 'Разблокируйте аккаунт, прежде чем менять роль.',
+    'profile.role.unavailable': 'В текущем состоянии эту роль нельзя установить.',
     'profile.role.stale': 'Подтверждение больше не действует. Откройте права аккаунта заново.',
-    'profile.role.promoted': 'Права администратора выданы.',
+    'profile.role.changed': 'Роль изменена: {role}.',
+    'profile.role.error.last_owner_required': 'Должен остаться хотя бы один владелец. Сначала сделайте владельцем другой аккаунт.',
+    'profile.role.error.last_admin_required': 'Должен остаться хотя бы один администратор.',
+    'profile.role.error.self_admin_revocation': 'Нельзя снять права администратора с самого себя.',
+    'profile.role.error.owner_only': 'Эту роль назначают и владельцев меняют только владельцы.',
 })
 
 CATALOG['en'].update({
@@ -3917,3 +3935,6 @@ CATALOG['ru'].update({
     'node_tools.agent_ssh.ssh_unreachable': 'Контроллер не смог подключиться к серверу по SSH.',
     'node_tools.agent_ssh.agent_install_failed': 'Команда установки завершилась с ошибкой на сервере. Выполните её сами, чтобы увидеть вывод.',
 })
+
+CATALOG['en']['nodes.traffic.inbounds'] = 'VLESS by inbound'
+CATALOG['ru']['nodes.traffic.inbounds'] = 'VLESS по входам'

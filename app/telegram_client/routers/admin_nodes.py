@@ -951,8 +951,17 @@ def node_traffic_section(traffic, locale):
         item = next((item for item in traffic['items'] if item['protocol'] == protocol), None)
         value = item['uplink_bytes'] + item['downlink_bytes'] if item and item['uplink_bytes'] is not None and item['downlink_bytes'] is not None else None
         parts.append(label + ': ' + amount(value, item['status'] if item else 'waiting'))
-    return Section(tr(locale, 'nodes.traffic.month', month=traffic['month']),
-        (' · '.join(parts), *((tr(locale, 'traffic.status.unknown'),) if traffic['status'] == 'unknown' else ())))
+    lines = [' · '.join(parts)]
+    # Xray counts each inbound separately, as Workstation shows it.
+    xray = next((item for item in traffic['items'] if item['protocol'] == 'xray'), None)
+    if xray and xray.get('inbounds'):
+        labels = {'vless-tcp': 'TCP', 'vless-xhttp': 'XHTTP'}
+        lines.append(tr(locale, 'nodes.traffic.inbounds') + ' · ' + ' · '.join(
+            labels.get(name, name) + ': ' + amount(value['uplink_bytes'] + value['downlink_bytes'], xray['status'])
+            for name, value in sorted(xray['inbounds'].items())))
+    if traffic['status'] == 'unknown':
+        lines.append(tr(locale, 'traffic.status.unknown'))
+    return Section(tr(locale, 'nodes.traffic.month', month=traffic['month']), tuple(lines))
 
 
 async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, state):

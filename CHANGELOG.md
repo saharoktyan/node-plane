@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The bot matches Workstation again: **Account permissions** offers every
+  preset role (member, support, operator, administrator, owner) with the
+  same rules, and server cards split VLESS traffic by inbound.
 - Traffic is counted per inbound of an engine: each Xray client has its own
   email on every inbound (`NAME.TAG`), so VLESS traffic splits into TCP and
   XHTTP (`inbounds` in profile and node traffic, migration r0037; shown on

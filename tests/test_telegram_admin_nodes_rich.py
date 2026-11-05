@@ -201,6 +201,12 @@ class AdminNodeRichTests(IsolatedAsyncioTestCase):
             self.overview['traffic']['items'][1]['uplink_bytes'] = None
             self.assertIn('AWG: —', nodes.node_traffic_section(self.overview['traffic'], locale).lines[0])
             self.assertIsNone(nodes.node_traffic_section(None, locale))
+            self.overview['traffic'] = {'month':'2026-10','status':'current','total_bytes':2048,
+                'items':[{'protocol':'xray','status':'current','uplink_bytes':2048,'downlink_bytes':0,
+                    'inbounds':{'vless-tcp':{'uplink_bytes':1024,'downlink_bytes':0},
+                                'vless-xhttp':{'uplink_bytes':1024,'downlink_bytes':0}}}]}
+            self.assertEqual(nodes.node_traffic_section(self.overview['traffic'], locale).lines[1],
+                             nodes.tr(locale, 'nodes.traffic.inbounds') + ' · TCP: 1.0 KiB · XHTTP: 1.0 KiB')
 
     async def test_full_cleanup_confirmation_lists_affected_profiles_and_resources(self):
         backend = SimpleNamespace(

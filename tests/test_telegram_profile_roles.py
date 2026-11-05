@@ -1,4 +1,4 @@
-"""Explicit, revision-bound administrator promotion through a profile."""
+"""Explicit, revision-bound role changes through a profile, as in Workstation."""
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
@@ -15,7 +15,7 @@ class ProfileRoleTests(IsolatedAsyncioTestCase):
         async def update_data(**values):
             self.data.update(values)
         self.state = SimpleNamespace(get_data=get_data, update_data=update_data)
-        self.query = SimpleNamespace(data='prof_promote:p1', answer=AsyncMock(),
+        self.query = SimpleNamespace(data='prof_promote:p1:admin', answer=AsyncMock(),
             from_user=SimpleNamespace(id=123),
             message=SimpleNamespace(message_id=77, chat=SimpleNamespace(id=123)))
         self.profile = {'id': 'p1', 'display_name': 'Alice', 'owner_account_id': 'a1'}
@@ -39,8 +39,9 @@ class ProfileRoleTests(IsolatedAsyncioTestCase):
             call = await self.open_confirmation()
             screen, rows = call.args[2:4]
             self.assertIn('@alice', screen.plain())
-            self.assertIn(profiles.tr(locale, 'profile.role.warning'), screen.lines)
-            self.assertEqual(rows[0][0].text, profiles.tr(locale, 'profile.role.confirm'))
+            self.assertIn(profiles.tr(locale, 'profile.role.warning.admin'), screen.lines)
+            self.assertEqual(rows[0][0].text, profiles.tr(
+                locale, 'profile.role.confirm', role=profiles.tr(locale, 'role.admin')))
             self.assertEqual(rows[0][0].style, 'danger')
             self.assertEqual(rows[-1][0].callback_data, 'prof_role:p1')
             self.assertFalse(any(c.args[0] == 'PATCH' for c in self.backend.request.call_args_list))
@@ -72,14 +73,36 @@ class ProfileRoleTests(IsolatedAsyncioTestCase):
             self.backend.request.assert_not_awaited()
             self.assertTrue(self.query.answer.call_args.kwargs['show_alert'])
 
-    async def test_back_discards_confirmation_and_already_admin_has_no_promote_button(self):
-        await self.open_confirmation()
-        self.account['role'] = 'admin'
+    async def role_buttons(self):
         self.query.data = 'prof_role:p1'
         with patch.object(profiles, 'render', new_callable=AsyncMock) as draw:
             await profiles.profile_role_cb(self.query, self.bot, self.backend, self.state)
+        return [button.callback_data for row in draw.call_args.args[3] for button in row]
+
+    async def test_back_discards_confirmation_and_the_current_role_is_not_offered(self):
+        await self.open_confirmation()
+        self.account.update(role='admin', roles=['admin'])
+        buttons = await self.role_buttons()
         self.assertIsNone(self.data['admin_promotion'])
-        self.assertEqual(len(draw.call_args.args[3]), 1)
+        self.assertNotIn('prof_promote:p1:admin', buttons)
+        self.assertIn('prof_promote:p1:owner', buttons)
+        self.assertIn('prof_promote:p1:member', buttons)
+
+    async def test_presets_are_sent_as_workstation_sends_them(self):
+        for current, roles, target, body in (
+                ('member', [], 'admin', {'role': 'admin'}),
+                ('member', [], 'operator', {'roles': ['operator']}),
+                ('admin', ['owner'], 'admin', {'roles': ['admin']}),
+                ('admin', ['support'], 'member', {'role': 'member'})):
+            self.account.update(role=current, roles=roles)
+            self.query.data = f'prof_promote:p1:{target}'
+            await self.open_confirmation()
+            self.assertEqual(self.data['admin_promotion']['body'], body, target)
+
+    async def test_owner_rules_are_explained(self):
+        for code, key in (('last_owner_required', 'profile.role.error.last_owner_required'),
+                          ('permission_denied', 'profile.role.error.owner_only')):
+            self.assertEqual(profiles._profile_error('en', BackendError(code, 409)), profiles.tr('en', key))
 
     async def test_pending_account_cannot_open_promotion(self):
         self.account['status'] = 'pending'

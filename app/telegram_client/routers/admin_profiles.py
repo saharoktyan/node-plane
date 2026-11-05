@@ -231,6 +231,11 @@ async def _clear_flow(state: FSMContext) -> None:
 
 
 def _profile_error(locale: str, error: BackendError) -> str:
+    for code in ('last_owner_required', 'last_admin_required', 'self_admin_revocation'):
+        if error.code == code:
+            return tr(locale, 'profile.role.error.' + code)
+    if error.code == 'permission_denied':
+        return tr(locale, 'profile.role.error.owner_only')
     if error.code == 'admin_name_owner_only':
         return tr(locale, 'profile.error.admin_name_owner_only')
     if error.status == 412:
@@ -929,6 +934,25 @@ def _account_label(account):
                                     str(account.get('telegram_user_id') or account['id']))
 
 
+# Presets in the order they are offered; `member` is no role at all.
+ROLE_CHOICES = ('member', 'support', 'operator', 'admin', 'owner')
+
+
+def _account_roles(account):
+    roles = [role for role in ROLE_CHOICES if role in (account.get('roles') or ())]
+    return roles if account['role'] == 'admin' and roles else ['admin'] if account['role'] == 'admin' else ['member']
+
+
+def _role_body(account, role):
+    """As Workstation sends it: promoting to administrator and demoting are
+    open to every administrator; any other preset is an owner's choice."""
+    if role == 'member':
+        return {'role': 'member'}
+    if role == 'admin' and account['role'] != 'admin':
+        return {'role': 'admin'}
+    return {'roles': [role]}
+
+
 @router.callback_query(F.data.startswith('prof_role:'))
 async def profile_role_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                           state: FSMContext):
@@ -937,13 +961,17 @@ async def profile_role_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
     profile_id = query.data.split(':', 1)[1]
     profile, account = await _profile_owner(backend, query.from_user.id, profile_id)
     locale = await _locale(state)
+    current = _account_roles(account)
     rows = []
-    if account['role'] == 'member' and account['status'] == 'approved':
-        rows.append([InlineKeyboardButton(text=tr(locale, 'profile.role.promote'),
-            callback_data=f'prof_promote:{profile_id}', style='danger')])
+    if account['status'] == 'approved':
+        choices = [role for role in ROLE_CHOICES if [role] != current]
+        for index in range(0, len(choices), 2):
+            rows.append([InlineKeyboardButton(text=tr(locale, 'profile.role.set', role=tr(locale, 'role.' + role)),
+                callback_data=f'prof_promote:{profile_id}:{role}',
+                style='danger' if role in {'admin', 'owner'} else None) for role in choices[index:index + 2]])
     lines = [tr(locale, 'profile.role.account', name=_account_label(account)),
              tr(locale, 'requests.detail_id', id=account.get('telegram_user_id') or '—'),
-             tr(locale, 'accounts.role', role=tr(locale, 'role.' + account['role']))]
+             tr(locale, 'accounts.role', role=', '.join(tr(locale, 'role.' + role) for role in current))]
     if account['status'] != 'approved':
         lines.append(tr(locale, 'profile.role.approve_first'))
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'),
@@ -955,22 +983,27 @@ async def profile_role_cb(query: CallbackQuery, bot: Bot, backend: BackendClient
 @router.callback_query(F.data.startswith('prof_promote:'))
 async def profile_promote_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
                              state: FSMContext):
-    profile_id = query.data.split(':', 1)[1]
+    _, profile_id, role = (query.data.split(':', 2) + ['admin'])[:3]
     locale = await _locale(state)
+    if role not in ROLE_CHOICES:
+        await query.answer()
+        return
     profile, account = await _profile_owner(backend, query.from_user.id, profile_id)
-    if account['role'] != 'member' or account['status'] != 'approved':
+    if account['status'] != 'approved' or [role] == _account_roles(account):
         await query.answer(tr(locale, 'profile.role.unavailable'), show_alert=True)
         return
     await query.answer()
     nonce = secrets.token_hex(4)
     await state.update_data(admin_promotion={'nonce': nonce, 'profile_id': profile_id,
-        'account_id': account['id'], 'revision': account['revision'],
+        'account_id': account['id'], 'revision': account['revision'], 'role': role,
+        'body': _role_body(account, role),
         'command_key': str(uuid4()), 'message_id': query.message.message_id})
+    name = tr(locale, 'role.' + role)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.role.confirm_title'),
         (tr(locale, 'profile.role.account', name=_account_label(account)),
          tr(locale, 'requests.detail_id', id=account.get('telegram_user_id') or '—'),
-         tr(locale, 'profile.role.warning')), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'profile.role.confirm'),
+         tr(locale, 'profile.role.warning.' + role)), embedded_buttons=True, navigation=True),
+        [[InlineKeyboardButton(text=tr(locale, 'profile.role.confirm', role=name),
             callback_data=f'promote_yes:{nonce}', style='danger')],
          [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=f'prof_role:{profile_id}')]],
         state, query.message.message_id)
@@ -992,17 +1025,18 @@ async def profile_promote_confirm_cb(query: CallbackQuery, bot: Bot,
         result = await backend.request('PATCH', f"/api/v1/accounts/{account['id']}",
             telegram_user_id=query.from_user.id, command=True,
             command_key=confirmation['command_key'], revision=confirmation['revision'],
-            body={'role': 'admin'})
+            body=confirmation['body'])
     except BackendError as exc:
         if exc.status != 503:
             await state.update_data(admin_promotion=None)
         await query.answer(_profile_error(locale, exc), show_alert=True)
         return
     await state.update_data(admin_promotion=None)
-    await query.answer(tr(locale, 'profile.role.promoted'))
+    changed = tr(locale, 'profile.role.changed', role=tr(locale, 'role.' + confirmation['role']))
+    await query.answer(changed)
     await render(bot, query.message.chat.id, Screen(tr(locale, 'profile.role.title'),
-        (tr(locale, 'profile.role.account', name=_account_label(result)),
-         tr(locale, 'profile.role.promoted')), embedded_buttons=True, navigation=True),
+        (tr(locale, 'profile.role.account', name=_account_label(result)), changed),
+        embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'back'),
             callback_data=f"prof_role:{confirmation['profile_id']}")]],
         state, query.message.message_id)
