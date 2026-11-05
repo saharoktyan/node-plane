@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep the display name and language on the account instead of reading them
+  from its Telegram identity. Existing accounts get them from Telegram on
+  upgrade, a new account takes them from its Telegram details when they are
+  empty, and an account without Telegram can choose its language. Workstation
+  shows the account's name next to its Telegram ID. Backups made before this
+  change stay compatible and get the details filled in on restore.
 - Stop reaching remote nodes over SSH from the controller. A remote agent is
   installed only with the one-time install command: by hand, by
   Workstation's Auto, or by the bot's **Install over SSH**, which now logs in

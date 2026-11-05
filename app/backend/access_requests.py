@@ -291,6 +291,8 @@ class AccessRequestService:
                     if not linked:
                         conn.execute("INSERT INTO backend_accounts(id,status) VALUES (?,'approved')", (account_id,))
                         conn.execute("INSERT INTO backend_external_identities(provider,subject,account_id) VALUES ('telegram',?,?)", (subject, account_id))
+                        from db.migration_revisions.r0028_account_details import backfill
+                        backfill(conn, account_id)
             now = datetime.now(timezone.utc).isoformat()
             conn.execute('''UPDATE backend_access_requests SET status = ?, account_id = ?, decided_at = ?,
                 decided_by = ?, decision_key = ? WHERE id = ?''',

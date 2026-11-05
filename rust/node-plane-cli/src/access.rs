@@ -1008,7 +1008,17 @@ pub fn label(tab: Tab, item: &Value) -> String {
         ),
         _ => format!(
             "{}{} · {}",
-            text(&item["telegram_user_id"]),
+            item["display_name"]
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .filter(|name| item["username"]
+                    .as_str()
+                    .map(|u| format!("@{u}"))
+                    .as_deref()
+                    != Some(*name))
+                .map(|name| format!("{name} · "))
+                .unwrap_or_default()
+                + &text(&item["telegram_user_id"]),
             item["username"]
                 .as_str()
                 .map(|name| format!(" · @{name}"))

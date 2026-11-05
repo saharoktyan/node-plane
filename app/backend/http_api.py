@@ -82,6 +82,10 @@ class MeOutput(AccountOutput):
     service_notifications: Literal['on', 'silent', 'off'] = 'on'
     traffic_available: bool = False
     permissions: list[str]
+    display_name: str | None = None
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     language_code: str | None = None
     locale: str | None = None
     locale_selected: bool = False
@@ -92,6 +96,7 @@ class AdminAccountOutput(AccountOutput):
     profile_id: str | None = None
     revision: int
     telegram_user_id: int | None
+    display_name: str | None = None
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
@@ -1288,7 +1293,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                         permissions=permissions,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),
-                        **identities.telegram_details_for_account(current.account.id))
+                        **identities.account_details(current.account.id))
 
     @app.patch('/api/v1/me/preferences', response_model=MeOutput)
     def update_my_preferences(body: AccountPreferencesInput, request: Request, current=Depends(session)):
@@ -1304,7 +1309,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             return me(session(request, current.principal))
         require_permission(current, 'account.self.preferences.write')
         if body.locale is not None:
-            identities.set_telegram_locale_for_account(current.account.id, body.locale)
+            identities.set_locale_for_account(current.account.id, body.locale)
         if body.announcement_silent is not None or body.service_notifications is not None:
             system_settings.update_member_preferences(current, body.announcement_silent,
                 service_notifications=body.service_notifications)
@@ -1319,7 +1324,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                         permissions=permissions,
                         onboarding_completed=onboarding_completed(db, current.account.id, 'telegram'),
                         **system_settings.member_preferences(current),
-                        **identities.telegram_details_for_account(current.account.id))
+                        **identities.account_details(current.account.id))
 
     @app.post('/api/v1/announcements/preview')
     def announcement_preview(body: AnnouncementInput, current=Depends(actor)):

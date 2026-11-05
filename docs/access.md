@@ -2,7 +2,7 @@
 
 # Profiles and access
 
-An account identifies a person and their role. A VPN profile holds that person's VPN access, expiry, devices and grants. Every account has exactly one VPN profile, including accounts without server access. Both interfaces present them together under profiles. A Workstation installation profile is a local connection entry and is unrelated to VPN access.
+An account identifies a person and their role. A VPN profile holds that person's VPN access, expiry, devices and grants. Every account has exactly one VPN profile, including accounts without server access. Both interfaces present them together under profiles. The account keeps its own display name and language: they start from the person's Telegram name and language and stay with the account whichever way the person signs in. A Workstation installation profile is a local connection entry and is unrelated to VPN access.
 
 ## Requests
 

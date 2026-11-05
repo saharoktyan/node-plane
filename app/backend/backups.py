@@ -45,6 +45,10 @@ TABLES = (
     "backend_quota_periods",
     "backend_access_requests",
 )
+ADDITIVE_COLUMNS = {
+    "backend_access_requests": ("telegram_subject",),
+    "backend_accounts": ("display_name", "locale", "locale_selected"),
+}
 CLEAR = (
     "backend_renewal_requests",
     "backend_agent_ssh_installs",
@@ -369,11 +373,12 @@ class BackupService:
             for table in TABLES:
                 current_columns = self._columns(conn, table)
                 stored_columns = value["tables"][table]["columns"]
-                if table == "backend_access_requests" and "telegram_subject" not in stored_columns:
-                    # Pre-visitor snapshots contain account-bound requests. The
-                    # additive nullable column may be omitted without rewriting
-                    # the checksummed snapshot or inventing guest accounts.
-                    current_columns = [column for column in current_columns if column != "telegram_subject"]
+                # Older snapshots may lack columns added later with defaults:
+                # pre-visitor requests have no telegram_subject, and accounts
+                # before r0028 have no details (restore fills them in).
+                additive = ADDITIVE_COLUMNS.get(table, ())
+                current_columns = [column for column in current_columns
+                                   if column in stored_columns or column not in additive]
                 compatible &= current_columns == stored_columns
         return {
             "id": str(UUID(backup_id)),
@@ -771,6 +776,8 @@ class BackupService:
                         f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
                         tuple(row[c] for c in columns),
                     )
+            from db.migration_revisions.r0028_account_details import backfill
+            backfill(conn)
             conn.execute(
                 "UPDATE backend_account_guard SET revision=revision+1 WHERE id=1"
             )

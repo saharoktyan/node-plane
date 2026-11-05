@@ -755,6 +755,9 @@ class AlertService:
                 "SELECT * FROM backend_alert_events WHERE id=?", (row["event_id"],)
             ).fetchone()
         )
+        account = conn.execute(
+            "SELECT locale FROM backend_accounts WHERE id=?", (row["account_id"],)
+        ).fetchone()
         details = conn.execute(
             "SELECT locale,language_code FROM backend_telegram_identity_details WHERE subject=?",
             (row["telegram_subject"],),
@@ -762,9 +765,8 @@ class AlertService:
         return {
             "id": row["id"],
             "telegram_user_id": int(row["telegram_subject"]),
-            "locale": (details["locale"] or details["language_code"])
-            if details
-            else None,
+            "locale": (account["locale"] if account and account["locale"] else None)
+            or ((details["locale"] or details["language_code"]) if details else None),
             "event": {
                 "node_key": event["node_key"],
                 "kind": event["kind"],

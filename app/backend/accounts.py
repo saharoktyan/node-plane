@@ -39,7 +39,7 @@ class AccountService:
         result = {'id': row['id'], 'role': row['role'], 'status': row['status'],
                 'revision': row['revision'],
                 'telegram_user_id': int(row['telegram_subject']) if row['telegram_subject'] else None}
-        for key in ('username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
+        for key in ('display_name', 'username', 'first_name', 'last_name', 'language_code', 'locale', 'locale_selected'):
             if key in row.keys():
                 result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
         if 'profile_id' in row.keys():
@@ -50,8 +50,8 @@ class AccountService:
     @staticmethod
     def _read(conn, account_id):
         row = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
-            i.subject AS telegram_subject, d.username, d.first_name, d.last_name,
-            d.language_code, d.locale, d.locale_selected,
+            i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
+            d.language_code, a.locale, a.locale_selected,
             (SELECT p.id FROM backend_profiles p WHERE p.owner_account_id=a.id ORDER BY p.id LIMIT 1) AS profile_id
             FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
@@ -84,8 +84,8 @@ class AccountService:
         after = _cursor(cursor, 'accounts')
         with self.db.connect() as conn:
             rows = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
-                i.subject AS telegram_subject, d.username, d.first_name, d.last_name,
-                d.language_code, d.locale, d.locale_selected
+                i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
+                d.language_code, a.locale, a.locale_selected
                 FROM backend_accounts a
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject

@@ -55,6 +55,8 @@ class SQLIdentityRepository:
             create_schema(conn)
             from db.migration_revisions.r0007_account_menu_refresh import upgrade
             upgrade(conn)
+            from db.migration_revisions.r0028_account_details import upgrade
+            upgrade(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()
@@ -112,14 +114,20 @@ class SQLIdentityRepository:
                 WHERE i.provider = 'telegram' AND i.subject = ?""", (str(user_id),)).fetchone()
         return self._account(row)
 
-    def telegram_details_for_account(self, account_id: str) -> dict:
+    def account_details(self, account_id: str) -> dict:
+        """The account's own name and language, with its Telegram details if it has them."""
         with self.db.connect() as conn:
-            row = conn.execute('''SELECT d.username, d.first_name, d.last_name, d.language_code,
-                d.locale, d.locale_selected
-                FROM backend_external_identities i JOIN backend_telegram_identity_details d
-                ON d.subject = i.subject WHERE i.account_id = ? AND i.provider = 'telegram'
-                ORDER BY i.subject LIMIT 1''', (account_id,)).fetchone()
-        return dict(row) if row is not None else {}
+            row = conn.execute('''SELECT a.display_name, a.locale, a.locale_selected,
+                d.username, d.first_name, d.last_name, d.language_code
+                FROM backend_accounts a
+                LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
+                LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
+                WHERE a.id = ? ORDER BY i.subject LIMIT 1''', (account_id,)).fetchone()
+        if row is None:
+            return {}
+        result = {key: row[key] for key in row.keys() if row[key] is not None}
+        result['locale_selected'] = bool(row['locale_selected'])
+        return result
 
     def _resolve(self, conn, user_id: int) -> Account:
         candidate = str(uuid4())
@@ -131,6 +139,9 @@ class SQLIdentityRepository:
             WHERE i.provider = 'telegram' AND i.subject = ?""", (str(user_id),)).fetchone()
         if row['id'] != candidate:
             conn.execute("DELETE FROM backend_accounts WHERE id = ?", (candidate,))
+        else:
+            from db.migration_revisions.r0028_account_details import backfill
+            backfill(conn, candidate)
         return self._account(row)
 
     def resolve_telegram(self, user_id: int) -> Account:
@@ -156,15 +167,24 @@ class SQLIdentityRepository:
                 (str(user_id), username, first_name, last_name, language_code,
                  language_code[:2].lower() if (language_code or '')[:2].lower() in {'ru', 'en'} else 'en',
                  datetime.now(timezone.utc).isoformat()))
+            linked = conn.execute('''SELECT account_id FROM backend_external_identities
+                WHERE provider = 'telegram' AND subject = ?''', (str(user_id),)).fetchone()
+            if linked is not None:
+                from db.migration_revisions.r0028_account_details import backfill
+                backfill(conn, linked['account_id'])
 
-    def set_telegram_locale_for_account(self, account_id: str, locale: str) -> None:
+    def set_locale_for_account(self, account_id: str, locale: str) -> None:
+        """The language is the account's; a linked Telegram identity keeps the same choice."""
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
+            if conn.execute('''UPDATE backend_accounts SET locale = ?, locale_selected = 1
+                    WHERE id = ?''', (locale, account_id)).rowcount == 0:
+                raise AccessDenied('resource_not_found', 404)
             row = conn.execute('''SELECT subject FROM backend_external_identities
                 WHERE account_id = ? AND provider = 'telegram' LIMIT 1''', (account_id,)).fetchone()
             if row is None:
-                raise AccessDenied('telegram_identity_required', 409)
+                return
             conn.execute('''INSERT INTO backend_telegram_identity_details
                 (subject, locale, locale_selected, updated_at)
                 VALUES (?, ?, 1, CURRENT_TIMESTAMP) ON CONFLICT(subject) DO UPDATE SET

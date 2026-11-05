@@ -255,6 +255,31 @@ class BackendBackupsTests(unittest.TestCase):
         self.assertEqual((saved['display_name'], saved['status'], saved['revision']), ('Phone', 'retired', 3))
         self.assertTrue(self.service.detail(self.actor, backup_id)['compatible'])
 
+    def test_snapshot_before_account_details_is_compatible_and_restore_fills_them(self):
+        from backend.identity_repository import SQLIdentityRepository
+        SQLIdentityRepository(self.db).update_telegram_details(
+            int(self.db.connection.execute("SELECT subject FROM backend_external_identities WHERE account_id=?",
+                                           (self.admin.id,)).fetchone()[0]), first_name='Ann', last_name='Lee')
+        backup_id, _ = self.snapshot()
+        path = self.service._path(backup_id)
+        raw = json.loads(path.read_bytes())
+        accounts = raw['tables']['backend_accounts']
+        for column in ('display_name', 'locale', 'locale_selected'):
+            accounts['columns'].remove(column)
+            for row in accounts['rows']:
+                del row[column]
+        raw['checksum'] = hashlib.sha256(encoded(raw['tables'])).hexdigest()
+        path.write_bytes(encoded(raw))
+        detail = self.service.detail(self.actor, backup_id)
+        self.assertTrue(detail['compatible'])
+        self.db.connection.execute("UPDATE backend_accounts SET display_name='Changed'")
+        job = self.service.queue(self.actor, str(uuid4()), 'restore', backup_id, detail['checksum'])
+        while self.service.run_one():
+            pass
+        self.assertEqual(self.service.get(self.actor, job['id'])['status'], 'succeeded')
+        self.assertEqual(self.db.connection.execute("SELECT display_name FROM backend_accounts WHERE id=?",
+                                                    (self.admin.id,)).fetchone()[0], 'Ann Lee')
+
     def test_tariffs_and_assignments_are_backed_up_and_older_formats_have_none(self):
         profile_id = self.device_profile()
         with self.db.transaction() as conn:

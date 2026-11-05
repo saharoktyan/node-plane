@@ -243,7 +243,7 @@ class WorkstationService:
 
     def choices(self) -> list[dict]:
         with self.db.connect() as conn:
-            rows = conn.execute("""SELECT a.id, d.username, d.first_name, d.last_name, i.subject
+            rows = conn.execute("""SELECT a.id, a.display_name, d.username, i.subject
                 FROM backend_accounts a LEFT JOIN backend_external_identities i
                 ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
@@ -254,8 +254,10 @@ class WorkstationService:
             label = 'Telegram ID: ' + row['subject'] if row['subject'] else row['id']
             if username:
                 label += ' · @' + username
-            choices.setdefault(row['id'], {'account_id': row['id'],
-                'label': label[:200], 'telegram_id': row['subject'], 'username': username})
+            if row['display_name'] and row['display_name'] != '@' + (username or ''):
+                label = row['display_name'] + ' · ' + label
+            choices.setdefault(row['id'], {'account_id': row['id'], 'label': label[:200],
+                'display_name': row['display_name'], 'telegram_id': row['subject'], 'username': username})
         return list(choices.values())
 
     def _account(self, request: dict, previous: dict | None):

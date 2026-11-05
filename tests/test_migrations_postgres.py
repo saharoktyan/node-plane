@@ -269,6 +269,10 @@ class MigrationsPostgresTests(unittest.TestCase):
         from backend.authorization import PrincipalKind, Actor, Principal, ADMIN_PERMISSIONS
         from backend.profiles import ProfileRepository
         from backend.operations import OperationRepository
+        # Current code writes account details; r0028 later finds the columns in place.
+        with self.db.transaction() as conn:
+            from db.migration_revisions.r0028_account_details import add_columns
+            add_columns(conn)
         identities = SQLIdentityRepository(self.db)
         admin = bootstrap_admin(identities,101,self.db)
         token_id, token = CredentialService(self.db).issue(PrincipalKind.ADAPTER,ADAPTER_SCOPES)
@@ -334,6 +338,19 @@ class MigrationsPostgresTests(unittest.TestCase):
             self.assertEqual(row['uplink_bytes'],123)
             self.assertEqual(row['downlink_bytes'],456)
 
+    def test_account_details_are_filled_from_telegram(self):
+        migrate(self.db,revisions=REVISIONS[:-1])
+        with self.db.transaction() as conn:
+            conn.execute("INSERT INTO backend_accounts(id,status) VALUES ('a1','approved'),('a2','approved')")
+            conn.execute("INSERT INTO backend_external_identities VALUES ('telegram','101','a1')")
+            conn.execute("""INSERT INTO backend_telegram_identity_details
+                (subject,username,first_name,last_name,language_code,locale,locale_selected,updated_at)
+                VALUES ('101','ann','Ann',NULL,'ru','ru',1,'2026-11-05')""")
+        self.assertEqual(migrate(self.db)['applied'], [REVISIONS[-1].number])
+        with self.db.connect() as conn:
+            rows = conn.execute('SELECT id,display_name,locale,locale_selected FROM backend_accounts ORDER BY id').fetchall()
+        self.assertEqual([tuple(row.values()) for row in rows], [('a1','Ann','ru',1), ('a2',None,None,0)])
+
     def test_pre_device_columns_are_upgraded_without_changing_command_payloads(self):
         migrate(self.db,revisions=REVISIONS[:1])
         from backend.admin_cli import bootstrap_admin
@@ -341,6 +358,10 @@ class MigrationsPostgresTests(unittest.TestCase):
         from backend.profiles import ProfileRepository
         from backend.operations import OperationRepository
         from backend.authorization import Actor, Principal, PrincipalKind, ADMIN_PERMISSIONS
+        # Current code writes account details; r0028 later finds the columns in place.
+        with self.db.transaction() as conn:
+            from db.migration_revisions.r0028_account_details import add_columns
+            add_columns(conn)
         admin = bootstrap_admin(SQLIdentityRepository(self.db),101,self.db)
         profile = ProfileRepository(self.db).create_profile(runtime_name='peer',display_name='Peer')
         with self.db.transaction() as conn:

@@ -32,17 +32,29 @@ fn administrator_label(choice: &Value, id: &str) -> String {
                 .as_u64()
                 .map(|value| value.to_string())
         });
+    let username = choice["username"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("@{}", value.trim_start_matches('@')));
     let label = if let Some(telegram_id) = telegram_id {
         let mut label = format!("Telegram ID: {telegram_id}");
-        if let Some(username) = choice["username"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-        {
-            label.push_str(&format!(" · @{}", username.trim_start_matches('@')));
+        if let Some(username) = &username {
+            label.push_str(&format!(" · {username}"));
         }
         label
+    } else if choice["display_name"].is_string() {
+        id.to_owned()
     } else {
         choice["label"].as_str().unwrap_or(id).to_owned()
+    };
+    // The account's own name comes first; a name that is only the Telegram
+    // username is already in the label.
+    let label = match choice["display_name"]
+        .as_str()
+        .filter(|name| !name.is_empty() && Some(*name) != username.as_deref())
+    {
+        Some(name) => format!("{name} · {label}"),
+        None => label,
     };
     label
         .chars()
@@ -607,6 +619,24 @@ mod tests {
         assert_eq!(
             administrator_label(&json!({"label":"103 · @legacy"}), "id"),
             "103 · @legacy"
+        );
+        assert_eq!(
+            administrator_label(
+                &json!({"display_name":"Ann Lee","telegram_id":"104","username":"ann"}),
+                "id"
+            ),
+            "Ann Lee · Telegram ID: 104 · @ann"
+        );
+        assert_eq!(
+            administrator_label(
+                &json!({"display_name":"@ann","telegram_id":"104","username":"ann"}),
+                "id"
+            ),
+            "Telegram ID: 104 · @ann"
+        );
+        assert_eq!(
+            administrator_label(&json!({"display_name":"Ops","telegram_id":null}), "acc-1"),
+            "Ops · acc-1"
         );
     }
     #[test]

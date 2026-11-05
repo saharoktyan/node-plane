@@ -398,6 +398,9 @@ class AnnouncementService:
             ("announcement_silent:" + row["account_id"],),
         ).fetchone()
         service = AnnouncementService._service_mode(conn, row)
+        account = conn.execute(
+            "SELECT locale FROM backend_accounts WHERE id=?", (row["account_id"],)
+        ).fetchone()
         details = conn.execute(
             "SELECT locale,language_code FROM backend_telegram_identity_details WHERE subject=?",
             (row["telegram_subject"],),
@@ -406,9 +409,8 @@ class AnnouncementService:
             "id": row["id"],
             "telegram_user_id": int(row["telegram_subject"]),
             "text": text,
-            "locale": (details["locale"] or details["language_code"])
-            if details
-            else None,
+            "locale": (account["locale"] if account and account["locale"] else None)
+            or ((details["locale"] or details["language_code"]) if details else None),
             "silent": (service == 'silent') if service else
                 (bool(json.loads(silent["value"])) if silent else False),
             **AnnouncementService.notification_metadata(conn,row["announcement_id"]),

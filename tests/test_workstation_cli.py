@@ -227,7 +227,7 @@ class WorkstationCredentialTests(unittest.TestCase):
             self.service.handle({'version': 1, 'action': 'authenticate',
                 'session_id': self.session_id, 'attribution': self.attribution})
         self.assertEqual(caught.exception.code, 'admin_selection_required')
-        self.assertEqual({choice['label'] for choice in caught.exception.choices}, {'Telegram ID: 101 · @operator', 'Telegram ID: 102'})
+        self.assertEqual({choice['label'] for choice in caught.exception.choices}, {'Telegram ID: 101 · @operator', 'Another Admin · Telegram ID: 102'})
         first = next(choice for choice in caught.exception.choices if choice['account_id'] == self.admin.id)
         self.assertEqual(first['telegram_id'], '101')
         self.assertEqual(first['username'], 'operator')
@@ -258,7 +258,8 @@ class WorkstationCredentialTests(unittest.TestCase):
         self.authenticate()
         result = self.service.handle({'version': 1, 'action': 'list'})
         self.assertEqual(result['accounts'], [{'account_id': self.admin.id,
-            'label': 'Telegram ID: 101 · @operator', 'telegram_id':'101', 'username':'operator'}])
+            'label': 'Telegram ID: 101 · @operator', 'display_name': '@operator',
+            'telegram_id':'101', 'username':'operator'}])
         self.assertNotIn('token', result)
         self.assertNotIn('np_', json.dumps(result))
 
