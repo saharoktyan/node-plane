@@ -80,6 +80,7 @@ class TemporaryConfigService:
         node = conn.execute('SELECT * FROM backend_nodes WHERE key=?', (node_key,)).fetchone()
         if node is None:
             raise AccessDenied('resource_not_found',404)
+        # An invitation waiting for its agent is never enabled.
         if not node['enabled'] or node['desired_revision'] != node['applied_revision']:
             raise AccessDenied('node_settings_pending',409)
         if protocol not in json.loads(node['protocols_json']) or (protocol == 'xray'

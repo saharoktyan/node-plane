@@ -53,6 +53,16 @@ class NodeServiceBoundariesTests(unittest.TestCase):
         overview = self.client.get('/api/v1/admin/overview', headers=self.admin_headers()).json()
         self.assertEqual((overview['nodes_total'], overview['invitations_total']), (1, 1))
 
+    def test_access_is_not_granted_on_an_invitation(self):
+        self.assertEqual(self.create_node('n1', protocols=['awg'], settings={'public_host': 'node.example', 'awg_port': 51820}).status_code, 201)
+        profile = self.client.post('/api/v1/profiles', headers=self.admin_headers(**{'Idempotency-Key': str(uuid4())}),
+                                   json={'display_name': 'Alice', 'owner_account_id': None}).json()['profile']
+        response = self.client.patch(f"/api/v1/profiles/{profile['id']}/grants",
+            headers=self.admin_headers(**{'Idempotency-Key': str(uuid4()), 'If-Match': '"1"'}),
+            json={'grants': [{'node_key': 'n1', 'protocol': 'awg'}]})
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()['error']['code'], 'grant_target_unavailable')
+
     def test_base_node_creation_and_metadata_edits_do_not_trigger_runtime_settings_apply(self):
         created = self.create_node('n1', protocols=[])
         self.assertEqual(created.status_code, 201, created.text)

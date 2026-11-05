@@ -8,7 +8,8 @@
   `stage=` to list one of them, and the admin overview counts invitations
   apart (`invitations_total`). Access and temporary-configuration pickers in
   the bot and Workstation offer only nodes; the bot and Workstation show an
-  invitation as waiting for the agent.
+  invitation as waiting for the agent; the backend refuses access on an
+  invitation (`grant_target_unavailable`).
 - Each installed node agent has one record (migration r0032): how it was
   installed (token, SSH, controller rollout, controller host or an earlier
   setup) and the version it last reported in a probe. Nodes in the API carry

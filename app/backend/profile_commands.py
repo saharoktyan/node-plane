@@ -51,6 +51,9 @@ class ProfileCommands:
             # The lock prevents a concurrent drain from accepting a new grant.
             node = conn.execute('''UPDATE backend_nodes SET enabled = enabled
                 WHERE key = ? RETURNING enabled, protocols_json''', (node_key,)).fetchone()
+            # Access is granted on nodes only: a node is enabled together with
+            # its first applied revision, so an invitation waiting for its
+            # agent is never enabled.
             if node is None or not node['enabled'] or protocol not in json.loads(node['protocols_json']):
                 raise AccessDenied('grant_target_unavailable', 422)
         return seen
