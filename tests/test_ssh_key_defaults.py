@@ -74,3 +74,11 @@ class SshKeyDefaultTests(unittest.TestCase):
                 capture_output=True, text=True, check=True, timeout=10, cwd=directory)
             self.assertEqual(result.stdout, 'Ops Team|a b|$(touch boom)\n')
             self.assertFalse((Path(directory) / 'boom').exists())
+
+    def test_a_new_driver_token_restarts_the_running_backend(self):
+        # On a first install the backend starts before driver setup creates the token.
+        source = (ROOT / 'scripts' / 'setup_driver_agents.sh').read_text()
+        token = source[source.index('ensure_local_driver_token() {'):]
+        self.assertIn('LOCAL_TOKEN_CREATED=1', token[:token.index('\n}\n')])
+        final = source[source.index('set_step "restart node-plane-driver with updated env"'):]
+        self.assertIn('systemctl try-restart node-plane-backend node-plane-backend-worker', final)

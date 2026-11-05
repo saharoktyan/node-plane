@@ -64,6 +64,7 @@ CURRENT_STEP="startup"
 DRIVER_BIN_CHANGED=0
 DRIVER_UNIT_CHANGED=0
 ENV_CHANGED=0
+LOCAL_TOKEN_CREATED=0
 CONTROLLER_ID=""
 RETIRED_NODE_KEYS=""
 JOURNAL_ARCHIVE_NOTICES=()
@@ -292,6 +293,7 @@ ensure_local_driver_token() {
   chmod 0600 "$ENV_FILE"
   export NODE_PLANE_DRIVER_LOCAL_TOKEN="$token"
   ENV_CHANGED=1
+  LOCAL_TOKEN_CREATED=1
 }
 
 sha256_of_file() {
@@ -1214,6 +1216,12 @@ if [[ $SKIP_DRIVER -eq 0 && $DRY_RUN -eq 0 ]]; then
     sudo systemctl is-active --quiet node-plane-driver
   else
     echo "No local driver/env changes detected; skipping final node-plane-driver restart."
+  fi
+  if [[ $LOCAL_TOKEN_CREATED -eq 1 ]]; then
+    # The backend and its worker read the token at start; on a first install
+    # they are already running without it.
+    set_step "restart backend with the driver token"
+    sudo systemctl try-restart node-plane-backend node-plane-backend-worker
   fi
 fi
 
