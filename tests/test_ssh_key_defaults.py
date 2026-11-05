@@ -60,3 +60,17 @@ class SshKeyDefaultTests(unittest.TestCase):
                     capture_output=True, text=True, check=True, timeout=10)
                 self.assertEqual('write' in result.stdout, bool(writes))
                 self.assertIn('key=' + (value or '/fixture/shared/ssh/id_ed25519'), result.stdout)
+
+
+    def test_env_file_values_are_read_literally(self):
+        source = (ROOT / 'scripts' / 'setup_driver_agents.sh').read_text()
+        start = source.index('load_env_file() {')
+        end = source.index('\n}\n', start) + 3
+        with tempfile.TemporaryDirectory() as directory:
+            env = Path(directory) / '.env'
+            env.write_text('NODE_PLANE_ADMIN_NAME=Ops Team\n# comment\nQUOTED="a b"\nPLAIN=$(touch boom)\n')
+            result = subprocess.run(['bash', '-c', 'set -euo pipefail\n' + source[start:end] +
+                f'load_env_file {env}\nprintf "%s|%s|%s\\n" "$NODE_PLANE_ADMIN_NAME" "$QUOTED" "$PLAIN"'],
+                capture_output=True, text=True, check=True, timeout=10, cwd=directory)
+            self.assertEqual(result.stdout, 'Ops Team|a b|$(touch boom)\n')
+            self.assertFalse((Path(directory) / 'boom').exists())

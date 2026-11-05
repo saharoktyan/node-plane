@@ -617,11 +617,24 @@ validate_security_configuration() {
   fi
 }
 
+# The env file is systemd's EnvironmentFile: KEY=VALUE lines, values taken
+# literally (the installer writes them unquoted, such as an administrator's
+# name with spaces), so it is read line by line instead of sourced.
+load_env_file() {
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    if [[ ${#value} -ge 2 && ( ( "${value:0:1}" == '"' && "${value: -1}" == '"' ) || ( "${value:0:1}" == "'" && "${value: -1}" == "'" ) ) ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    export "${key}=${value}"
+  done < "$1"
+}
+
 if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  load_env_file "$ENV_FILE"
   if [[ ${BIN_SOURCE_EXPLICIT:-0} -eq 0 && -n "${NODE_PLANE_BIN_SOURCE:-}" ]]; then
     BIN_SOURCE="$NODE_PLANE_BIN_SOURCE"
   fi
