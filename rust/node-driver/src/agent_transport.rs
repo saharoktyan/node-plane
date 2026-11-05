@@ -65,6 +65,26 @@ impl AgentTransport {
         let mut client = self.client().await.map_err(connection_status)?;
         Ok(client.backend_node_action(request).await?.into_inner())
     }
+    pub async fn apply_relay(
+        &self,
+        request: crate::agent::v1::ApplyRelayRequest,
+    ) -> Result<crate::agent::v1::RelayState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.apply_relay(request).await?.into_inner())
+    }
+
+    pub async fn get_relay_state(&self) -> Result<crate::agent::v1::RelayState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(AgentEmpty {});
+        request.set_timeout(Duration::from_secs(10));
+        Ok(client.get_relay_state(request).await?.into_inner())
+    }
+
+    pub async fn remove_relay(&self) -> Result<crate::agent::v1::RelayState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.remove_relay(AgentEmpty {}).await?.into_inner())
+    }
+
     pub async fn get_backend_xray_public(
         &self,
     ) -> Result<crate::agent::v1::BackendXrayPublic, tonic::Status> {

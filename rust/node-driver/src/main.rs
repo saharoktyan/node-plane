@@ -12,6 +12,8 @@ use tonic::{Request, Response, Status, transport::Server};
 mod agent_transport;
 mod enrollment;
 mod operations;
+mod relay_api;
+mod relays;
 
 use operations::{CommandIdentity, CommandStart, DriverState};
 
@@ -53,6 +55,7 @@ struct DriverContext {
     app_semver: String,
     app_commit: String,
     agent_targets: Arc<RwLock<HashMap<String, String>>>,
+    relays: Arc<relays::Relays>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,7 +132,17 @@ impl DriverContext {
             .unwrap_or_else(|| {
                 PathBuf::from(Self::candidate_shared_root()).join("data/node-driver-operations.bin")
             });
+        let relay_dir = operations_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("relay-link");
+        let api = env::var("NODE_PLANE_API_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
+        let relays = relays::Relays::open(relay_dir, api).map_err(std::io::Error::other)?;
         Ok(Self {
+            relays,
             state: DriverState::open(operations_path)?,
             app_semver,
             app_commit,
@@ -1363,6 +1376,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_api = NodeApi { ctx: ctx.clone() };
     let provisioning_api = ProvisioningApi { ctx: ctx.clone() };
     let runtime_api = RuntimeApi { ctx: ctx.clone() };
+    let relay_api = relay_api::RelayApi { ctx: ctx.clone() };
     let operation_api = OperationApi { ctx };
 
     println!("node-plane-driver listening on {}", addr);
@@ -1380,6 +1394,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime_api,
             authorize_local,
         ))
+        .add_service(
+            driver::v1::relay_service_server::RelayServiceServer::with_interceptor(
+                relay_api,
+                authorize_local,
+            ),
+        )
         .add_service(OperationServiceServer::with_interceptor(
             operation_api,
             authorize_local,

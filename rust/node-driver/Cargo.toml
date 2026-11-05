@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+node-plane-relay = { path = "../node-plane-relay", default-features = false, features = ["link"] }
 prost = "0.13"
 # Already in the tree through rustls; HMAC and randomness for enrollment.
 ring = "0.17"

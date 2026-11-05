@@ -72,6 +72,7 @@ async fn run_link() -> Result<(), String> {
         },
         api: env::var("NODE_PLANE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
         limits: link::Limits::default(),
+        status: Default::default(),
     };
     tokio::select! {
         () = link::run(config) => Ok(()),

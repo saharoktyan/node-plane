@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+// The web cabinet's relay on a node. The driver holds the controller's link
+// key and the list of relays it keeps a link to; the node's agent runs the
+// relay. Keys cross only as public halves: the agent returns the relay's,
+// the driver hands over its own.
+service RelayService {
+  // Install or update the relay on the node, pin its key, keep a link to it.
+  rpc ApplyRelay(ApplyRelayRequest) returns (RelayStatus);
+  // Drop the link, then remove the relay from the node.
+  rpc RemoveRelay(RelayNodeRequest) returns (RelayStatus);
+  rpc GetRelay(RelayNodeRequest) returns (RelayStatus);
+}
+
+message ApplyRelayRequest {
+  string node_key = 1;
+  string domain = 2;
+  uint32 port = 3;
+  // "acme", "files" or "proxy".
+  string tls = 4;
+  string acme_contact = 5;
+  string certificate_path = 6;
+  string key_path = 7;
+}
+
+message RelayNodeRequest {
+  string node_key = 1;
+}
+
+message RelayStatus {
+  // Unset when the agent did not answer; the link fields still hold.
+  bool agent_reachable = 1;
+  bool installed = 2;
+  bool active = 3;
+  string relay_key = 4;
+  // The driver's link to the relay.
+  bool linked = 5;
+  bool link_connected = 6;
+  string link_error = 7;
+  uint64 link_since = 8;
+  // The URL the link dials.
+  string url = 9;
+}

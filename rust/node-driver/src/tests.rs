@@ -46,6 +46,7 @@ fn context() -> DriverContext {
         app_semver: "test".into(),
         app_commit: "test".into(),
         agent_targets: Default::default(),
+        relays: crate::relays::Relays::scratch(),
     }
 }
 

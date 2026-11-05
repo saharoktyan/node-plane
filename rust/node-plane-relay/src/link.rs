@@ -1,6 +1,9 @@
 //! The controller's side: holds the connection to the relay and performs the
 //! requests that come over it against the local API.
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use http::{HeaderValue, Method, Uri};
@@ -55,6 +58,30 @@ pub struct Config {
     /// certificate of its own CA. The pinned relay key is checked either way.
     pub ca: Option<Vec<u8>>,
     pub limits: Limits,
+    /// Kept current for whoever shows the link's state.
+    pub status: Arc<Mutex<Status>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Status {
+    pub connected: bool,
+    /// Why the last attempt or connection ended.
+    pub error: String,
+    /// Unix seconds of the last change.
+    pub since: u64,
+}
+
+fn report(config: &Config, connected: bool, error: String) {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let mut status = config.status.lock().unwrap();
+    // Repeated failures keep the time the link went down.
+    if status.connected != connected || status.since == 0 {
+        status.since = since;
+    }
+    status.connected = connected;
+    status.error = error;
 }
 
 type Http = Client<HttpConnector, Full<Bytes>>;
@@ -64,10 +91,12 @@ pub async fn run(config: Config) {
     let mut delay = Duration::from_secs(1);
     loop {
         let mut established = false;
-        match session(&config, &mut established).await {
-            Ok(()) => eprintln!("link closed by the relay"),
-            Err(error) => eprintln!("link: {error}"),
-        }
+        let error = match session(&config, &mut established).await {
+            Ok(()) => "the relay closed the link".to_string(),
+            Err(error) => error,
+        };
+        eprintln!("link: {error}");
+        report(&config, false, error);
         if established {
             delay = Duration::from_secs(1);
         }
@@ -138,6 +167,7 @@ pub async fn session(config: &Config, established: &mut bool) -> Result<(), Stri
     };
     tx.send(hello).await.map_err(|e| e.to_string())?;
     *established = true;
+    report(config, true, String::new());
     eprintln!("link connected to {}", config.relay);
     let http: Http = Client::builder(TokioExecutor::new()).build_http();
     let permits = Arc::new(Semaphore::new(config.limits.concurrent));

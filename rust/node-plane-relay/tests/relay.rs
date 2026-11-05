@@ -121,6 +121,7 @@ fn link_config(pair: &Pair, relay: SocketAddr, api: SocketAddr) -> link::Config 
             response_body: 16 << 10,
             ..link::Limits::default()
         },
+        status: Default::default(),
     }
 }
 
@@ -186,8 +187,20 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
         relay(&pair, serve::Limits::default()).await,
         listen(fake_api()).await,
     );
-    tokio::spawn(link::run(link_config(&pair, relay, api)));
+    let config = link_config(&pair, relay, api);
+    let status = config.status.clone();
+    tokio::spawn(link::run(config));
     wait_for_link(relay, "connected").await;
+
+    // The controller's side knows it too.
+    for _ in 0..100 {
+        if status.lock().unwrap().connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(status.lock().unwrap().connected);
+    assert!(status.lock().unwrap().since > 0);
 
     let request = Request::post(format!("http://{relay}/api/v1/profiles/p1?x=1"))
         .header("authorization", "Bearer session")

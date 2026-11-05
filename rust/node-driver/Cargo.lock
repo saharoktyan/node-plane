@@ -626,10 +626,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
+name = "node-plane-api"
+version = "1.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "node-plane-driver"
 version = "1.0.0-beta.11"
 dependencies = [
  "chrono",
+ "node-plane-relay",
  "prost",
  "ring",
  "serde",
@@ -638,6 +646,25 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
+
+[[package]]
+name = "node-plane-relay"
+version = "1.0.0-beta.1"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper-util",
+ "node-plane-api",
+ "prost",
+ "ring",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-build",
  "uuid",
@@ -1216,6 +1243,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -1460,6 +1488,24 @@ dependencies = [
  "hashbrown 0.15.4",
  "indexmap 2.13.1",
  "semver",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.11",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

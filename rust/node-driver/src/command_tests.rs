@@ -332,6 +332,7 @@ async fn failed_command_is_not_reexecuted_after_configuration_changes() {
             app_semver: "test".into(),
             app_commit: "test".into(),
             agent_targets: Default::default(),
+            relays: crate::relays::Relays::scratch(),
         },
     };
     let first = api
@@ -371,6 +372,7 @@ async fn every_rpc_returns_existing_command_without_execution() {
         app_semver: "test".into(),
         app_commit: "test".into(),
         agent_targets: Default::default(),
+        relays: crate::relays::Relays::scratch(),
     };
     let runtime = RuntimeApi { ctx: ctx.clone() };
     let provisioning = ProvisioningApi { ctx: ctx.clone() };
