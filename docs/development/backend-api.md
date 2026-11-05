@@ -6,8 +6,6 @@ The HTTP application is `app/backend/http_api.py`. Pydantic request/response mod
 
 Clients and SDKs (the bot, Workstation, the web cabinet) are built from one contract, not from each other. `api/openapi.json` is the schema of this release; `scripts/export_openapi.py` writes it from the application (`backend/api_contract.py`), and `tests/test_api_contract.py` fails while the committed file differs. Commit the regenerated schema with every API change. The contract has its own version (`info.version`, `api_contract.VERSION`): bump the major part for a breaking change. Routes stay under `/api/v1`.
 
-Python clients use the SDK in `sdk/python` (`node_plane_sdk`): it applies the rules below once (bearer credentials, acting for a Telegram identity, idempotency keys, revisions, error bodies as `ApiError`, cursor pages through `collect`). The bot's `BackendClient` is the SDK client with the adapter's own checks; the controller release ships the SDK, and `telegram_client` adds it to the import path until the repository layout gives it its own.
-
 Every new operation declares its response model. The operations without one are listed in `api/untyped-operations.txt`; the list may only shrink (`scripts/export_openapi.py --untyped` records a shrink).
 
 Rules every client relies on:

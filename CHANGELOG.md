@@ -2,9 +2,6 @@
 
 ## Unreleased
 
-- Python SDK (`sdk/python`, `node_plane_sdk`): the API contract's rules for
-  Python clients in one place. The Telegram bot uses it; the controller
-  release ships it.
 - The API contract is part of the repository: `api/openapi.json` (written by
   `scripts/export_openapi.py`, checked by a test) with its own version, and
   the shared rules for errors, idempotency, revisions and pagination in

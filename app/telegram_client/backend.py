@@ -1,16 +1,20 @@
-"""The bot's API client: the SDK with the adapter's own rules. Telegram
-identities are delegated, never trusted as roles."""
+"""Async HTTP transport; Telegram identities are delegated, never trusted as roles."""
 from __future__ import annotations
 
+from uuid import uuid4
 from urllib.parse import quote, urlencode, urlsplit
 
-from node_plane_sdk import ApiError, Client, collect
-
-# The bot's name for the SDK's error; `code` and `status` as in the contract.
-BackendError = ApiError
+import aiohttp
+import logging
 
 
-class BackendClient(Client):
+class BackendError(Exception):
+    def __init__(self, code: str, status: int):
+        self.code, self.status = code, status
+        super().__init__(code)
+
+
+class BackendClient:
     async def bootstrap_node(self, user_id, node_key, action, revision, command_key):
         return await self.request('POST', f'/api/v1/nodes/{node_key}/bootstrap',
             telegram_user_id=user_id, body={'action': action, 'revision': revision},
@@ -112,11 +116,52 @@ class BackendClient(Client):
         return await self.request('POST', f'/api/v1/system/backups/catalog/{backup_id}/delete',
                                   telegram_user_id=user_id, body={'checksum': checksum})
 
-    def __init__(self, session, base_url: str, adapter_token: str):
+    def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str):
         parsed = urlsplit(base_url)
         if parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost'} or not parsed.port or parsed.path not in {'', '/'}:
             raise ValueError('Telegram adapter requires a loopback backend endpoint')
-        super().__init__(session, base_url, adapter_token, on_request=_timing)
+        self.session = session
+        self.base_url = base_url.rstrip('/')
+        self.adapter_token = adapter_token
+
+    async def request(self, method: str, path: str, *, telegram_user_id: int | None = None,
+                      body: dict | None = None, command: bool = False,
+                      revision: int | None = None, command_key: str | None = None,
+                      timeout_seconds: int | None = None, content: bytes | None = None,
+                      binary: bool = False) -> dict | bytes:
+        from time import perf_counter
+        from .timings import record, route
+        started = perf_counter()
+        request_id = '-'
+        headers = {'Authorization': f'Bearer {self.adapter_token}'}
+        if telegram_user_id is not None:
+            headers['X-Node-Plane-Telegram-User-ID'] = str(telegram_user_id)
+        if command:
+            headers['Idempotency-Key'] = command_key or str(uuid4())
+        if revision is not None:
+            headers['If-Match'] = f'"{revision}"'
+        # Raw content is a backup file; its size is bounded by the backend.
+        options = {'headers': headers, 'json': body} if content is None else {'headers': headers, 'data': content}
+        if timeout_seconds is not None:
+            options['timeout'] = aiohttp.ClientTimeout(total=timeout_seconds)
+        try:
+            async with self.session.request(method, self.base_url + path,
+                                            **options) as response:
+                if binary and response.status < 400:
+                    return await response.read()
+                data = await response.json()
+                request_id = response.headers.get('X-Request-ID', '-')
+                if response.status >= 400:
+                    error = data.get('error', {}) if isinstance(data, dict) else {}
+                    logging.getLogger(__name__).warning('Backend request failed: %s %s status=%s code=%s request_id=%s',
+                        method, path.split('?')[0], response.status, error.get('code', 'backend_unavailable'),
+                        response.headers.get('X-Request-ID', 'unknown'))
+                    raise BackendError(error.get('code', 'backend_unavailable'), response.status)
+                return data
+        except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
+            raise BackendError('backend_unavailable', 503) from exc
+        finally:
+            record('backend', started, method + ' ' + route(path), request_id)
 
     async def resolve(self, telegram_user_id: int, *, username=None, first_name=None,
                       last_name=None, language_code=None) -> dict:
@@ -204,9 +249,16 @@ class BackendClient(Client):
 
     async def profile_nodes(self, telegram_user_id: int, profile_id: str) -> dict:
         path = f'/api/v1/profiles/{profile_id}/nodes?limit=100'
-        items = await collect(lambda cursor: self.request(
-            'GET', path + ('&cursor=' + quote(cursor, safe='') if cursor else ''),
-            telegram_user_id=telegram_user_id))
+        page = await self.request('GET', path, telegram_user_id=telegram_user_id)
+        items = list(page['items'])
+        seen = set()
+        while cursor := page.get('next_cursor'):
+            if cursor in seen:
+                raise BackendError('invalid_node_pagination', 502)
+            seen.add(cursor)
+            page = await self.request('GET', path + '&cursor=' + quote(cursor, safe=''),
+                                      telegram_user_id=telegram_user_id)
+            items.extend(page['items'])
         return {'items': items, 'next_cursor': None}
 
     async def request_access(self, telegram_user_id: int) -> dict:
@@ -468,8 +520,3 @@ class BackendClient(Client):
     async def update_traffic_policy(self, telegram_user_id, enabled):
         return await self.request('PATCH', '/api/v1/system/traffic/preferences',
                                   telegram_user_id=telegram_user_id, body={'enabled': enabled})
-
-
-def _timing(method, path, started, request_id):
-    from .timings import record, route
-    record('backend', started, method + ' ' + route(path), request_id)

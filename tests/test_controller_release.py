@@ -73,8 +73,6 @@ class ControllerReleaseTests(unittest.TestCase):
         destination = self.root / 'release'
         release.extract(self.archive, destination, self.tag, self.commit)
         self.assertTrue((destination / 'app/telegram_client/main.py').is_file())
-        # The bot's API client ships beside the application.
-        self.assertTrue((destination / 'sdk/python/node_plane_sdk/client.py').is_file())
         self.assertTrue((destination / 'LICENSE').is_file())
         self.assertTrue((destination / 'THIRD_PARTY_LICENSES').is_file())
         self.assertEqual((destination / 'scripts/update.sh').stat().st_mode & 0o777, 0o755)
