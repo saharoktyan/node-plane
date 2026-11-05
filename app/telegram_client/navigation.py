@@ -154,6 +154,12 @@ def parent_path(callback, locale, data):
     if callback.startswith('wsaudit:'):
         return (*parent_path('recpage:0', locale, data),
                 Breadcrumb(tr(locale, 'audit.title'), callback))
+    if callback.startswith('relay:'):
+        # One relay screen, reached from settings or a node: the path follows the way in.
+        from .routers.admin_relay import back_callback, parse
+        action, where = parse(callback)
+        view = (*parent_path(back_callback(where), locale, data), Breadcrumb(tr(locale, 'relay.title'), 'relay:v:' + where))
+        return view if action in {'v', 'rm'} else (*view, Breadcrumb(tr(locale, 'relay.setup_title'), 'relay:e:' + where))
     pieces = callback.split(':')
     prefix = pieces[0]
     if prefix == 'node_job' and len(pieces) == 2:

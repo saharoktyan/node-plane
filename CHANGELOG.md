@@ -20,6 +20,9 @@
   administrators manage it (`services.relay.manage`). Its port may not be
   one of the node's Xray ports, and a node with the relay is not removed.
   A backup restore drops the relay setting: set it up again.
+- The relay is set up in Workstation and in the bot, from system settings
+  or from the node (its settings add it, its card opens it); Back and the
+  breadcrumbs follow the way in.
 - The API contract is part of the repository: `api/openapi.json` (written by
   `scripts/export_openapi.py`, checked by a test) with its own version, and
   the shared rules for errors, idempotency, revisions and pagination in

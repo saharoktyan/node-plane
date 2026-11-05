@@ -17,6 +17,7 @@ from ..node_templates import NODE_TEMPLATES
 from .common import installation_progress_lines, schedule_refresh, render
 from ..navigation import remember_node, parent_path
 from .states import NodeDraftState, NodeEditState
+from .admin_relay import card_rows as relay_card_rows
 from .callbacks import (
     AdminNodesCallback, NewNodeCallback, AdminNodeCallback,
     NodeSettingsCallback, EditNodeFieldCallback, NodeProtocolsCallback,
@@ -1035,7 +1036,8 @@ async def show_admin_node(chat_id, user_id, message_id, node_key, bot, backend, 
     sections.insert(1, Section(tr(locale, 'nodes.rich.configuration'),
         (tr(locale, 'nodes.apply.state.' + operation['status']),) if operation and operation['status'] in {'awaiting_executor', 'running'} else
         (tr(locale, 'nodes.rich.pending'),) if pending else (),
-        rows=(*progress_rows, (InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending and not operation else None),))))
+        rows=(*progress_rows, (InlineKeyboardButton(text=tr(locale, 'nodes.card.settings'), callback_data=NodeSettingsCallback(node_key=node_key).pack(), style='primary' if pending and not operation else None),),
+              *relay_card_rows(locale, node))))
     if node.get('notes'):
         sections.append(Section(tr(locale, 'nodes.settings.field.notes'), (node['notes'],), collapsed=True))
     traffic = node_traffic_section(overview.get('traffic') if overview else None, locale)
@@ -1128,12 +1130,14 @@ async def show_node_settings(chat_id, user_id, message_id, node_key, bot, backen
             InlineKeyboardButton(text=tr(locale, 'protocol.' + protocol), callback_data=f'node_section:{protocol}:{node_key}') for protocol in node['protocols']),
             (InlineKeyboardButton(text=tr(locale, 'nodes.rich.protocol_options'), callback_data=NodeProtocolsCallback(node_key=node_key).pack()),)))]
     from .admin_node_policies import settings_section
+    from .admin_relay import settings_section as relay_section
     try:
         policy = await backend.request('GET', '/api/v1/vpn-policies/installation', telegram_user_id=user_id)
     except BackendError:
         policy = None
     from .admin_policy_overrides import node_section
     sections += list(settings_section(locale, node, policy)) + list(node_section(locale, node, policy))
+    sections += list(relay_section(locale, node, installed_agent(node)))
     await render(bot, chat_id, Screen(tr(locale, 'nodes.settings.title'), sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[InlineKeyboardButton(text=tr(locale, 'nodes.card.back_to_server'), callback_data=AdminNodeCallback(node_key=node_key).pack())]], state, message_id)
     if (node.get('_settings_operation') or {}).get('status') in {'awaiting_executor', 'running'}:

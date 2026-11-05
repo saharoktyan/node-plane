@@ -22,6 +22,10 @@ Traffic collection is controlled by an administrator. Enable it to collect suppo
 
 Set the displayed bot name in installation settings → Telegram; like the bot's other settings, it is hidden while the bot is off. The controller public SSH key is needed only for the bot's **Install over SSH**: add it to the server's `authorized_keys` yourself. Copy it or use the bot's separate public-key message action. Keep private keys private.
 
+## Relay
+
+The relay is the web cabinet's public address. It runs as a service on a node with an installed agent; the controller connects out to it and is never exposed. Set it up from the bot's **System settings → Relay** or Workstation's **Settings → Basic → Relay**: choose the node, the cabinet's domain and how the relay gets TLS (Let's Encrypt on port 443, certificate files on the node, or a reverse proxy in front of it). The same screen opens from a node: its settings add the relay to that node, and a node with the relay has **Relay settings** on its card. Back returns the way you came. One relay per installation; owners and administrators manage it.
+
 ## Announcements
 
 Choose recipients, write the message and preview it before sending. The preview shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
