@@ -100,6 +100,8 @@ export const handlers = [
   http.delete('/api/v1/me/passkeys/:id', guarded(() => new HttpResponse(null, { status: 204 }))),
 
   http.get('/api/v1/admin/overview', guarded(() => fixtures.overview(choice().scenario))),
+  http.get('/api/v1/system/attention', guarded(() => ({ unacknowledged_alerts: 0,
+    update_available: choice().scenario !== 'empty' }))),
   http.get('/api/v1/accounts', guarded(({ url }) => ({
     items: fixtures.accounts(choice().scenario, new URL(url).searchParams.get('access') ?? 'with'),
     next_cursor: null }))),

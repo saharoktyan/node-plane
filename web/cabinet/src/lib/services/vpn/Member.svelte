@@ -2,7 +2,6 @@
      tiles; then connecting and the devices, with what the tariff includes
      beside them. -->
 <script lang="ts">
-  import { tiles } from '$lib/ui/tiles';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import type { ServiceProfile } from '$lib/services/registry';
   import { t } from '$lib/i18n/index.svelte';
@@ -10,6 +9,7 @@
   import Dialog from '$lib/ui/Dialog.svelte';
   import { errorText } from '$lib/ui/errors';
   import { bytes, date, key } from '$lib/ui/format';
+  import { tiles } from '$lib/ui/tiles';
   import Connect from './Connect.svelte';
   import Devices from './Devices.svelte';
   import { lines } from './limits';

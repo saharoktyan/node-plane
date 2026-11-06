@@ -13,22 +13,20 @@
   }
 </script>
 
-<div class="page-head">
-  <h1>{t('admin.users')}</h1>
-  <div class="actions">
-    {#each ['with', 'without', 'all'] as const as value (value)}
-      <button class:primary={access === value} onclick={() => (access = value)}>{t('admin.access_' + value)}</button>
-    {/each}
-  </div>
+<div class="page-head"><h1>{t('admin.users')}</h1></div>
+<div class="tabs" role="tablist" aria-label={t('admin.users')}>
+  {#each ['with', 'without', 'all'] as const as value (value)}
+    <button role="tab" aria-selected={access === value} onclick={() => (access = value)}>{t('admin.access_' + value)}</button>
+  {/each}
 </div>
 <Async {load}>
   {#snippet children(page)}
-    <table>
+    <div class="table"><table>
       <thead><tr><th>{t('admin.name')}</th><th>{t('auth.login')}</th><th>Telegram</th><th>{t('admin.roles')}</th></tr></thead>
       <tbody>
         {#each page.items as item (item.id)}
           <tr>
-            <td>{name(item)}</td>
+            <td class="name">{name(item)}</td>
             <td>{item.login ?? '—'}</td>
             <td>{item.username ? '@' + item.username : (item.telegram_user_id ?? '—')}</td>
             <td>{(item.roles ?? []).map((role) => t('admin.role_' + role)).join(', ') || t('admin.role_member')}</td>
@@ -37,7 +35,13 @@
           <tr><td colspan="4" class="muted">{t('admin.no_accounts')}</td></tr>
         {/each}
       </tbody>
-    </table>
+    </table></div>
   {/snippet}
 </Async>
+
+<style>
+  .name {
+    font-weight: 600;
+  }
+</style>
 

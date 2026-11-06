@@ -9,6 +9,8 @@ export const icons: Record<string, string> = {
   catalog: 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 3.5h7m-3.5-3.5v7',
   announcements: 'M4 10v4h3l6 4V6L7 10H4zm13-1a4 4 0 010 6',
   system: 'M4 6h16v12H4V6zm4 13h8M7 10l2 2-2 2m4 0h4',
+  backups: 'M4 5h16v4H4V5zm1 4v10h14V9M10 13h4',
+  updates: 'M20 12a8 8 0 11-2.3-5.6M20 4v5h-5',
   admin: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z',
   cabinet: 'M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9z',
   collapse: 'M15 6l-6 6 6 6',

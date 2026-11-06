@@ -117,7 +117,11 @@ export function overview(scenario: Scenario): Schemas['AdminOverviewOutput'] {
     profiles_total: many ? 480 : 12, profiles_active: many ? 455 : 11, profiles_frozen: many ? 25 : 1,
     pending_requests: many ? 7 : 1, requests_enabled: true, invitations_total: 0, alerts_enabled: true, unacknowledged_alerts: many ? 3 : 0,
     problem_nodes: many ? [{ key: 'sg1', title: 'Singapore', region: 'Asia', flag: '🇸🇬' }] : [],
-    checked_at: '2026-11-06T12:00:00+00:00'
+    checked_at: '2026-11-06T12:00:00+00:00',
+    tasks: { queued: many ? 4 : 0, running: many ? 2 : 0, blocked: many ? 1 : 0 },
+    backup: { enabled: true, last_job: { status: 'succeeded', created_at: '2026-11-06T03:00:00+00:00' } },
+    updates: { available: true, latest_version: '0.5.1', last_checked_at: '2026-11-06T09:00:00+00:00',
+      status: 'ok', branch: 'main' }
   };
 }
 

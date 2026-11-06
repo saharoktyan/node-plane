@@ -12,13 +12,13 @@
 <div class="page-head"><h1>{t('admin.nodes')}</h1></div>
 <Async {load}>
   {#snippet children(page)}
-    <table>
+    <div class="table"><table>
       <thead><tr><th>{t('admin.node')}</th><th>{t('admin.region')}</th><th>{t('admin.services')}</th>
         <th>{t('admin.state')}</th></tr></thead>
       <tbody>
         {#each page.items as node (node.key)}
           <tr>
-            <td>{node.flag} {node.title}</td>
+            <td class="name">{node.flag} {node.title}</td>
             <td class="muted">{node.region}</td>
             <td>
               <div class="row">
@@ -35,6 +35,13 @@
           <tr><td colspan="4" class="muted">{t('admin.no_nodes')}</td></tr>
         {/each}
       </tbody>
-    </table>
+    </table></div>
   {/snippet}
 </Async>
+
+<style>
+  .name {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+</style>

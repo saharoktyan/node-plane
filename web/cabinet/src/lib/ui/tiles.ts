@@ -2,7 +2,7 @@
  * when they fit; otherwise as even a grid as the width allows (four become
  * two by two, not three and one); a shorter last line stretches its tiles to
  * the full width (five become three and two). */
-export function columns(width: number, count: number, min = 180, gap = 1): number {
+export function columns(width: number, count: number, min = 150, gap = 1): number {
   if (count < 1) return 1;
   const fit = Math.max(1, Math.floor((width + gap) / (min + gap)));
   if (fit >= count) return count;

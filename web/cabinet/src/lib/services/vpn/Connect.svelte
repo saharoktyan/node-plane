@@ -185,7 +185,7 @@
                 {@const offered = choices(node.key)}
                 <tr class:off={down(node.key)}>
                   <td class="server">{node.flag} {node.title}</td>
-                  <td class="muted">{node.region || '—'}</td>
+                  <td class="muted region">{node.region || '—'}</td>
                   {#if down(node.key)}
                     <td colspan={SLOTS.length} class="unavailable">{t('vpn.unavailable_now')}</td>
                   {:else}
@@ -359,5 +359,41 @@
   }
   .numbers button:disabled {
     color: var(--line);
+  }
+  /* A phone: the server on a line of its own, its protocols under it in three
+     even columns; the region gives way. */
+  @media (max-width: 600px) {
+    table {
+      min-width: 0;
+    }
+    thead,
+    td.region {
+      display: none;
+    }
+    tbody tr:not(.under) {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+    tbody tr:not(.under) > td {
+      border-bottom: none;
+      padding: 0.3rem 0.5rem 0.55rem 0;
+      width: auto;
+      font-size: 13px;
+    }
+    tbody tr:not(.under) > td.server {
+      grid-column: 1 / -1;
+      padding-top: 0.65rem;
+      font-size: 14px;
+    }
+    tbody tr:not(.under) > td.unavailable {
+      grid-column: 1 / -1;
+    }
+    tr.under {
+      display: block;
+    }
+    tr.under > td {
+      display: block;
+    }
   }
 </style>

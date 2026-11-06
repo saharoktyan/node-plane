@@ -2,8 +2,8 @@
      own. Until stage I it shows the profile's summary; the connection fields
      and actions a manifest declares come with it. -->
 <script lang="ts">
-  import { tiles } from '$lib/ui/tiles';
   import type { ServiceProfile } from '$lib/services/registry';
+  import { tiles } from '$lib/ui/tiles';
 
   let { profile }: { profile: ServiceProfile } = $props();
   const entries = $derived(Object.entries(profile.summary).filter(([, value]) => value !== null));

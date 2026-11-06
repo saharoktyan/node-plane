@@ -408,6 +408,11 @@ dl.facts dd {
   border-bottom: 2px solid transparent;
   font-weight: 500;
 }
+/* Tabs under a page's title divide the whole page. */
+.page-head + .tabs {
+  border-bottom: 1px solid var(--line);
+  margin: -0.5rem 0 1.5rem;
+}
 .tabs > [aria-selected='true'],
 .tabs > [aria-current='page'] {
   color: var(--text);

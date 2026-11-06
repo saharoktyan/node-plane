@@ -7,7 +7,12 @@
   side panel groups sections; tiles wrap into an even grid. The VPN page
   puts the tariff beside connecting and the devices, shows the next traffic
   reset, and connects through a subscription (to come) or a server chosen
-  from a searchable, paged list with a column for each protocol.
+  from a searchable, paged list with a column for each protocol. The
+  administration's overview has tabs for the nodes, VPN and the controller
+  (version, tasks, the last backup, update checks), refreshes every 15
+  seconds and lists what needs attention; charts come with the metrics
+  history. Backups and Updates get their sections, with a dot when an
+  update is available.
 - The web cabinet's VPN page: what the tariff includes (name, description,
   limits in force), the devices (add, rename, a new VLESS or AWG key,
   remove) and configurations for a device on a server, with the link, a QR
