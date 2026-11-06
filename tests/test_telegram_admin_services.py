@@ -33,7 +33,7 @@ class ServicesTests(IsolatedAsyncioTestCase):
         screen, rows = draw.call_args.args[2:4]
         text = screen.plain()
         self.assertLess(text.index('System'), text.index('Built-in'))
-        for value in ('Web cabinet', 'Telegram bot', 'VPN', '3'):
+        for value in ('Relay', 'Telegram bot', 'VPN', '3'):
             self.assertIn(value, text)
         self.assertEqual([row[0].callback_data for row in rows], ['relay:v:v', 'admin_menu'])
         self.assertEqual([c.label for c in screen_parents(screen, rows, 'en', self.data)], ['Admin'])
