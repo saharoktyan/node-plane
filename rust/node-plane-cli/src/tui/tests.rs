@@ -10297,7 +10297,8 @@ fn the_web_cabinet_page_serves_it_on_the_relay_or_the_controller() {
     app.controller.apply(
         Command::CabinetSave(serde_json::json!({})),
         serde_json::json!({"cabinet": {"mode":"local","listen":"0.0.0.0:9000","public_url":"https://panel.example.com",
-            "url":"https://panel.example.com","status":"applying","version":"0.4.0","applied_version":null,"error_code":null}}),
+            "url":"https://panel.example.com","status":"applying","version":"0.4.0","applied_version":null,"error_code":null},
+            "available": true, "relay_node_key": null}),
     );
     assert!(app.controller.cabinet_draft.is_none());
     let (text, controls) = app.cabinet_view();

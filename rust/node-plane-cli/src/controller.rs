@@ -701,13 +701,8 @@ impl Browser {
                     self.cabinet_draft = None;
                     self.cabinet_confirm_remove = false;
                     self.selected = 0;
-                    // A change answers with the cabinet alone; the page keeps the rest.
-                    let mut page = self.cabinet.take().unwrap_or_default();
-                    page["cabinet"] = value["cabinet"].clone();
-                    self.cabinet = Some(page);
-                } else {
-                    self.cabinet = Some(value);
                 }
+                self.cabinet = Some(value);
                 self.defaults_input = None;
             }
             Command::Services => self.services = Some(value),

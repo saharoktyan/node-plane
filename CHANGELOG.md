@@ -37,6 +37,9 @@
   its address, where it is served from, its state and version, and serve it
   on the relay's node in one step or from the controller with the address
   to listen on and the public address; stopping asks first.
+- Setting up or stopping the web cabinet answers with the whole page state,
+  as reading it does. A first install starts the controller's cabinet server
+  only once the driver's binary is there, instead of failing once first.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

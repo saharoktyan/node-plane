@@ -62,7 +62,9 @@ class WebCabinetTests(unittest.TestCase):
     def test_served_by_the_relays_node_on_its_domain(self):
         self.refused('cabinet_needs_relay', lambda: self.cabinet.configure(self.actor, 'relay'))
         self.relay()
-        cabinet = self.cabinet.configure(self.actor, 'relay')['cabinet']
+        answer = self.cabinet.configure(self.actor, 'relay')
+        self.assertEqual((answer['available'], answer['relay_node_key']), (True, 'n1'))
+        cabinet = answer['cabinet']
         self.assertEqual((cabinet['node_key'], cabinet['url'], cabinet['state']),
                          ('n1', 'https://cab.example.com', 'changes_pending'))
         self.assertTrue(self.cabinet.run_one())

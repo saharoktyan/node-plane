@@ -28,11 +28,20 @@ Set the displayed bot name in installation settings → Telegram; like the bot's
 
 ## Services
 
-The bot's **Admin → Services** and Workstation's **Settings → Services** list the installation's services by kind: system ones (the web cabinet's relay and the Telegram bot), built-in ones that people get access to (VPN) and, later, your own services from manifests. Each shows its state and how many instances run on nodes. The relay's and Telegram's pages open from here, and Back returns here. Clients read the same list from `GET /api/v1/services`; an account's own services are `GET /api/v1/me/services`.
+The bot's **Admin → Services** and Workstation's **Settings → Services** list the installation's services by kind: system ones (the relay, the web cabinet and the Telegram bot), built-in ones that people get access to (VPN) and, later, your own services from manifests. Each shows its state and how many instances run on nodes. The relay's, the web cabinet's and Telegram's pages open from here, and Back returns here. Clients read the same list from `GET /api/v1/services`; an account's own services are `GET /api/v1/me/services`.
 
 ## Relay
 
-The relay is the web cabinet's public address. It runs as a service on a node with an installed agent; the controller connects out to it and is never exposed. Set it up from the bot's **System settings → Relay** or Workstation's **Settings → Basic → Relay**: choose the node, the cabinet's domain and how the relay gets TLS (Let's Encrypt on port 443, certificate files on the node, or a reverse proxy in front of it). The same screen opens from a node: its settings add the relay to that node, and a node with the relay has **Relay settings** on its card. Back returns the way you came. One relay per installation; owners and administrators manage it.
+The relay is the installation's public address: a tunnel to the controller's API that the web cabinet and other clients reach it through. It runs as a service on a node with an installed agent; the controller connects out to it and is never exposed. Set it up from the bot's **System settings → Relay** or Workstation's **Settings → Basic → Relay**: choose the node, the cabinet's domain and how the relay gets TLS (Let's Encrypt on port 443, certificate files on the node, or a reverse proxy in front of it). The same screen opens from a node: its settings add the relay to that node, and a node with the relay has **Relay settings** on its card. Back returns the way you came. One relay per installation; owners and administrators manage it. While it serves the web cabinet it cannot be removed: stop serving the cabinet first.
+
+## Web cabinet
+
+The web cabinet is the app people open in a browser or as a Telegram Mini App. It ships with the controller's release and updates with it. Set where it is served from in the bot's **Admin → Services → Web cabinet** or **System settings → Web cabinet**, or Workstation's **Settings → Basic → Web cabinet** (also under **Services**):
+
+- **On the relay's node**: the relay serves it beside the API on its own domain. Set up the relay first; then it is one step. The controller sends the files to the node's agent, which keeps each version whole in `/var/lib/node-plane-cabinet/`.
+- **From the controller**: the controller's own server (the `node-plane-cabinet` unit) serves it without a relay and passes its API requests through under the relay's rules. Give the address and port it listens on (not 8080, the API's) and the address people open it at, for example behind your own reverse proxy. The controller then listens on the network: open only that port.
+
+The page shows the cabinet's address, where it is served from, its state and version. To move it from one place to the other, **Stop serving** it first. The cabinet's address is the passkeys' domain and where invite links lead. Managing the cabinet is not available through the relay, not even from the cabinet itself.
 
 ## Announcements
 

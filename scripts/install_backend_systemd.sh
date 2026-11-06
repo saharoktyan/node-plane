@@ -153,7 +153,10 @@ systemctl daemon-reload
 systemctl enable node-plane-backend.service node-plane-backend-worker.service node-plane-cabinet.service
 systemctl restart node-plane-backend.service
 systemctl restart node-plane-backend-worker.service
-systemctl restart node-plane-cabinet.service || true
+# On a first install the driver's binary comes later; its setup starts it then.
+if [[ -x /usr/local/bin/node-plane-driver ]]; then
+  systemctl restart node-plane-cabinet.service || true
+fi
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   if "${current_dir}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
     exit 0

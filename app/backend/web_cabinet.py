@@ -165,6 +165,14 @@ def _write_local(settings):
     temporary.replace(path)
 
 
+def _state(conn):
+    """What the cabinet's page shows: the cabinet, whether this release has
+    it and the relay's node it can be served on."""
+    relay = _relay(conn)
+    return {'cabinet': public(_row(conn), conn), 'available': available(),
+            'relay_node_key': relay['node_key'] if relay else None}
+
+
 class WebCabinetService:
     def __init__(self, db, driver=None):
         self.db, self.driver = db, driver
@@ -177,9 +185,7 @@ class WebCabinetService:
     def get(self, actor):
         require_permission(actor, CABINET_PERMISSION)
         with self.db.connect() as conn:
-            relay = _relay(conn)
-            return {'cabinet': public(_row(conn), conn), 'available': available(),
-                    'relay_node_key': relay['node_key'] if relay else None}
+            return _state(conn)
 
     def configure(self, actor, mode, *, listen=None, public_url=None):
         """Serve the cabinet from the relay's node or from the controller."""
@@ -215,7 +221,7 @@ class WebCabinetService:
                 conn.execute('''UPDATE backend_web_cabinet SET node_key=?, listen=?, public_url=?,
                     status='applying', revision=revision+1, error_code=NULL, attempted_at=NULL, actor_id=?,
                     updated_at=? WHERE id=1''', (node_key, listen, public_url, actor.account.id, now))
-            return {'cabinet': public(_row(conn), conn)}
+            return _state(conn)
 
     def remove(self, actor):
         require_permission(actor, CABINET_PERMISSION)
@@ -224,7 +230,7 @@ class WebCabinetService:
                 raise AccessDenied('resource_not_found', 404)
             conn.execute('''UPDATE backend_web_cabinet SET status='removing', error_code=NULL, attempted_at=NULL,
                 actor_id=?, updated_at=? WHERE id=1''', (actor.account.id, _now().isoformat()))
-            return {'cabinet': public(_row(conn), conn)}
+            return _state(conn)
 
     def recover(self):
         """At worker start: apply the files again, which may be a new
