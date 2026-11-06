@@ -35,6 +35,8 @@ class CredentialService:
                 expires_at TEXT NOT NULL,
                 revoked_at TEXT
             )''')
+            from db.migration_revisions.r0041_sessions import credentials_schema
+            credentials_schema(conn)
         from .workstation_audit import WorkstationAudit
         WorkstationAudit(self.db).initialize_schema()
 

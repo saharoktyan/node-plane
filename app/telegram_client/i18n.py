@@ -4080,3 +4080,24 @@ CATALOG['ru'].update({
     'login.error.login_taken': 'Этот логин занят.',
     'login.error.login_change_too_soon': 'Логин можно менять раз в 30 дней.',
 })
+
+CATALOG['en'].update({
+    'sessions.title': 'Password and sessions',
+    'sessions.no_password': 'No password set. It is not entered in Telegram: set it in the web cabinet or in Workstation.',
+    'sessions.password_set': 'Password set. A session is a device signed in with it.',
+    'sessions.open': 'Sessions', 'sessions.empty': 'No sessions.',
+    'sessions.item': '{device} — last active {used}',
+    'sessions.end': 'End: {device}', 'sessions.end_all': 'Sign out everywhere',
+    'sessions.card_password': 'Password: set', 'sessions.card_no_password': 'Password: not set',
+    'sessions.card_count': 'Sessions: {count}', 'sessions.end_account': 'End sessions',
+})
+CATALOG['ru'].update({
+    'sessions.title': 'Пароль и сессии',
+    'sessions.no_password': 'Пароль не задан. В Telegram он не вводится: задайте его в веб-кабинете или в Workstation.',
+    'sessions.password_set': 'Пароль задан. Сессия — устройство, на котором с ним выполнен вход.',
+    'sessions.open': 'Сессии', 'sessions.empty': 'Сессий нет.',
+    'sessions.item': '{device} — активна {used}',
+    'sessions.end': 'Завершить: {device}', 'sessions.end_all': 'Выйти везде',
+    'sessions.card_password': 'Пароль: задан', 'sessions.card_no_password': 'Пароль: не задан',
+    'sessions.card_count': 'Сессий: {count}', 'sessions.end_account': 'Завершить сессии',
+})

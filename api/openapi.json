@@ -554,6 +554,11 @@
             ],
             "title": "First Name"
           },
+          "has_password": {
+            "default": false,
+            "title": "Has Password",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -633,6 +638,11 @@
             },
             "title": "Roles",
             "type": "array"
+          },
+          "sessions": {
+            "default": 0,
+            "title": "Sessions",
+            "type": "integer"
           },
           "status": {
             "title": "Status",
@@ -2321,6 +2331,11 @@
             ],
             "title": "First Name"
           },
+          "has_password": {
+            "default": false,
+            "title": "Has Password",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -3778,6 +3793,33 @@
         "title": "OperationTaskOutput",
         "type": "object"
       },
+      "PasswordInput": {
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
+          },
+          "password": {
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "PasswordInput",
+        "type": "object"
+      },
       "ProbePortOutput": {
         "properties": {
           "network": {
@@ -4796,6 +4838,21 @@
         "title": "RecoveryOverviewOutput",
         "type": "object"
       },
+      "RefreshInput": {
+        "additionalProperties": false,
+        "properties": {
+          "refresh_token": {
+            "maxLength": 128,
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshInput",
+        "type": "object"
+      },
       "RegistryRetirementInput": {
         "additionalProperties": false,
         "properties": {
@@ -5196,6 +5253,131 @@
           "telegram_user_id"
         ],
         "title": "ResolveInput",
+        "type": "object"
+      },
+      "SessionOutput": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "device": {
+            "title": "Device",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "used_at": {
+            "title": "Used At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "method",
+          "device",
+          "created_at",
+          "used_at",
+          "expires_at",
+          "current"
+        ],
+        "title": "SessionOutput",
+        "type": "object"
+      },
+      "SessionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SessionPage",
+        "type": "object"
+      },
+      "SessionTokens": {
+        "properties": {
+          "access_expires_at": {
+            "title": "Access Expires At",
+            "type": "string"
+          },
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "refresh_expires_at": {
+            "title": "Refresh Expires At",
+            "type": "string"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "access_token",
+          "access_expires_at",
+          "refresh_token",
+          "refresh_expires_at"
+        ],
+        "title": "SessionTokens",
+        "type": "object"
+      },
+      "SignInInput": {
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "login": {
+            "maxLength": 64,
+            "title": "Login",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "password"
+        ],
+        "title": "SignInInput",
         "type": "object"
       },
       "SshKeyOutput": {
@@ -6352,6 +6534,68 @@
           }
         ],
         "summary": "Update Account"
+      }
+    },
+    "/api/v1/accounts/{account_id}/sessions": {
+      "delete": {
+        "description": "Sign the account out on every device.",
+        "operationId": "end_account_sessions_api_v1_accounts__account_id__sessions_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End Account Sessions"
       }
     },
     "/api/v1/admin/overview": {
@@ -7838,6 +8082,68 @@
         "summary": "Dismiss My Notification"
       }
     },
+    "/api/v1/me/password": {
+      "put": {
+        "description": "Set or change the account's password; a change ends its other sessions.",
+        "operationId": "set_my_password_api_v1_me_password_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set My Password"
+      }
+    },
     "/api/v1/me/preferences": {
       "patch": {
         "operationId": "update_my_preferences_api_v1_me_preferences_patch",
@@ -8079,6 +8385,154 @@
           }
         ],
         "summary": "Own Profile Summary"
+      }
+    },
+    "/api/v1/me/sessions": {
+      "delete": {
+        "description": "Sign out everywhere else; the session of this request stays.",
+        "operationId": "end_my_other_sessions_api_v1_me_sessions_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End My Other Sessions"
+      },
+      "get": {
+        "operationId": "my_sessions_api_v1_me_sessions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Sessions"
+      }
+    },
+    "/api/v1/me/sessions/{session_id}": {
+      "delete": {
+        "description": "End one session; `current` is the one this request comes from.",
+        "operationId": "end_my_session_api_v1_me_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End My Session"
       }
     },
     "/api/v1/node-bootstraps/{identity}": {
@@ -12770,6 +13224,83 @@
           }
         ],
         "summary": "Reject Renewal"
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "description": "Sign in with a login and password; the reply never says which was wrong.",
+        "operationId": "sign_in_api_v1_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokens"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sign In"
+      }
+    },
+    "/api/v1/sessions/refresh": {
+      "post": {
+        "operationId": "refresh_session_api_v1_sessions_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokens"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Session"
       }
     },
     "/api/v1/speed-limits/nodes": {

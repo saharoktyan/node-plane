@@ -1,6 +1,13 @@
 use super::super::*;
 
 impl App {
+    /// The account the active installation signs in as.
+    pub(in crate::tui) fn own_account(&self) -> Option<&str> {
+        self.connections
+            .active()
+            .map(|installation| installation.account.as_str())
+            .filter(|account| !account.is_empty())
+    }
     pub(in crate::tui) fn activate_access(&mut self, control: Control) -> Option<KeyEvent> {
         match control {
             Control::AccessGrants => {
@@ -458,6 +465,53 @@ impl App {
                 }
                 None
             }
+            Control::AccessPassword => {
+                let has = self.access.card.as_ref().is_some_and(|card| {
+                    card.get("_account").unwrap_or(card)["has_password"] == true
+                });
+                self.access.password_input = Some(Default::default());
+                self.access.password_field = usize::from(!has);
+                self.error.clear();
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessPasswordField(index) => {
+                self.access.password_field = index;
+                self.focus(control);
+                None
+            }
+            Control::AccessPasswordSave => {
+                if let Some([current, new, again]) = &self.access.password_input {
+                    if new != again {
+                        self.error = crate::access::password_error("password_mismatch");
+                        return None;
+                    }
+                    let mut body = serde_json::json!({ "password": new });
+                    if !current.is_empty() {
+                        body["current_password"] = current.as_str().into();
+                    }
+                    let command = crate::access::Command::SetPassword {
+                        body,
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
+            Control::AccessEndSessions => {
+                if let Some(id) = self.access.card.as_ref().and_then(|card| {
+                    card.get("_account").unwrap_or(card)["id"]
+                        .as_str()
+                        .map(str::to_owned)
+                }) {
+                    let command = crate::access::Command::EndSessions {
+                        id,
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
             Control::AccessRole(None) => {
                 self.access.role_picker = true;
                 self.access.selected = 0;
@@ -618,6 +672,7 @@ impl App {
                 }
                 if std::mem::take(&mut self.access.role_picker)
                     || self.access.login_input.take().is_some()
+                    || self.access.password_input.take().is_some()
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -739,6 +794,10 @@ impl App {
                         | Control::AccessLogin
                         | Control::AccessLoginInput
                         | Control::AccessLoginSave
+                        | Control::AccessPassword
+                        | Control::AccessPasswordField(_)
+                        | Control::AccessPasswordSave
+                        | Control::AccessEndSessions
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit

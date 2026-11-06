@@ -28,6 +28,7 @@ impl App {
                             | Control::AccessField(_)
                             | Control::AccessDeviceName
                             | Control::AccessLoginInput
+                            | Control::AccessPasswordField(_)
                             | Control::AccessDurationInput
                             | Control::AccessIdentity
                     )
@@ -296,6 +297,37 @@ impl App {
                 }
                 KeyCode::Enter => {
                     self.activate(Control::AccessLoginSave);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if let Some(Control::AccessPasswordField(index)) =
+            controls.get(self.access.selected).copied()
+            && let Some(fields) = self.access.password_input.as_mut()
+        {
+            let field = &mut fields[index];
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if field.chars().count() < 256 {
+                        field.push(c);
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    super::super::text_input::delete_backwards(field, key);
+                    return;
+                }
+                KeyCode::Enter => {
+                    // Enter moves to the next field, and saves on the last.
+                    if index < 2 {
+                        self.access.selected += 1;
+                        self.access.password_field = index + 1;
+                    } else {
+                        self.activate(Control::AccessPasswordSave);
+                    }
                     return;
                 }
                 _ => {}

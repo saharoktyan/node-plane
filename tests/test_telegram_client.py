@@ -1225,7 +1225,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         sound = sections[1].rows[0][0]
         self.assertEqual(sound.text, 'Enable')
         self.assertEqual(user.actions[sound.callback_data[2:]].args, ('false',))
-        self.assertEqual(len(sections), 4)
+        self.assertEqual(len(sections), 5)
         self.assertEqual(sections[2].title, 'Service notifications')
         self.assertEqual(sections[3].title, 'Login')
 

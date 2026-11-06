@@ -323,6 +323,7 @@ class BackendBackupsTests(unittest.TestCase):
         # Older formats had no role assignments.
         raw['tables'].pop('backend_role_assignments', None)
         raw['tables'].pop('backend_logins', None)
+        raw['tables'].pop('backend_passwords', None)
         raw['format'] = 'node-plane-backend-v6'
         raw['checksum'] = hashlib.sha256(encoded(raw['tables'])).hexdigest()
         path.write_bytes(encoded(raw))
@@ -352,6 +353,7 @@ class BackendBackupsTests(unittest.TestCase):
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
         payload['tables'].pop('backend_logins', None)
+        payload['tables'].pop('backend_passwords', None)
         payload['format'] = 'node-plane-backend-v2'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -381,6 +383,7 @@ class BackendBackupsTests(unittest.TestCase):
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
         payload['tables'].pop('backend_logins', None)
+        payload['tables'].pop('backend_passwords', None)
         payload['format'] = 'node-plane-backend-v4'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))
@@ -401,6 +404,7 @@ class BackendBackupsTests(unittest.TestCase):
         # Older formats had no role assignments.
         payload['tables'].pop('backend_role_assignments', None)
         payload['tables'].pop('backend_logins', None)
+        payload['tables'].pop('backend_passwords', None)
         payload['format'] = 'node-plane-backend-v1'
         del payload['tables']['backend_devices']
         from backend.grant_policies import TABLE_COLUMNS

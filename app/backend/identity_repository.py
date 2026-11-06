@@ -63,6 +63,8 @@ class SQLIdentityRepository:
             upgrade(conn)
             from db.migration_revisions.r0040_logins import upgrade
             upgrade(conn)
+            from db.migration_revisions.r0041_sessions import create_schema as sessions_schema
+            sessions_schema(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()

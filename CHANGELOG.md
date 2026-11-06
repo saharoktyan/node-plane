@@ -31,6 +31,20 @@
   username as a suggestion, and administrators change any login with
   `PATCH /api/v1/accounts/{id}`. In the bot: Settings → Login and the account
   card; in Workstation: Login on the account card.
+- Passwords and sessions (migration r0041): `PUT /api/v1/me/password` sets
+  the account's password (argon2id; a change needs the current one and ends
+  the other sessions), but not through the Telegram adapter, since secrets
+  do not travel through Telegram. `POST /api/v1/sessions` signs in with the
+  login and password and gives a 15-minute access token and a refresh token;
+  `POST /api/v1/sessions/refresh` replaces both, and a refresh token used a
+  second time ends its session. Failed sign-ins are limited per login and
+  per client address (behind the relay, the address the relay saw). Members
+  list and end their sessions with `/api/v1/me/sessions`; administrators see
+  whether an account has a password and how many sessions, and end them
+  with `DELETE /api/v1/accounts/{id}/sessions`. Backups keep passwords; a
+  restore ends every session. In the bot: Settings → Password and sessions
+  and the account card; in Workstation: Password on the own account card
+  and End sessions on any.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

@@ -125,6 +125,12 @@ An account can have a login: the name it will sign in to the web cabinet with. A
 
 A member sets their login in the bot's **Settings → Login**; the bot offers their Telegram username when it fits and is free. A member can change it once in 30 days, and the old login stays reserved for them for 30 days. Administrators change any account's login at any time: on the account card in the bot, or with **Login** on the account card in Workstation's **Accounts**. Deleting an account frees its login after 30 days.
 
+## Password and sessions
+
+With a login, an account can have a password for the web cabinet. A password is never entered in Telegram: an administrator sets their own with **Password** on their account card in Workstation's **Accounts**, and members will set theirs in the web cabinet. A password is 10–256 characters and differs from the login; changing it needs the current one and signs the account out everywhere else.
+
+Each device signed in with a password is a session. A session lasts 30 days from its last use. Repeated wrong passwords pause signing in to that login, or from that address, for 15 minutes. In the bot, **Settings → Password and sessions** shows whether a password is set and lists the sessions, each with its own **End** and **Sign out everywhere** for all of them. Administrators see on the account card, in the bot and in Workstation, whether an account has a password and how many sessions it has, and **End sessions** signs it out on every device. Restoring a backup ends every session; passwords are kept.
+
 ## Delete an account
 
 **Delete account** removes the account, its VPN profile and devices. After deletion, submitting a new request alone does not recreate an account; a subsequent approval or explicit administrator provisioning creates a fresh account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.

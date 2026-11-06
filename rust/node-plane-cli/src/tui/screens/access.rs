@@ -1064,6 +1064,17 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
             }
         }
+        if app.access.tab == Tab::Accounts && card["has_password"].is_boolean() {
+            lines.push(Line::from(format!(
+                "Password: {} · Sessions: {}",
+                if card["has_password"] == true {
+                    "set"
+                } else {
+                    "not set"
+                },
+                card["sessions"].as_u64().unwrap_or(0)
+            )));
+        }
         if app.access.tab == Tab::Profiles {
             if card["deleting"] == true {
                 let status = card["operation"]["status"]
@@ -1127,6 +1138,34 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 ("Save", Control::AccessLoginSave),
                 ("Cancel", Control::AccessBack),
             ];
+        } else if let Some(fields) = &app.access.password_input {
+            lines.push(Line::from(
+                "Password: 10–256 characters, not the same as the login. Changing it ends the account's other sessions.",
+            ));
+            let titles = ["Current password", "New password", "Repeat it"];
+            let first = usize::from(card["has_password"] != true);
+            for (index, field) in fields.iter().enumerate().skip(first) {
+                let cursor = if app.access.password_field == index {
+                    "▏"
+                } else {
+                    ""
+                };
+                lines.push(Line::from(format!(
+                    "{}: {}{cursor}",
+                    titles[index],
+                    "•".repeat(field.chars().count())
+                )));
+            }
+            buttons = (first..3)
+                .map(|index| {
+                    (
+                        ["Type current", "Type new", "Type again"][index],
+                        Control::AccessPasswordField(index),
+                    )
+                })
+                .collect();
+            buttons.push(("Save", Control::AccessPasswordSave));
+            buttons.push(("Cancel", Control::AccessBack));
         } else if app.access.role_picker {
             lines.push(Line::from("Choose the role of this account:"));
             buttons = vec![
@@ -1159,6 +1198,13 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 buttons.push(("Role", Control::AccessRole(None)));
                 if app.access.tab == Tab::Accounts {
                     buttons.push(("Login", Control::AccessLogin));
+                    // Only the own password is set here, never through Telegram.
+                    if app.own_account() == account["id"].as_str() {
+                        buttons.push(("Password", Control::AccessPassword));
+                    }
+                    if account["sessions"].as_u64().unwrap_or(0) > 0 {
+                        buttons.push(("End sessions", Control::AccessEndSessions));
+                    }
                 }
                 if account["role"] != "admin" {
                     buttons.push((

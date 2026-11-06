@@ -1388,6 +1388,8 @@ async def show_member_settings(chat_id: int, user_id: int, message_id: int,
                 for mode in ('on', 'silent', 'off')),)))
         from .account_login import settings_section as login_section
         sections.append(login_section(locale, user_id, current))
+        from .account_sessions import settings_section as sessions_section
+        sections.append(sessions_section(locale, user_id, current))
     await render(bot, chat_id, Screen(tr(locale, 'settings.title'),
         sections=tuple(sections), embedded_buttons=True, navigation=True),
         [[button(user_id, tr(locale, 'back'), 'home')]], state, message_id)

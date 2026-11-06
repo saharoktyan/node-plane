@@ -316,6 +316,10 @@ impl App {
             | Control::AccessLogin
             | Control::AccessLoginInput
             | Control::AccessLoginSave
+            | Control::AccessPassword
+            | Control::AccessPasswordField(..)
+            | Control::AccessPasswordSave
+            | Control::AccessEndSessions
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)
             | Control::AccessProfileConfirm

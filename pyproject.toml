@@ -13,7 +13,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-backend = ["fastapi==0.141.1", "uvicorn==0.54.0"]
+backend = [
+    "argon2-cffi==25.1.0",
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+]
 telegram = ["aiogram==3.31.0"]
 dev = ["grpcio-tools==1.74.0", "httpx==0.28.1", "uv==0.13.6"]
 

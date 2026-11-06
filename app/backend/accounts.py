@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from uuid import UUID
 
 from .authorization import AccessDenied, require_permission
@@ -51,6 +52,9 @@ class AccountService:
                 result[key] = bool(row[key]) if key == 'locale_selected' else row[key]
         if 'profile_id' in row.keys():
             result['profile_id'] = row['profile_id']
+        if 'has_password' in row.keys():
+            result['has_password'] = bool(row['has_password'])
+            result['sessions'] = row['sessions']
         if 'roles' in row.keys():
             result['roles'] = row['roles']
         result['deleted'] = bool(row['deleted']) if 'deleted' in row.keys() else False
@@ -61,11 +65,14 @@ class AccountService:
         row = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
             i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
             d.language_code, a.locale, a.locale_selected, (SELECT l.login FROM backend_logins l WHERE l.account_id = a.id AND l.released_at IS NULL) AS login,
+            EXISTS (SELECT 1 FROM backend_passwords w WHERE w.account_id = a.id) AS has_password,
+            (SELECT COUNT(*) FROM backend_sessions s WHERE s.account_id = a.id AND s.revoked_at IS NULL
+                AND s.expires_at > ?) AS sessions,
             (SELECT p.id FROM backend_profiles p WHERE p.owner_account_id=a.id ORDER BY p.id LIMIT 1) AS profile_id
             FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
             LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
-            WHERE a.id = ?''', (account_id,)).fetchone()
+            WHERE a.id = ?''', (datetime.now(timezone.utc).isoformat(), account_id)).fetchone()
         if row is None:
             return None
         result = dict(row)
@@ -86,6 +93,16 @@ class AccountService:
         if row is None:
             raise AccessDenied('resource_not_found', 404)
         return self.public(row)
+
+    def end_sessions(self, actor, account_id):
+        """Signs the account out on every device."""
+        require_permission(actor, 'accounts.manage')
+        from .sessions import revoke_all
+        with self.db.transaction() as conn:
+            if conn.execute('SELECT 1 FROM backend_accounts WHERE id=?', (account_id,)).fetchone() is None:
+                raise AccessDenied('resource_not_found', 404)
+            revoke_all(conn, account_id)
+        return self.get(actor, account_id)
 
     def list(self, actor, *, limit=25, cursor=None):
         require_permission(actor, 'accounts.manage')

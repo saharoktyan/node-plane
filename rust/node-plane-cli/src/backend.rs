@@ -574,6 +574,7 @@ fn transport_error() -> ApiError {
 fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
     let resource = path.split('?').next().unwrap_or_default();
     if (resource == "/api/v1/me"
+        || resource == "/api/v1/me/password"
         || path.starts_with("/api/v1/system/")
         || resource == "/api/v1/regions"
         || resource == "/api/v1/accounts"

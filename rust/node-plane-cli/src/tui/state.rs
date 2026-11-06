@@ -270,6 +270,12 @@ pub(super) enum Control {
     AccessLogin,
     AccessLoginInput,
     AccessLoginSave,
+    /// The own account's password: open the fields, one field, save it.
+    AccessPassword,
+    AccessPasswordField(usize),
+    AccessPasswordSave,
+    /// Sign the open account out on every device.
+    AccessEndSessions,
     AccessAccountConfirm,
     AccessDeviceItem(usize),
     AccessDeviceNew,

@@ -49,6 +49,16 @@ pub enum Command {
         body: Value,
         key: Uuid,
     },
+    /// Signs the account out on every device.
+    EndSessions {
+        id: String,
+        key: Uuid,
+    },
+    /// Sets or changes the password of the Workstation's own account.
+    SetPassword {
+        body: Value,
+        key: Uuid,
+    },
     ProfileProgress(String),
     Devices(String),
     DeviceMutate {
@@ -109,6 +119,18 @@ impl Command {
             Self::AccountMutate { id, body, key, .. } => (
                 hyper::Method::PATCH,
                 format!("/api/v1/accounts/{id}"),
+                Some(body.clone()),
+                Some(*key),
+            ),
+            Self::EndSessions { id, key } => (
+                hyper::Method::DELETE,
+                format!("/api/v1/accounts/{id}/sessions"),
+                None,
+                Some(*key),
+            ),
+            Self::SetPassword { body, key } => (
+                hyper::Method::PUT,
+                "/api/v1/me/password".into(),
                 Some(body.clone()),
                 Some(*key),
             ),
@@ -699,6 +721,10 @@ pub struct Browser {
     pub role_picker: bool,
     /// The open account's login being typed.
     pub login_input: Option<String>,
+    /// The own account's password being typed: current, new and repeated.
+    pub password_input: Option<[String; 3]>,
+    /// Which of the password fields takes typing.
+    pub password_field: usize,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -876,7 +902,26 @@ impl Browser {
                     };
                 }
             }
-            Command::AccountMutate { body, .. } => {
+            Command::SetPassword { .. } => {
+                self.password_input = None;
+                if let Some(card) = &mut self.card {
+                    let account = if card.get("_account").is_some() {
+                        &mut card["_account"]
+                    } else {
+                        card
+                    };
+                    account["has_password"] = true.into();
+                }
+                self.result = Some("Password saved.".into());
+            }
+            command @ (Command::AccountMutate { .. } | Command::EndSessions { .. }) => {
+                let body = match &command {
+                    Command::AccountMutate { body, .. } => body.clone(),
+                    _ => {
+                        self.result = Some("The account was signed out on every device.".into());
+                        Value::Null
+                    }
+                };
                 if body["login"].is_string() {
                     self.login_input = None;
                     self.result = Some("Login changed.".into());
@@ -1096,6 +1141,19 @@ pub fn login_error(error: &str) -> String {
         "The account changed. Refresh it and try again."
     } else {
         "The login was not changed. Refresh the account and try again."
+    }
+    .into()
+}
+
+pub fn password_error(error: &str) -> String {
+    if error.contains("password_invalid") {
+        "Use 10–256 characters, not the same as the login."
+    } else if error.contains("password_incorrect") {
+        "The current password is wrong."
+    } else if error.contains("password_mismatch") {
+        "The new password and its repetition differ."
+    } else {
+        "The password was not changed."
     }
     .into()
 }

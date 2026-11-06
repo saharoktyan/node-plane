@@ -496,6 +496,12 @@ impl App {
                         return;
                     }
 
+                    if self.access.password_input.is_some() && !error.is_empty() {
+                        // The fields stay open; what was typed is not shown anyway.
+                        self.error = crate::access::password_error(&error);
+                        return;
+                    }
+
                     if self.access.login_input.is_some() && !error.is_empty() {
                         // The input stays open with what was typed.
                         self.error = crate::access::login_error(&error);

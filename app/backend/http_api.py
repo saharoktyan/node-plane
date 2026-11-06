@@ -100,10 +100,14 @@ class MeOutput(AccountOutput):
     login_change_available_at: str | None = None
     # The Telegram username as a login, offered while the account has none.
     login_suggestion: str | None = None
+    has_password: bool = False
 
 
 class AdminAccountOutput(AccountOutput):
     deleted: bool = False
+    has_password: bool = False
+    # Sessions the account is signed in with now.
+    sessions: int = 0
     profile_id: str | None = None
     revision: int
     telegram_user_id: int | None
@@ -140,6 +144,48 @@ class AccountEditInput(BaseModel):
 class LoginInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     login: StrictStr = Field(max_length=32)
+
+
+class PasswordInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    password: StrictStr = Field(max_length=256)
+    # Needed to change a password the account already has.
+    current_password: StrictStr | None = Field(default=None, max_length=256)
+
+
+class SignInInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    login: StrictStr = Field(max_length=64)
+    password: StrictStr = Field(max_length=256)
+    # A name for the session, such as the browser and system.
+    device: StrictStr | None = Field(default=None, max_length=256)
+
+
+class RefreshInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    refresh_token: StrictStr = Field(max_length=128)
+
+
+class SessionTokens(BaseModel):
+    session_id: str
+    access_token: str
+    access_expires_at: str
+    refresh_token: str
+    refresh_expires_at: str
+
+
+class SessionOutput(BaseModel):
+    id: str
+    method: str
+    device: str
+    created_at: str
+    used_at: str
+    expires_at: str
+    current: bool
+
+
+class SessionPage(BaseModel):
+    items: list[SessionOutput]
 
 
 class AccountPreferencesInput(BaseModel):
@@ -1417,8 +1463,71 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def own_login(conn, account_id, username):
         from . import logins
         value = logins.current(conn, account_id)
+        from .sessions import has_password
         return {'login': value, 'login_change_available_at': logins.change_available_at(conn, account_id),
-                'login_suggestion': None if value else logins.suggestion(conn, account_id, username)}
+                'login_suggestion': None if value else logins.suggestion(conn, account_id, username),
+                'has_password': has_password(conn, account_id)}
+
+    def client_source(request):
+        """The client's address: as the relay saw it when the request came through it."""
+        from .relay_policy import through_relay
+        if through_relay(request.headers):
+            return header(request, 'X-Node-Plane-Client') or 'relay'
+        return request.client.host if request.client else 'unknown'
+
+    @app.post('/api/v1/sessions', response_model=SessionTokens, status_code=201)
+    def sign_in(body: SignInInput, request: Request):
+        """Sign in with a login and password; the reply never says which was wrong."""
+        from . import sessions
+        return sessions.sign_in(db, body.login, body.password,
+                                device=body.device or header(request, 'User-Agent'), source=client_source(request))
+
+    @app.post('/api/v1/sessions/refresh', response_model=SessionTokens)
+    def refresh_session(body: RefreshInput):
+        from . import sessions
+        return sessions.refresh(db, body.refresh_token)
+
+    @app.get('/api/v1/me/sessions', response_model=SessionPage)
+    def my_sessions(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import sessions
+        with db.connect() as conn:
+            return {'items': sessions.listed(conn, current.account.id, sessions.current(conn, current.principal.id))}
+
+    @app.delete('/api/v1/me/sessions/{session_id}', status_code=204)
+    def end_my_session(session_id: str, current=Depends(actor)):
+        """End one session; `current` is the one this request comes from."""
+        require_permission(current, 'account.self.preferences.write')
+        from . import sessions
+        with db.transaction() as conn:
+            if session_id == 'current':
+                session_id = sessions.current(conn, current.principal.id)
+                if session_id is None:
+                    raise AccessDenied('resource_not_found', 404)
+            sessions.revoke(conn, current.account.id, session_id)
+        return Response(status_code=204)
+
+    @app.delete('/api/v1/me/sessions', status_code=204)
+    def end_my_other_sessions(current=Depends(actor)):
+        """Sign out everywhere else; the session of this request stays."""
+        require_permission(current, 'account.self.preferences.write')
+        from . import sessions
+        with db.transaction() as conn:
+            sessions.revoke_all(conn, current.account.id, keep=sessions.current(conn, current.principal.id))
+        return Response(status_code=204)
+
+    @app.put('/api/v1/me/password', response_model=MeOutput)
+    def set_my_password(body: PasswordInput, current=Depends(actor)):
+        """Set or change the account's password; a change ends its other sessions."""
+        require_permission(current, 'account.self.preferences.write')
+        if current.principal.kind == PrincipalKind.ADAPTER:
+            # Secrets do not travel through Telegram.
+            raise AccessDenied('password_not_through_adapter', 403)
+        from . import sessions
+        with db.transaction() as conn:
+            sessions.set_password(conn, current.account.id, body.password, current=body.current_password,
+                                  keep_session=sessions.current(conn, current.principal.id))
+        return me(current)
 
     @app.put('/api/v1/me/login', response_model=MeOutput)
     def set_my_login(body: LoginInput, current=Depends(actor)):
@@ -2263,6 +2372,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         result = accounts.get(current, str(account_id))
         response.headers['ETag'] = '"' + str(result['revision']) + '"'
         return result
+
+    @app.delete('/api/v1/accounts/{account_id}/sessions', response_model=AdminAccountOutput)
+    def end_account_sessions(account_id: UUID, current=Depends(actor)):
+        """Sign the account out on every device."""
+        return accounts.end_sessions(current, str(account_id))
 
     @app.patch('/api/v1/accounts/{account_id}', response_model=AdminAccountOutput)
     def update_account(account_id: UUID, body: AccountEditInput, request: Request, response: Response,

@@ -339,16 +339,18 @@ async def account_cb(query: CallbackQuery, callback_data: AccountCallback,
 
 async def show_account(chat_id, user_id, message_id, account_id, bot, backend, state):
     from .account_login import card_lines, card_row
+    from . import account_sessions
     await state.set_state(None)
     account = await backend.request('GET', f'/api/v1/accounts/{account_id}', telegram_user_id=user_id)
     locale = await _locale(state)
     rows = [[InlineKeyboardButton(text=tr(locale, 'accounts.open_profile'),
         callback_data=NewProfileCallback(account_id=account['id']).pack(), style='primary')],
         card_row(locale, account),
+        *account_sessions.card_rows(locale, account),
         [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=AccountsCallback().pack())]]
     await render(bot, chat_id,
         Screen(tr(locale, 'accounts.card', name=account.get('login') or account.get('telegram_user_id') or account['id'][:8]),
-               (*card_lines(locale, account),
+               (*card_lines(locale, account), *account_sessions.card_lines(locale, account),
                 tr(locale, 'account.status', status=tr(locale, f"status.{account['status']}")),
                 tr(locale, 'accounts.role', role=tr(locale, f"role.{account['role']}"))), embedded_buttons=True, navigation=True),
         rows, state, message_id)

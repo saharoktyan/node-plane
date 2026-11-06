@@ -33,7 +33,7 @@ LEGACY_ACCESS_SCOPES = LEGACY_NODE_SCOPES | {'accounts.manage', 'profiles.manage
 LEGACY_PROFILE_SCOPES = LEGACY_ACCESS_SCOPES | {'profiles.self.read'}
 LEGACY_OBSERVATION_SCOPES = LEGACY_PROFILE_SCOPES | {'account.self.read', 'access_requests.self.read'}
 LEGACY_OPERATION_SCOPES = LEGACY_OBSERVATION_SCOPES | {'operations.read'}
-SCOPES = LEGACY_OPERATION_SCOPES | {'nodes.execute', 'roles.manage'}
+SCOPES = LEGACY_OPERATION_SCOPES | {'nodes.execute', 'roles.manage', 'account.self.preferences.write'}
 LIFETIME = timedelta(hours=1)
 MAX_REQUEST_BYTES = 16_384
 MAX_SESSION_BYTES = 16_384

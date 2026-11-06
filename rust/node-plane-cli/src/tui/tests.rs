@@ -9612,6 +9612,68 @@ fn an_administrator_changes_an_accounts_login_on_its_card() {
 }
 
 #[test]
+fn the_own_account_sets_its_password_and_any_account_is_signed_out() {
+    let mut app = test_profile_app();
+    app.connections.installations[0].account = "me".into();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Accounts;
+    app.access.card = Some(serde_json::json!(
+        {"id":"other", "role":"member", "status":"approved", "revision":7, "has_password":true, "sessions":2}
+    ));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let controls = app.access_controls();
+    // Another account's password is never set here; its sessions can be ended.
+    assert!(!controls.contains(&Control::AccessPassword));
+    app.activate(Control::AccessEndSessions);
+    let Some(crate::nodes::Command::Access(crate::access::Command::EndSessions { id, .. })) =
+        app.nodes_requested.take()
+    else {
+        panic!("the sessions are ended");
+    };
+    assert_eq!(id, "other");
+    app.access.card = Some(serde_json::json!(
+        {"id":"me", "role":"admin", "status":"approved", "revision":3, "has_password":false, "sessions":0}
+    ));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let controls = app.access_controls();
+    assert!(controls.contains(&Control::AccessPassword));
+    assert!(!controls.contains(&Control::AccessEndSessions));
+    app.activate(Control::AccessPassword);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    // Without a password yet, no current one is asked for.
+    assert!(
+        !app.access_controls()
+            .contains(&Control::AccessPasswordField(0))
+    );
+    app.activate(Control::AccessPasswordField(1));
+    for c in "secret pass".chars() {
+        app.access_key(KeyCode::Char(c).into());
+    }
+    app.access_key(KeyCode::Enter.into());
+    for c in "secret pasz".chars() {
+        app.access_key(KeyCode::Char(c).into());
+    }
+    app.access_key(KeyCode::Enter.into());
+    assert!(app.error.contains("differ"));
+    assert!(app.nodes_requested.is_none());
+    app.access_key(KeyCode::Backspace.into());
+    app.access_key(KeyCode::Char('s').into());
+    app.access_key(KeyCode::Enter.into());
+    let Some(crate::nodes::Command::Access(crate::access::Command::SetPassword { body, .. })) =
+        app.nodes_requested.take()
+    else {
+        panic!("the password is saved");
+    };
+    assert_eq!(body, serde_json::json!({"password":"secret pass"}));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!format!("{:?}", terminal.backend().buffer()).contains("secret"));
+    assert!(crate::access::password_error("{\"code\":\"password_incorrect\"}").contains("wrong"));
+    app.activate(Control::AccessBack);
+    assert!(app.access.password_input.is_none());
+}
+
+#[test]
 fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
     use crate::controller::Command;
     let mut app = test_profile_app();
