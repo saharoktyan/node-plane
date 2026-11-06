@@ -96,22 +96,13 @@ class PasskeyTests(unittest.TestCase):
         return passkeys.sign_in(self.db, started['challenge_id'], device.get(started['options'], **kwargs),
                                 device='Phone', source='10.0.0.1', now=now)
 
-    def test_relying_party_is_the_relays_public_origin(self):
-        class Conn:
-            def __init__(self, row):
-                self.row = row
-
-            def execute(self, *args):
-                return self
-
-            def fetchone(self):
-                return self.row
+    def test_relying_party_is_the_cabinets_public_origin(self):
         relying_party = RELYING_PARTY
-        for row, origin in (({'domain': 'cab.example', 'port': 443, 'tls': 'acme'}, 'https://cab.example'),
-                            ({'domain': 'cab.example', 'port': 8443, 'tls': 'files'}, 'https://cab.example:8443'),
-                            ({'domain': 'cab.example', 'port': 8080, 'tls': 'proxy'}, 'https://cab.example')):
-            self.assertEqual(relying_party(Conn(row)), ('cab.example', origin))
-        self.assertEqual(self.code(relying_party, Conn(None)), 'passkeys_unavailable')
+        for address, host in (('https://cab.example', 'cab.example'), ('https://cab.example:8443', 'cab.example')):
+            with patch('backend.web_cabinet.origin', return_value=address):
+                self.assertEqual(relying_party(None), (host, address))
+        with patch('backend.web_cabinet.origin', return_value=None):
+            self.assertEqual(self.code(relying_party, None), 'passkeys_unavailable')
 
     def test_register_and_sign_in_without_a_login(self):
         account_id = self.account()

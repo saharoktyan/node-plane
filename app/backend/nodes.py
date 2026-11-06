@@ -210,6 +210,8 @@ class NodeService:
             backfill(conn)
             from db.migration_revisions.r0038_relays import create_schema as create_relay_schema
             create_relay_schema(conn)
+            from db.migration_revisions.r0050_web_cabinet import create_schema as create_cabinet_schema
+            create_cabinet_schema(conn)
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,

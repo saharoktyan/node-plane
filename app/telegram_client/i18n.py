@@ -4163,7 +4163,8 @@ CATALOG['en'].update({
     'services.kind_hint.system': 'What the installation itself runs.',
     'services.kind_hint.builtin': 'Part of Node Plane; people get access to them.',
     'services.kind_hint.user': 'Added from manifests.',
-    'services.name.vpn': 'VPN', 'services.name.relay': 'Relay', 'services.name.telegram_bot': 'Telegram bot',
+    'services.name.vpn': 'VPN', 'services.name.relay': 'Relay', 'services.name.web_cabinet': 'Web cabinet',
+    'services.name.telegram_bot': 'Telegram bot',
     'services.state.off': 'off', 'services.state.active': 'on', 'services.state.changes_pending': 'applying',
     'services.state.failed': 'failed', 'services.state.removing': 'removing',
 })
@@ -4259,7 +4260,8 @@ CATALOG['ru'].update({
     'services.kind_hint.system': 'То, что работает для самой установки.',
     'services.kind_hint.builtin': 'Часть Node Plane; к ним люди получают доступ.',
     'services.kind_hint.user': 'Добавлены из манифестов.',
-    'services.name.vpn': 'VPN', 'services.name.relay': 'Relay', 'services.name.telegram_bot': 'Telegram-бот',
+    'services.name.vpn': 'VPN', 'services.name.relay': 'Relay', 'services.name.web_cabinet': 'Веб-кабинет',
+    'services.name.telegram_bot': 'Telegram-бот',
     'services.state.off': 'выключен', 'services.state.active': 'работает', 'services.state.changes_pending': 'применяется',
     'services.state.failed': 'ошибка', 'services.state.removing': 'удаляется',
 })

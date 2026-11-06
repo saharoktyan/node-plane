@@ -13,6 +13,14 @@
   `cabinet/` (it reaches the nodes from the controller and updates with it),
   and `node-plane-cabinet.tar.gz` holds the same files on their own. Building
   a release needs npm.
+- The web cabinet is a system service of its own (migration r0050), apart
+  from the relay: served by the relay's node on its domain, or by the
+  controller's own server on an address of the controller with the address
+  people open it at. `GET/PUT/DELETE /api/v1/web-cabinet` (owners and
+  administrators, not through the relay); the worker applies it and applies
+  the files again after a controller update. The cabinet's address is now
+  the passkeys' domain and where invite links lead; the relay stays while
+  the cabinet is served beside it.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

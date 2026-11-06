@@ -73,8 +73,9 @@ CLEAR = (
     "backend_account_channels",
     # Rebuilt from the restored nodes.
     "backend_agent_installations",
-    # The relay is set up again after a restore; it needs its instance.
+    # The relay and the web cabinet are set up again after a restore.
     "backend_relays",
+    "backend_web_cabinet",
     "backend_service_instances",
     # Rebuilt from the restored VPN profiles.
     "backend_service_profiles",

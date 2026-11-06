@@ -17,6 +17,7 @@ pub fn name(service: &str) -> &str {
     match service {
         "vpn" => "VPN",
         "relay" => "Relay",
+        "web_cabinet" => "Web cabinet",
         "telegram_bot" => "Telegram bot",
         other => other,
     }

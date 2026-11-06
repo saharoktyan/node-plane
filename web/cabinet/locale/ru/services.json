@@ -12,6 +12,7 @@
   "status_suspended": "Приостановлен: квота исчерпана",
   "name_vpn": "VPN",
   "name_relay": "Relay",
+  "name_web_cabinet": "Веб-кабинет",
   "name_telegram_bot": "Telegram-бот",
   "name_xray": "Xray",
   "name_awg": "AmneziaWG"

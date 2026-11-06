@@ -66,7 +66,8 @@ class ServiceCatalogTests(unittest.TestCase):
     def test_staff_see_system_services_and_instances(self):
         items = {item['service']: item for item in
                  self.client.get('/api/v1/services', headers=self.admin_headers()).json()['items']}
-        self.assertEqual(set(items), {'vpn', 'relay', 'telegram_bot'})
+        self.assertEqual(set(items), {'vpn', 'relay', 'web_cabinet', 'telegram_bot'})
+        self.assertEqual((items['web_cabinet']['kind'], items['web_cabinet']['state']), ('system', 'off'))
         self.assertEqual((items['vpn']['access'], items['vpn']['instances']), ('active', 0))
         self.assertEqual((items['relay']['kind'], items['relay']['state'], items['relay']['instances']),
                          ('system', 'off', 0))

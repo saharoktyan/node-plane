@@ -1203,6 +1203,40 @@ class RelayInput(BaseModel):
     key_path: str | None = Field(default=None, max_length=256)
 
 
+class WebCabinetInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mode: Literal['relay', 'local']
+    # The controller's own server: the address it listens on (`host:port`)
+    # and the address people open it at.
+    listen: str | None = Field(default=None, max_length=64)
+    public_url: str | None = Field(default=None, max_length=300)
+
+
+class WebCabinetOutput(BaseModel):
+    mode: Literal['relay', 'local']
+    node_key: str | None = None
+    listen: str | None = None
+    # Where people open the cabinet: the relay's address or `public_url`.
+    url: str | None = None
+    public_url: str | None = None
+    status: Literal['applying', 'active', 'failed', 'removing']
+    state: str
+    revision: int
+    applied_revision: int | None = None
+    # The release the served files came from, and the controller's own.
+    applied_version: str | None = None
+    version: str
+    error_code: str | None = None
+    updated_at: str
+
+
+class WebCabinetEnvelope(BaseModel):
+    cabinet: WebCabinetOutput | None = None
+    # Whether this controller release carries the cabinet's files.
+    available: bool = False
+    relay_node_key: str | None = None
+
+
 class RelayLinkOutput(BaseModel):
     agent_reachable: bool
     running: bool
@@ -2834,6 +2868,24 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def remove_relay(current=Depends(actor)):
         from .relays import RelayService
         return RelayService(db).remove(current)
+
+    @app.get('/api/v1/web-cabinet', response_model=WebCabinetEnvelope)
+    def get_web_cabinet(current=Depends(actor)):
+        """Where the web cabinet is served from, and how far that is applied."""
+        from .web_cabinet import WebCabinetService
+        return WebCabinetService(db).get(current)
+
+    @app.put('/api/v1/web-cabinet', response_model=WebCabinetEnvelope, status_code=202)
+    def configure_web_cabinet(body: WebCabinetInput, current=Depends(actor)):
+        """Serve the cabinet from the relay's node or from the controller; the
+        worker applies it."""
+        from .web_cabinet import WebCabinetService
+        return WebCabinetService(db).configure(current, body.mode, listen=body.listen, public_url=body.public_url)
+
+    @app.delete('/api/v1/web-cabinet', response_model=WebCabinetEnvelope, status_code=202)
+    def remove_web_cabinet(current=Depends(actor)):
+        from .web_cabinet import WebCabinetService
+        return WebCabinetService(db).remove(current)
 
     @app.get('/api/v1/node-bootstraps/{identity}')
     def get_node_bootstrap(identity: UUID, current=Depends(actor)):

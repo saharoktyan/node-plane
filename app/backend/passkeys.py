@@ -37,15 +37,13 @@ def _now():
 
 
 def relying_party(conn):
-    """The cabinet's domain and origin, from the relay's settings."""
-    row = conn.execute("SELECT domain, port, tls FROM backend_relays WHERE status != 'removing' "
-                       'ORDER BY created_at LIMIT 1').fetchone()
-    if row is None:
+    """The cabinet's domain and origin, from its public address."""
+    from urllib.parse import urlsplit
+    from .web_cabinet import origin
+    address = origin(conn)
+    if address is None:
         raise AccessDenied('passkeys_unavailable', 409)
-    # Behind a reverse proxy the relay's own port is not the public one.
-    public_port = 443 if row['tls'] == 'proxy' else int(row['port'])
-    origin = f"https://{row['domain']}" + ('' if public_port == 443 else f':{public_port}')
-    return row['domain'], origin
+    return urlsplit(address).hostname, address
 
 
 def _challenge(conn, kind, account_id, now):

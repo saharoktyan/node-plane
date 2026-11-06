@@ -3230,6 +3230,32 @@ export interface paths {
         patch: operations["update_installation_vpn_policies_api_v1_vpn_policies_installation_patch"];
         trace?: never;
     };
+    "/api/v1/web-cabinet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Web Cabinet
+         * @description Where the web cabinet is served from, and how far that is applied.
+         */
+        get: operations["get_web_cabinet_api_v1_web_cabinet_get"];
+        /**
+         * Configure Web Cabinet
+         * @description Serve the cabinet from the relay's node or from the controller; the
+         *     worker applies it.
+         */
+        put: operations["configure_web_cabinet_api_v1_web_cabinet_put"];
+        post?: never;
+        /** Remove Web Cabinet */
+        delete: operations["remove_web_cabinet_api_v1_web_cabinet_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -5888,6 +5914,64 @@ export interface components {
             options: {
                 [key: string]: unknown;
             };
+        };
+        /** WebCabinetEnvelope */
+        WebCabinetEnvelope: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            cabinet?: components["schemas"]["WebCabinetOutput"] | null;
+            /** Relay Node Key */
+            relay_node_key?: string | null;
+        };
+        /** WebCabinetInput */
+        WebCabinetInput: {
+            /** Listen */
+            listen?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "relay" | "local";
+            /** Public Url */
+            public_url?: string | null;
+        };
+        /** WebCabinetOutput */
+        WebCabinetOutput: {
+            /** Applied Revision */
+            applied_revision?: number | null;
+            /** Applied Version */
+            applied_version?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Listen */
+            listen?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "relay" | "local";
+            /** Node Key */
+            node_key?: string | null;
+            /** Public Url */
+            public_url?: string | null;
+            /** Revision */
+            revision: number;
+            /** State */
+            state: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "applying" | "active" | "failed" | "removing";
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url?: string | null;
+            /** Version */
+            version: string;
         };
         /** WorkstationAuditItemOutput */
         WorkstationAuditItemOutput: {
@@ -13090,6 +13174,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_web_cabinet_api_v1_web_cabinet_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebCabinetEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configure_web_cabinet_api_v1_web_cabinet_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebCabinetInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebCabinetEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_web_cabinet_api_v1_web_cabinet_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebCabinetEnvelope"];
                 };
             };
             /** @description Validation Error */

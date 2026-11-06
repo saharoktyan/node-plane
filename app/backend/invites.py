@@ -105,7 +105,7 @@ def telegram_link(conn, token):
 
 
 def cabinet_link(conn, token):
-    """The link into the web cabinet, when there is a relay. The token is in
+    """The link into the web cabinet, when it is set up. The token is in
     the fragment, so it reaches no server log."""
     from .passkeys import relying_party
     try:

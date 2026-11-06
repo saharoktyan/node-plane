@@ -1,7 +1,7 @@
 """The installation's services in one shape for every client.
 
 A service is of one of three kinds: `system` (what the installation itself
-runs: the web cabinet's relay and the Telegram bot; staff only), `builtin`
+runs: the relay, the web cabinet and the Telegram bot; staff only), `builtin`
 (VPN: its own code inside, the common shape outside) and `user` (from a
 manifest, stage I). Clients list services and an account's service profiles
 by this shape; a type's own screens come from the client's module for it,
@@ -10,13 +10,13 @@ or from the generic one that renders what the type declares.
 from datetime import datetime, timezone
 
 from . import localized
-from .authorization import RELAY_PERMISSION, AccessDenied, require_permission, service_permission
+from .authorization import CABINET_PERMISSION, RELAY_PERMISSION, AccessDenied, require_permission, service_permission
 from .service_instances import RELAY_STATES, TYPES as VPN_ENGINES
 
 # Services people hold profiles of, with the instance types that serve them.
 BUILTIN = {'vpn': VPN_ENGINES}
 # System services and the permission that sees them.
-SYSTEM = {'relay': RELAY_PERMISSION, 'telegram_bot': 'settings.manage'}
+SYSTEM = {'relay': RELAY_PERMISSION, 'web_cabinet': CABINET_PERMISSION, 'telegram_bot': 'settings.manage'}
 
 
 def _may(actor, permission):
@@ -49,6 +49,10 @@ def _system_state(conn, service):
     if service == 'relay':
         row = conn.execute('SELECT status FROM backend_relays LIMIT 1').fetchone()
         return RELAY_STATES[row['status']] if row else 'off'
+    if service == 'web_cabinet':
+        from .web_cabinet import STATES
+        row = conn.execute('SELECT status FROM backend_web_cabinet WHERE id=1').fetchone()
+        return STATES[row['status']] if row else 'off'
     from .account_channels import enabled
     return 'active' if 'telegram' in enabled(conn) else 'off'
 

@@ -18,7 +18,7 @@ CLOSED = re.compile(r'''^(
   | /api/v1/system/(updates|backups|cleanup|recovery|ssh-key|controller-address|workstation-audit)(/.*)?
   | /api/v1/nodes/[^/]+/(agent-enrollment|agent-rollouts|bootstrap|bind-verification-target
         |cleanup-step|drain|remove-step|retire-registry-only|verify-and-retire)
-  | /api/v1/(agent-rollouts|node-bootstraps|relay)(/.*)?
+  | /api/v1/(agent-rollouts|node-bootstraps|relay|web-cabinet)(/.*)?
 )$''', re.VERBOSE)
 
 
