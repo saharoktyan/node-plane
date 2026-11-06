@@ -54,19 +54,34 @@ def node_snapshot(conn, node_key, now=None):
 
 
 def device_networks(conn, profile_id, now=None):
-    """Active devices of a profile with a limit: networks seen in the last
-    `FRESH_MINUTES` on any node, and the effective limit."""
+    """Active devices of a profile with a limit, at their busiest node: the
+    limit holds on each node apart, so the count is one node's networks seen
+    in the last `FRESH_MINUTES` with that node's limit, not a sum."""
     since = ((now or datetime.now(timezone.utc)) - timedelta(minutes=FRESH_MINUTES)).isoformat()
+    seen = {}
+    for row in conn.execute('''SELECT o.device_id, o.node_key, o.active_sources, o.blocked_sources
+        FROM backend_vpn_session_observations o JOIN backend_devices d ON d.id=o.device_id
+        WHERE d.profile_id=? AND d.status='active' AND o.observed_at>=?
+        ORDER BY o.device_id, o.node_key''', (profile_id, since)).fetchall():
+        seen.setdefault(row['device_id'], []).append(row)
     result = {}
-    for row in conn.execute('''SELECT d.id,
-            COALESCE(SUM(CASE WHEN o.observed_at>=? THEN o.active_sources END),0) AS active,
-            COALESCE(SUM(CASE WHEN o.observed_at>=? THEN o.blocked_sources END),0) AS blocked
-        FROM backend_devices d LEFT JOIN backend_vpn_session_observations o ON o.device_id=d.id
-        WHERE d.profile_id=? AND d.status='active' GROUP BY d.id''', (since, since, profile_id)).fetchall():
-        values = effective(conn, device_id=row['id'], keys=KEYS[:2])
-        if values['connections.mode'] != 'off':
-            result[row['id']] = {'active': row['active'], 'blocked': row['blocked'],
-                                 'limit': values['connections.max_sources']}
+    for device in conn.execute("SELECT id FROM backend_devices WHERE profile_id=? AND status='active'",
+                               (profile_id,)).fetchall():
+        busiest = None
+        for row in seen.get(device['id'], ()):
+            values = effective(conn, device_id=device['id'], node_key=row['node_key'], protocol='xray', keys=KEYS[:2])
+            if values['connections.mode'] == 'off':
+                continue
+            entry = {'active': row['active_sources'], 'blocked': row['blocked_sources'],
+                     'limit': values['connections.max_sources']}
+            if busiest is None or entry['active'] * busiest['limit'] > busiest['active'] * entry['limit']:
+                busiest = entry
+        if busiest is None:
+            values = effective(conn, device_id=device['id'], keys=KEYS[:2])
+            if values['connections.mode'] != 'off':
+                busiest = {'active': 0, 'blocked': 0, 'limit': values['connections.max_sources']}
+        if busiest is not None:
+            result[device['id']] = busiest
     return result
 
 

@@ -2153,7 +2153,7 @@ fn device_key_reissue_requires_confirmation_and_posts_the_rotate_command() {
         .draw(|frame| app.hits = draw_content(frame, &app))
         .unwrap();
     let screen = format!("{:?}", terminal.backend().buffer());
-    assert!(screen.contains("VLESS connections now: 1 of 1"));
+    assert!(screen.contains("VLESS connections now: 1 of 1 on the busiest node"));
     assert!(
         app.access_controls()
             .contains(&Control::AccessDeviceRotate(false))

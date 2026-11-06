@@ -183,6 +183,25 @@ class ObservationTests(Fixture, unittest.TestCase):
         self.assertEqual(self.db.connection.execute(
             'SELECT COUNT(*) FROM backend_vpn_session_observations').fetchone()[0], 0)
 
+
+    def test_a_device_shows_its_busiest_node_since_the_limit_holds_on_each(self):
+        node = dict(self.db.connection.execute("SELECT * FROM backend_nodes WHERE key='node'").fetchone())
+        node['key'] = 'other'
+        self.db.connection.execute(f"INSERT INTO backend_nodes({','.join(node)}) VALUES ({','.join('?' * len(node))})",
+                                   tuple(node.values()))
+        # Another node lets this device in from three networks.
+        self.db.connection.execute("""INSERT INTO backend_vpn_policies(id,subject_kind,node_key,key,value_json,updated_at)
+            VALUES ('wide','installation','other','connections.max_sources','3',?)""",
+            (datetime.now(timezone.utc).isoformat(),))
+        now = datetime.now(timezone.utc).isoformat()
+        for key, active in (('node', 1), ('other', 2)):
+            self.db.connection.execute("""INSERT INTO backend_vpn_session_observations
+                VALUES (?,?,?,0,?)""", (self.phone['id'], key, active, now))
+        devices = self.client.get(f'/api/v1/profiles/{self.profile}/devices', headers=self.headers_for()).json()
+        # Not 3 of 1 summed: one of one on the first node is the fuller one.
+        self.assertEqual(next(d for d in devices['items'] if d['id'] == self.phone['id'])['networks'],
+                         {'active': 1, 'blocked': 0, 'limit': 1})
+
     def test_an_eviction_notifies_the_owner_once_and_the_cursor_moves(self):
         self.driver.observed['events'] = [self.evicted(1), self.evicted(2)]
         self.limits.sync()

@@ -71,8 +71,8 @@
           <Icon name={switchTo.icon} /><span>{switchTo.label}</span>
         </a>
       {/if}
-      <!-- The account's name opens its settings. -->
-      <a href="/settings" class="who" title={account.me?.login ?? ''}>
+      <!-- The account's name opens its settings; they have no section of their own. -->
+      <a href="/settings" class="who" class:active={page.url.pathname.startsWith('/settings')} title={account.me?.login ?? ''}>
         <span class="avatar">{(account.me?.display_name ?? account.me?.login ?? '?').slice(0, 1).toUpperCase()}</span>
         <span>{account.me?.display_name ?? account.me?.login ?? ''}</span>
       </a>
@@ -159,7 +159,8 @@
     background: var(--bg);
     color: var(--text);
   }
-  nav a.active {
+  nav a.active,
+  .who.active {
     background: var(--accent-soft);
     color: var(--accent);
   }

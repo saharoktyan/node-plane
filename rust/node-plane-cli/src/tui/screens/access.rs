@@ -422,7 +422,7 @@ pub(in crate::tui) fn draw_access_devices(
         ];
         if let Some(networks) = card["networks"].as_object() {
             lines.push(Line::from(format!(
-                "VLESS connections now: {} of {}",
+                "VLESS connections now: {} of {} on the busiest node",
                 networks
                     .get("active")
                     .and_then(serde_json::Value::as_u64)
@@ -451,8 +451,8 @@ pub(in crate::tui) fn draw_access_devices(
                 buttons.extend([
                     ("Rename", Control::AccessDeviceEdit),
                     ("Limits", Control::AccessLimits),
-                    ("New VLESS key", Control::AccessDeviceRotate(false)),
-                    ("New AWG key", Control::AccessDeviceRotate(true)),
+                    ("Reissue VLESS", Control::AccessDeviceRotate(false)),
+                    ("Reissue AWG", Control::AccessDeviceRotate(true)),
                     ("Delete", Control::AccessDeviceDelete),
                 ]);
             }

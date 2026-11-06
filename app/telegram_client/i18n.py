@@ -96,9 +96,9 @@ CATALOG = {
         'devices.changed': 'Профиль или устройство изменились. Вернитесь назад и начните заново.',
         'devices.delete_title': 'Удалить {name}?',
         'devices.delete_warning': 'Конфиги AmneziaWG и VLESS этого устройства перестанут работать.',
-        'devices.rotate': 'Новый ключ VLESS',
-        'devices.rotate_title': 'Перевыпустить ключ для {name}?',
-        'devices.rotate_warning': 'Устройство получит новый ключ VLESS, старые ссылки VLESS перестанут работать. Получите конфиг заново. Конфиги AmneziaWG не меняются.',
+        'devices.rotate': 'Перевыпустить VLESS',
+        'devices.rotate_title': 'Перевыпустить доступ для {name}?',
+        'devices.rotate_warning': 'Текущий доступ VLESS этого устройства отзывается на всех серверах, взамен выпускается новый. Старые ссылки VLESS перестанут работать — получите конфиг заново. AmneziaWG не меняется.',
         'devices.preparing': 'Подготовка устройства',
         'devices.preparing_text': 'Сервер ещё применяет изменения. Обновите экран через несколько секунд.',
         'audit.title': 'Аудит Workstation',
@@ -848,9 +848,9 @@ CATALOG = {
         'devices.changed': 'The profile or device changed. Go back and start again.',
         'devices.delete_title': 'Delete {name}?',
         'devices.delete_warning': 'This device’s AmneziaWG and VLESS configurations will stop working.',
-        'devices.rotate': 'New VLESS key',
-        'devices.rotate_title': 'Reissue the key for {name}?',
-        'devices.rotate_warning': 'The device gets a new VLESS key and its old VLESS links stop working. Get the configuration again. AmneziaWG configurations do not change.',
+        'devices.rotate': 'Reissue VLESS',
+        'devices.rotate_title': 'Reissue access for {name}?',
+        'devices.rotate_warning': 'The device\'s current VLESS access is revoked on every server and new access is issued instead. Old VLESS links stop working: get the configuration again. AmneziaWG does not change.',
         'devices.preparing': 'Preparing device',
         'devices.preparing_text': 'The server is still applying changes. Refresh this screen in a few seconds.',
         'audit.title': 'Workstation audit',
@@ -3558,16 +3558,16 @@ CATALOG['ru'].update({
     'notification.connection_evicted.body': 'Устройство {device} подключилось к {node} из другой сети, поэтому его прежнее подключение отключено. Если это были не вы, перевыпустите ключ устройства в боте.',
 })
 
-CATALOG['en']['devices.networks'] = 'VLESS connections now: {active} of {limit}. Connecting from another network disconnects the oldest one.'
-CATALOG['ru']['devices.networks'] = 'Подключений VLESS сейчас: {active} из {limit}. Подключение из новой сети отключает самое старое.'
+CATALOG['en']['devices.networks'] = 'VLESS connections now: {active} of {limit} on the busiest server. The limit holds on each server: connecting there from another network disconnects the oldest one.'
+CATALOG['ru']['devices.networks'] = 'Подключений VLESS сейчас: {active} из {limit} на самом загруженном сервере. Лимит действует на каждом сервере отдельно: подключение к нему из новой сети отключает самое старое.'
 
 CATALOG['en'].update({
-    'devices.rotate_awg': 'New AWG key',
-    'devices.rotate_awg_warning': 'The device gets a new AmneziaWG key and its old AmneziaWG configurations stop working once the nodes apply the change. Get the configuration again. VLESS links do not change.',
+    'devices.rotate_awg': 'Reissue AWG',
+    'devices.rotate_awg_warning': 'The device\'s current AmneziaWG access is revoked on every server and new access is issued on each instead. Old AmneziaWG configurations stop working once the servers apply the change: get the configuration again. VLESS does not change.',
 })
 CATALOG['ru'].update({
-    'devices.rotate_awg': 'Новый ключ AWG',
-    'devices.rotate_awg_warning': 'Устройство получит новый ключ AmneziaWG; старые конфиги AmneziaWG перестанут работать, когда ноды применят изменение. Получите конфиг заново. Ссылки VLESS не меняются.',
+    'devices.rotate_awg': 'Перевыпустить AWG',
+    'devices.rotate_awg_warning': 'Текущий доступ AmneziaWG этого устройства отзывается на всех серверах, взамен на каждом выпускается новый. Старые конфиги AmneziaWG перестанут работать, когда серверы применят изменение, — получите конфиг заново. VLESS не меняется.',
 })
 
 CATALOG['en'].update({
@@ -4298,7 +4298,7 @@ CATALOG['en'].update({
     'included.title': 'What the tariff includes', 'included.none': 'No tariff: the limits are set for you directly.',
     'included.days': 'Each renewal adds {days} days.', 'included.own': 'set for you',
     'included.devices': 'Devices', 'included.traffic': 'Traffic', 'included.exhausted': 'When the traffic runs out',
-    'included.speed': 'Speed per device', 'included.networks': 'Simultaneous VLESS connections per device',
+    'included.speed': 'Speed per device', 'included.networks': 'Simultaneous VLESS connections per device on each server',
     'included.no_limit': 'no limit', 'included.speed_value': '↓ {down} · ↑ {up}',
     'included.reset.calendar_month': 'per calendar month', 'included.reset.monthly_anchor': 'per month from the start day',
     'included.reset.interval': 'every {days} days', 'included.reset.none': 'for the whole term',
@@ -4309,7 +4309,7 @@ CATALOG['ru'].update({
     'included.title': 'Что входит в тариф', 'included.none': 'Без тарифа: лимиты заданы лично для вас.',
     'included.days': 'Каждое продление добавляет {days} дн.', 'included.own': 'задано для вас',
     'included.devices': 'Устройства', 'included.traffic': 'Трафик', 'included.exhausted': 'Когда трафик закончится',
-    'included.speed': 'Скорость на устройство', 'included.networks': 'Подключений VLESS на устройство одновременно',
+    'included.speed': 'Скорость на устройство', 'included.networks': 'Подключений VLESS на устройство на каждом сервере',
     'included.no_limit': 'без ограничения', 'included.speed_value': '↓ {down} · ↑ {up}',
     'included.reset.calendar_month': 'за календарный месяц', 'included.reset.monthly_anchor': 'за месяц от дня начала',
     'included.reset.interval': 'каждые {days} дн.', 'included.reset.none': 'на весь срок',
