@@ -293,6 +293,8 @@ class Worker:
         self.system_cleanup = SystemCleanupService(self.executor.db, self.executor.driver)
         from .relays import RelayService
         self.relays = RelayService(self.executor.db, self.executor.driver)
+        from .registrations import RegistrationCleanup
+        self.registration_cleanup = RegistrationCleanup(self.executor.db)
 
     def recover(self):
         self.node_jobs.repair_removed_runtime_state()
@@ -305,7 +307,7 @@ class Worker:
         services = (self.system_cleanup, self.backup_executor, self.update_executor,
                     self.enrollment_executor, self.bootstrap_executor, self.rollout_executor, self.removals,
                     self.node_jobs, self.node_executor, self.executor,
-                    self.temporary_executor, self.config_executor, self.relays)
+                    self.temporary_executor, self.config_executor, self.relays, self.registration_cleanup)
         while not stop.is_set():
             from .maintenance_gate import core_upgrade
             with self.executor.db.connect() as conn:

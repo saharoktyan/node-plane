@@ -1431,11 +1431,11 @@ async fn execute_inner(
                             items.extend(extra.iter().cloned()); value["next_cursor"] = next["next_cursor"].clone();
                         }
                         if *tab == crate::access::Tab::Profiles {
-                            let mut accounts = backend::request(session, &credential, Method::GET, "/api/v1/accounts?limit=100", None, None).await?;
+                            let mut accounts = backend::request(session, &credential, Method::GET, "/api/v1/accounts?limit=100&access=all", None, None).await?;
                             let mut cursors = BTreeSet::new();
                             while let Some(cursor) = accounts["next_cursor"].as_str().map(str::to_owned) {
                                 ensure!(cursors.insert(cursor.clone()), "Account pagination did not advance");
-                                let next = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts?limit=100&cursor={}", encode(&cursor)), None, None).await?;
+                                let next = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts?limit=100&access=all&cursor={}", encode(&cursor)), None, None).await?;
                                 let extra = next["items"].as_array().context("Missing accounts")?;
                                 let items = accounts["items"].as_array_mut().context("Missing accounts")?;
                                 ensure!(items.len() + extra.len() <= 20_000, "Too many accounts");

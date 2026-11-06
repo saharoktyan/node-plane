@@ -9797,6 +9797,75 @@ fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
 }
 
 #[test]
+fn registration_settings_and_accounts_without_access() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Invites;
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::AccessRegistration);
+    let Some(crate::nodes::Command::Access(command @ crate::access::Command::Registration)) =
+        app.nodes_requested.take()
+    else {
+        panic!("the settings load");
+    };
+    app.access.apply(
+        command,
+        serde_json::json!({"open":false,"cleanup_days":null}),
+    );
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(format!("{:?}", terminal.backend().buffer()).contains("Open registration: off"));
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessRegistrationOpen(true))
+    );
+    app.activate(Control::AccessRegistrationOpen(true));
+    let Some(crate::nodes::Command::Access(crate::access::Command::RegistrationUpdate {
+        body,
+        ..
+    })) = app.nodes_requested.take()
+    else {
+        panic!("registration opens");
+    };
+    assert_eq!(body, serde_json::json!({"open":true}));
+    app.activate(Control::AccessRegistrationCleanup(0));
+    let Some(crate::nodes::Command::Access(crate::access::Command::RegistrationUpdate {
+        body,
+        ..
+    })) = app.nodes_requested.take()
+    else {
+        panic!("cleanup is set");
+    };
+    assert_eq!(body, serde_json::json!({"cleanup_days":null}));
+    app.activate(Control::AccessBack);
+    assert!(app.access.registration.is_none());
+    app.access.tab = crate::access::Tab::Profiles;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::AccessWithoutAccess);
+    let Some(crate::nodes::Command::Access(command @ crate::access::Command::WithoutAccess)) =
+        app.nodes_requested.take()
+    else {
+        panic!("the accounts load");
+    };
+    assert_eq!(
+        command.request().1,
+        "/api/v1/accounts?limit=100&access=without"
+    );
+    app.access.apply(
+        command,
+        serde_json::json!({"items":[{"id":"acc","login":"kim","role":"member","status":"approved"}]}),
+    );
+    assert_eq!(
+        crate::access::label(crate::access::Tab::Profiles, &app.access.items[0]),
+        "kim · No VPN access"
+    );
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let controls = app.access_controls();
+    assert!(controls.contains(&Control::AccessTab(crate::access::Tab::Profiles)));
+    assert!(!controls.contains(&Control::AccessWithoutAccess));
+}
+
+#[test]
 fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
     use crate::controller::Command;
     let mut app = test_profile_app();

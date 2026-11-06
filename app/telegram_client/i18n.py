@@ -4117,6 +4117,17 @@ CATALOG['en'].update({
     'invite.error.invite_creator_unavailable': 'The person who made this invite can no longer give access. Ask for a new one.',
     'invite.error.invite_limit': 'Too many active invites. Revoke some first.',
     'invite.error.sign_in_rate_limited': 'Too many attempts. Try again in 15 minutes.',
+    'registration.title': 'Registration', 'registration.open': 'Open registration',
+    'registration.open_hint': 'Anyone who reaches the web cabinet can make an account. It gets no access '
+                              'and no request: the person asks for a service. Invites work either way.',
+    'registration.on': 'On', 'registration.off': 'Off',
+    'registration.cleanup': 'Remove empty accounts',
+    'registration.cleanup_hint': 'Registered accounts without access or requests are removed after this '
+                                 'long without a sign-in.',
+    'registration.cleanup_off': 'Never', 'registration.cleanup_days': '{days} days',
+    'registration.without_access': 'Without access',
+    'registration.without_access_hint': 'Accounts without access to services and without requests.',
+    'registration.without_access_empty': 'No accounts without access.',
 })
 CATALOG['ru'].update({
     'sessions.title': 'Вход и сессии',
@@ -4154,4 +4165,15 @@ CATALOG['ru'].update({
     'invite.error.invite_creator_unavailable': 'Автор приглашения больше не может выдавать доступ. Попросите новое.',
     'invite.error.invite_limit': 'Слишком много активных приглашений. Сначала отзовите лишние.',
     'invite.error.sign_in_rate_limited': 'Слишком много попыток. Попробуйте через 15 минут.',
+    'registration.title': 'Регистрация', 'registration.open': 'Открытая регистрация',
+    'registration.open_hint': 'Любой, кто зайдёт в веб-кабинет, может создать аккаунт. Он не получает доступов '
+                              'и заявки: человек сам запрашивает сервис. Приглашения работают в любом случае.',
+    'registration.on': 'Вкл', 'registration.off': 'Выкл',
+    'registration.cleanup': 'Удалять пустые аккаунты',
+    'registration.cleanup_hint': 'Зарегистрированные аккаунты без доступов и заявок удаляются, если в них '
+                                 'столько дней не входили.',
+    'registration.cleanup_off': 'Никогда', 'registration.cleanup_days': '{days} дней',
+    'registration.without_access': 'Без доступа',
+    'registration.without_access_hint': 'Аккаунты без доступа к сервисам и без заявок.',
+    'registration.without_access_empty': 'Аккаунтов без доступа нет.',
 })

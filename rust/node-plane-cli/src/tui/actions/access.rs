@@ -509,6 +509,32 @@ impl App {
                 self.access_command(crate::access::Command::InviteTemplates);
                 None
             }
+            Control::AccessRegistration => {
+                self.access.selected = 0;
+                self.access_command(crate::access::Command::Registration);
+                None
+            }
+            Control::AccessRegistrationOpen(open) => {
+                self.access_command(crate::access::Command::RegistrationUpdate {
+                    body: serde_json::json!({ "open": open }),
+                    key: uuid::Uuid::new_v4(),
+                });
+                None
+            }
+            Control::AccessRegistrationCleanup(days) => {
+                let days = (days > 0).then_some(days);
+                self.access_command(crate::access::Command::RegistrationUpdate {
+                    body: serde_json::json!({ "cleanup_days": days }),
+                    key: uuid::Uuid::new_v4(),
+                });
+                None
+            }
+            Control::AccessWithoutAccess => {
+                self.access.page = 0;
+                self.access.search.clear();
+                self.access_command(crate::access::Command::WithoutAccess);
+                None
+            }
             Control::AccessBotUsername => {
                 self.access.bot_username_input = Some(
                     self.access.telegram_bot["username"]
@@ -767,6 +793,7 @@ impl App {
                     || std::mem::take(&mut self.access.passkeys_confirm)
                     || self.access.invite_templates.take().is_some()
                     || self.access.bot_username_input.take().is_some()
+                    || self.access.registration.take().is_some()
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -898,6 +925,10 @@ impl App {
                         | Control::AccessInviteRevoke
                         | Control::AccessInviteAccount
                         | Control::AccessBotUsername
+                        | Control::AccessRegistration
+                        | Control::AccessRegistrationOpen(_)
+                        | Control::AccessRegistrationCleanup(_)
+                        | Control::AccessWithoutAccess
                         | Control::AccessBotUsernameInput
                         | Control::AccessBotUsernameSave
                         | Control::AccessRemovePasskeysConfirm

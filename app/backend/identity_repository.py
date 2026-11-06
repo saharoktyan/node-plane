@@ -69,6 +69,8 @@ class SQLIdentityRepository:
             passkeys_schema(conn)
             from db.migration_revisions.r0043_invites import create_schema as invites_schema
             invites_schema(conn)
+            from db.migration_revisions.r0044_registrations import create_schema as registrations_schema
+            registrations_schema(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()

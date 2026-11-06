@@ -282,6 +282,13 @@ pub(super) enum Control {
     AccessInviteTemplate(usize),
     AccessInviteRevoke,
     AccessInviteAccount,
+    /// Registration settings: open the page, open or close it, cleanup
+    /// days (0 never).
+    AccessRegistration,
+    AccessRegistrationOpen(bool),
+    AccessRegistrationCleanup(u16),
+    /// List the accounts without access on the Profiles tab.
+    AccessWithoutAccess,
     /// The bot's username for invite links: open the input, the input, save.
     AccessBotUsername,
     AccessBotUsernameInput,

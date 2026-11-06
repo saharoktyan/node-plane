@@ -71,6 +71,19 @@
   while Telegram is on, a new-account invite needs it
   (`telegram_bot_username_required`). Workstation asks for it, the bot puts
   its own, and both warn that links stop opening if the username changes.
+- Open registration (migration r0044), off by default:
+  `GET/PATCH /api/v1/system/registration` turns it on and sets the removal
+  of registered accounts left empty (7–365 days without a sign-in, off by
+  default). `GET /api/v1/registrations` tells the cabinet whether it is open,
+  `POST /api/v1/registrations/challenge` hands out a proof-of-work puzzle
+  (sha256 with 18 leading zero bits, single use) and `POST
+  /api/v1/registrations` makes an account without access or request and
+  signs it in, at most 5 a day per address. `GET /api/v1/me/service-access`
+  shows where the account stands with each service. `GET /api/v1/accounts`
+  leaves out accounts without access or requests unless `access=without` (or
+  `all`). In the bot: System settings → Registration and Accounts → Without
+  access; in Workstation: Registration on the Invites tab and Without access
+  on the Profiles tab.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

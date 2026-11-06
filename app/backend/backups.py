@@ -48,6 +48,7 @@ TABLES = (
     "backend_logins",
     "backend_passwords",
     "backend_passkeys",
+    "backend_registrations",
 )
 ADDITIVE_COLUMNS = {
     "backend_access_requests": ("telegram_subject", "service"),
@@ -60,6 +61,7 @@ CLEAR = (
     "backend_webauthn_challenges",
     # Links are given out again after a restore.
     "backend_invites",
+    "backend_registration_challenges",
     # Rebuilt from the restored Telegram logins.
     "backend_account_channels",
     # Rebuilt from the restored nodes.
@@ -267,7 +269,8 @@ class BackupService:
                 - ({'backend_retired_peers', 'backend_quota_state', 'backend_quota_periods'} if before_v6 else set())
                 - ({'backend_tariffs', 'backend_profile_tariffs'} if before_v7 else set())
                 - ({'backend_role_assignments'} if before_v8 else set())
-                - ({'backend_logins', 'backend_passwords', 'backend_passkeys'} if before_v9 else set()))
+                - ({'backend_logins', 'backend_passwords', 'backend_passkeys', 'backend_registrations'}
+                   if before_v9 else set()))
             if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
                                          'node-plane-backend-v4', 'node-plane-backend-v5', 'node-plane-backend-v6',
                                          'node-plane-backend-v7', 'node-plane-backend-v8',
@@ -356,6 +359,8 @@ class BackupService:
                 payload['tables']['backend_passkeys'] = {'columns': [
                     'id', 'account_id', 'rp_id', 'public_key', 'sign_count', 'transports_json', 'name', 'aaguid',
                     'backed_up', 'created_at', 'used_at'], 'rows': []}
+                payload['tables']['backend_registrations'] = {'columns': ['account_id', 'source', 'created_at'],
+                                                              'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -643,7 +648,8 @@ class BackupService:
                 elif table == "backend_profiles":
                     rows = [r for r in rows if r['id'] not in deleted_profiles]
                 elif table in {"backend_external_identities", "backend_access_requests", "backend_role_assignments",
-                               "backend_logins", "backend_passwords", "backend_passkeys"}:
+                               "backend_logins", "backend_passwords", "backend_passkeys",
+                               "backend_registrations"}:
                     rows = [r for r in rows if r['account_id'] not in deleted_accounts]
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]

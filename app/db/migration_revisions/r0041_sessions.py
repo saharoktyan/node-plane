@@ -17,7 +17,7 @@ def create_schema(conn):
     conn.execute('''CREATE TABLE IF NOT EXISTS backend_sessions (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL REFERENCES backend_accounts(id) ON DELETE CASCADE,
-        method TEXT NOT NULL CHECK(method IN ('password', 'passkey', 'invite')),
+        method TEXT NOT NULL CHECK(method IN ('password', 'passkey', 'invite', 'registration')),
         device TEXT NOT NULL,
         refresh_hash TEXT NOT NULL,
         previous_refresh_hash TEXT,

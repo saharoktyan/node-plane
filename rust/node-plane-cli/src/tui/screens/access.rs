@@ -822,6 +822,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             count
         };
         count.div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
+    } else if app.access.registration.is_some() {
+        // Open on and off, four cleanup choices and Back.
+        7u16.div_ceil(if inner.width >= 32 { 2 } else { 1 }) * 3
     } else if app.access.bot_username_input.is_some() {
         3u16.div_ceil(if inner.width >= 32 { 2 } else { 1 }) * 3
     } else if let Some(tariffs) = &app.access.invite_templates {
@@ -1314,6 +1317,43 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             Paragraph::new(lines).wrap(Wrap { trim: false }),
             sections[1],
         );
+    } else if let Some(registration) = &app.access.registration {
+        let open = registration["open"] == true;
+        let cleanup = registration["cleanup_days"].as_u64();
+        let lines = vec![
+            Line::from(format!(
+                "Open registration: {}",
+                if open { "on" } else { "off" }
+            )),
+            Line::from(
+                "Anyone who reaches the web cabinet can make an account. It gets no access and no request: the person asks for a service. Invites work either way.",
+            ),
+            Line::from(format!(
+                "Remove registered accounts left without access: {}",
+                cleanup.map_or("never".to_owned(), |days| format!(
+                    "after {days} days without a sign-in"
+                ))
+            )),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        buttons = vec![
+            (
+                if open {
+                    "Close registration"
+                } else {
+                    "Open registration"
+                },
+                Control::AccessRegistrationOpen(!open),
+            ),
+            ("Never remove", Control::AccessRegistrationCleanup(0)),
+            ("After 7 days", Control::AccessRegistrationCleanup(7)),
+            ("After 30 days", Control::AccessRegistrationCleanup(30)),
+            ("After 90 days", Control::AccessRegistrationCleanup(90)),
+            ("Back", Control::AccessBack),
+        ];
     } else if let Some(username) = &app.access.bot_username_input {
         let mut lines = vec![
             Line::from(
@@ -1429,12 +1469,17 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         if app.access.creating_profile {
             buttons.push(("Cancel", Control::AccessBack));
         }
-        if app.access.tab == Tab::Profiles {
+        if app.access.tab == Tab::Profiles && !app.access.without_access {
             buttons.push(("New profile", Control::AccessNew));
+            buttons.push(("Without access", Control::AccessWithoutAccess));
+        }
+        if app.access.without_access {
+            buttons.push(("All profiles", Control::AccessTab(Tab::Profiles)));
         }
         if app.access.tab == Tab::Invites {
             buttons.push(("New invite", Control::AccessInviteNew));
             buttons.push(("Bot username", Control::AccessBotUsername));
+            buttons.push(("Registration", Control::AccessRegistration));
         }
         if page > 0 {
             buttons.push(("Previous page", Control::AccessPage(false)));

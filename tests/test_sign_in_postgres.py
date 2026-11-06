@@ -42,3 +42,22 @@ class SignInPostgresTests(unittest.TestCase):
         with self.db.connect() as conn:
             methods = sorted(s['method'] for s in sessions.listed(conn, account['id'], now=NOW))
         self.assertEqual(methods, ['invite', 'passkey', 'password'])
+
+    def test_registration_lists_apart_and_cleans_up(self):
+        from datetime import timedelta
+        from backend import registrations
+        from backend.accounts import AccountService
+        from tests.test_backend_registrations import solve
+        CredentialService(self.db).initialize_schema()
+        admin = resolve_actor(Principal('test', PrincipalKind.ACCOUNT, PERMISSIONS, account_id=self.admin.id),
+                              SQLIdentityRepository(self.db))
+        registrations.update(self.db, admin, open=True, cleanup_days=7)
+        with patch.object(registrations, 'POW_BITS', 8):
+            puzzle = registrations.challenge(self.db, source='s', now=NOW)
+            account = registrations.register(self.db, puzzle['challenge_id'], solve(puzzle), login='kim',
+                                             source='s', now=NOW)['account']
+        apart = AccountService(self.db).list(admin, limit=100, access='without')['items']
+        self.assertEqual([item['id'] for item in apart], [account['id']])
+        self.assertNotIn(account['id'], [item['id'] for item in AccountService(self.db).list(admin, limit=100,
+                                                                                             access='with')['items']])
+        self.assertTrue(registrations.RegistrationCleanup(self.db).run_one(now=NOW + timedelta(days=8)))

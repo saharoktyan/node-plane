@@ -5490,6 +5490,154 @@
         "title": "RefreshInput",
         "type": "object"
       },
+      "RegistrationChallenge": {
+        "properties": {
+          "bits": {
+            "title": "Bits",
+            "type": "integer"
+          },
+          "challenge": {
+            "title": "Challenge",
+            "type": "string"
+          },
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "challenge",
+          "bits",
+          "expires_at"
+        ],
+        "title": "RegistrationChallenge",
+        "type": "object"
+      },
+      "RegistrationInput": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_id": {
+            "maxLength": 64,
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "login": {
+            "maxLength": 64,
+            "title": "Login",
+            "type": "string"
+          },
+          "nonce": {
+            "maxLength": 64,
+            "title": "Nonce",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "nonce",
+          "login"
+        ],
+        "title": "RegistrationInput",
+        "type": "object"
+      },
+      "RegistrationOpen": {
+        "properties": {
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "open"
+        ],
+        "title": "RegistrationOpen",
+        "type": "object"
+      },
+      "RegistrationSettings": {
+        "properties": {
+          "cleanup_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Days"
+          },
+          "open": {
+            "title": "Open",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "open",
+          "cleanup_days"
+        ],
+        "title": "RegistrationSettings",
+        "type": "object"
+      },
+      "RegistrationSettingsInput": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 7.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Days"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          }
+        },
+        "title": "RegistrationSettingsInput",
+        "type": "object"
+      },
       "RegistryRetirementInput": {
         "additionalProperties": false,
         "properties": {
@@ -5890,6 +6038,46 @@
           "telegram_user_id"
         ],
         "title": "ResolveInput",
+        "type": "object"
+      },
+      "ServiceAccessOutput": {
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "pending",
+              "requestable",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "state"
+        ],
+        "title": "ServiceAccessOutput",
+        "type": "object"
+      },
+      "ServiceAccessPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceAccessOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ServiceAccessPage",
         "type": "object"
       },
       "SessionOutput": {
@@ -6942,6 +7130,7 @@
     },
     "/api/v1/accounts": {
       "get": {
+        "description": "Accounts; those without access or requests are listed apart (`access=without`).",
         "operationId": "list_accounts_api_v1_accounts_get",
         "parameters": [
           {
@@ -6971,6 +7160,21 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "access",
+            "required": false,
+            "schema": {
+              "default": "with",
+              "enum": [
+                "with",
+                "without",
+                "all"
+              ],
+              "title": "Access",
+              "type": "string"
             }
           },
           {
@@ -9820,6 +10024,58 @@
           }
         ],
         "summary": "Own Profile Summary"
+      }
+    },
+    "/api/v1/me/service-access": {
+      "get": {
+        "description": "The installation's services and where the account stands with each.",
+        "operationId": "my_service_access_api_v1_me_service_access_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccessPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Service Access"
       }
     },
     "/api/v1/me/sessions": {
@@ -14225,6 +14481,80 @@
         "summary": "Grant Regions"
       }
     },
+    "/api/v1/registrations": {
+      "get": {
+        "description": "Whether the web cabinet offers to register.",
+        "operationId": "registration_open_api_v1_registrations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationOpen"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Registration Open"
+      },
+      "post": {
+        "description": "Make an account without access and sign in; it asks for services itself.",
+        "operationId": "register_api_v1_registrations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedInvite"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register"
+      }
+    },
+    "/api/v1/registrations/challenge": {
+      "post": {
+        "operationId": "registration_challenge_api_v1_registrations_challenge_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationChallenge"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Registration Challenge"
+      }
+    },
     "/api/v1/relay": {
       "delete": {
         "operationId": "remove_relay_api_v1_relay_delete",
@@ -16916,6 +17246,117 @@
           }
         ],
         "summary": "Recover Operation"
+      }
+    },
+    "/api/v1/system/registration": {
+      "get": {
+        "operationId": "registration_settings_api_v1_system_registration_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Registration Settings"
+      },
+      "patch": {
+        "description": "Open registration and the removal of registered accounts left empty; `cleanup_days: null` turns it off.",
+        "operationId": "update_registration_settings_api_v1_system_registration_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationSettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Registration Settings"
       }
     },
     "/api/v1/system/ssh-key": {

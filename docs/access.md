@@ -129,6 +129,12 @@ The template is applied with the rights its author has when the link is used: if
 
 **Sign-in link** on an account card in Workstation makes an invite for that account: with it, the person sets a login and password in the web cabinet, for the first time or after losing the password (a new password ends the other sessions). Such a link signs in as the account, so it is never made through Telegram. Restoring a backup voids all invites.
 
+## Open registration
+
+Registration without an invite is off by default. Turn it on in the bot's **System settings → Registration** or under **Registration** on Workstation's **Invites** tab. Then anyone who reaches the web cabinet can make an account with a login and a password or passkey. Such an account gets no access and no automatic request: the person asks for a service under **Access to services**.
+
+To keep a leaked domain from flooding the installation, each registration solves a short proof-of-work puzzle in the browser (no third-party CAPTCHA), and one address makes at most 5 accounts a day. Accounts without access and without requests stay out of the main list: they are under **Accounts → Without access** in the bot and **Without access** on Workstation's **Profiles** tab. Optionally, registered accounts left like that are removed after 7, 30 or 90 days without a sign-in; this is off by default too.
+
 ## Login
 
 An account can have a login: the name it will sign in to the web cabinet with. A login is 3–32 Latin letters, digits, `_`, `.` or `-`, starts with a letter or digit, and is unique regardless of case; names such as `admin`, `root` and `support` are reserved. Everything else refers to the account itself, so changing a login breaks nothing.

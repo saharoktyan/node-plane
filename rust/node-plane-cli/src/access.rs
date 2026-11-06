@@ -73,6 +73,14 @@ pub enum Command {
         id: String,
         key: Uuid,
     },
+    /// Accounts without access to services and without requests.
+    WithoutAccess,
+    /// Open registration and the removal of registered accounts left empty.
+    Registration,
+    RegistrationUpdate {
+        body: Value,
+        key: Uuid,
+    },
     /// The bot's username, which invite links name.
     SetBotUsername {
         username: String,
@@ -163,6 +171,24 @@ impl Command {
                 hyper::Method::DELETE,
                 format!("/api/v1/invites/{id}"),
                 None,
+                Some(*key),
+            ),
+            Self::WithoutAccess => (
+                hyper::Method::GET,
+                "/api/v1/accounts?limit=100&access=without".into(),
+                None,
+                None,
+            ),
+            Self::Registration => (
+                hyper::Method::GET,
+                "/api/v1/system/registration".into(),
+                None,
+                None,
+            ),
+            Self::RegistrationUpdate { body, key } => (
+                hyper::Method::PATCH,
+                "/api/v1/system/registration".into(),
+                Some(body.clone()),
                 Some(*key),
             ),
             Self::SetBotUsername { username, key } => (
@@ -782,6 +808,10 @@ pub struct Browser {
     pub telegram_bot: Value,
     /// The bot's username being typed.
     pub bot_username_input: Option<String>,
+    /// The registration settings page, while open.
+    pub registration: Option<Value>,
+    /// The Profiles tab lists the accounts without access instead.
+    pub without_access: bool,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -1037,12 +1067,34 @@ impl Browser {
                 self.notice = "Account saved.".into();
             }
             Command::List(tab) => {
+                self.without_access = false;
                 self.tab = tab;
                 self.items = value["items"].as_array().cloned().unwrap_or_default();
                 self.card = None;
                 if tab == Tab::Invites {
                     self.telegram_bot = value["_telegram_bot"].clone();
                 }
+            }
+            Command::WithoutAccess => {
+                self.tab = Tab::Profiles;
+                self.card = None;
+                self.without_access = true;
+                self.items = value["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|account| {
+                        let mut item = account.clone();
+                        item["_account_only"] = true.into();
+                        if let Some(login) = account["login"].as_str() {
+                            item["display_name"] = login.into();
+                        }
+                        item
+                    })
+                    .collect();
+            }
+            Command::Registration | Command::RegistrationUpdate { .. } => {
+                self.registration = Some(value);
             }
             Command::SetBotUsername { .. } => {
                 self.telegram_bot = value;

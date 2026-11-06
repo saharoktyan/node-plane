@@ -326,6 +326,10 @@ impl App {
             | Control::AccessInviteRevoke
             | Control::AccessInviteAccount
             | Control::AccessBotUsername
+            | Control::AccessRegistration
+            | Control::AccessRegistrationOpen(..)
+            | Control::AccessRegistrationCleanup(..)
+            | Control::AccessWithoutAccess
             | Control::AccessBotUsernameInput
             | Control::AccessBotUsernameSave
             | Control::AccessRemovePasskeysConfirm

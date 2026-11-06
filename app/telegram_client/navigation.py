@@ -85,7 +85,7 @@ def parent_path(callback, locale, data):
         'alerts': 'alerts.title', 'traffic': 'traffic.title',
         'bot_title_settings': 'bot_title.title', 'request_policy': 'request_policy.title',
         'idefault:open': 'defaults.title', 'idefault:guide': 'defaults.title', 'idefault:main': 'defaults.title',
-        'recpage:0': 'recovery.title',
+        'recpage:0': 'recovery.title', 'reg:v': 'registration.title',
         'system_cleanup': 'system_cleanup.title', 'ssh_key': 'settings.admin.ssh_key',
     }
     if callback in settings_pages:
@@ -168,6 +168,9 @@ def parent_path(callback, locale, data):
             return (*parent_path('admin_node:' + key, locale, data),
                     Breadcrumb(tr(locale, 'node_tools.last_operation'), callback))
         return servers
+    if callback == 'reg:without':
+        return (*parent_path('accounts', locale, data),
+                Breadcrumb(tr(locale, 'registration.without_access'), callback))
     if callback in {'inv:new', 'inv:list'}:
         return (*parent_path('accounts', locale, data),
                 Breadcrumb(tr(locale, 'invite.title' if callback == 'inv:new' else 'invite.list'), callback))

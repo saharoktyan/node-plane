@@ -31,7 +31,8 @@ def error_text(locale, exc):
 
 def accounts_row(locale):
     return [InlineKeyboardButton(text=tr(locale, 'invite.create'), callback_data='inv:new'),
-            InlineKeyboardButton(text=tr(locale, 'invite.list'), callback_data='inv:list')]
+            InlineKeyboardButton(text=tr(locale, 'invite.list'), callback_data='inv:list'),
+            InlineKeyboardButton(text=tr(locale, 'registration.without_access'), callback_data='reg:without')]
 
 
 async def _locale(state):

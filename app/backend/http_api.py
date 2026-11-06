@@ -314,6 +314,48 @@ class AcceptedTelegramInvite(BaseModel):
     account: dict[str, Any]
 
 
+class RegistrationOpen(BaseModel):
+    open: bool
+
+
+class RegistrationSettings(RegistrationOpen):
+    # Registered accounts left without access are removed after this many days without a sign-in.
+    cleanup_days: int | None
+
+
+class RegistrationSettingsInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    open: StrictBool | None = None
+    cleanup_days: StrictInt | None = Field(default=None, ge=7, le=365)
+
+
+class RegistrationChallenge(BaseModel):
+    challenge_id: str
+    # Find a nonce whose sha256("<challenge>:<nonce>") starts with `bits` zero bits.
+    challenge: str
+    bits: int
+    expires_at: str
+
+
+class RegistrationInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    challenge_id: StrictStr = Field(max_length=64)
+    nonce: StrictStr = Field(max_length=64)
+    login: StrictStr = Field(max_length=64)
+    password: StrictStr | None = Field(default=None, max_length=256)
+    device: StrictStr | None = Field(default=None, max_length=256)
+
+
+class ServiceAccessOutput(BaseModel):
+    service: str
+    # `active`, `pending` (a request waits), `requestable`, or `unavailable` (requests are off).
+    state: Literal['active', 'pending', 'requestable', 'unavailable']
+
+
+class ServiceAccessPage(BaseModel):
+    items: list[ServiceAccessOutput]
+
+
 class AccountPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     locale: Literal['ru', 'en'] | None = None
@@ -1701,6 +1743,46 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             passkeys.remove(conn, current.account.id, passkey_id)
         return Response(status_code=204)
 
+    @app.get('/api/v1/registrations', response_model=RegistrationOpen)
+    def registration_open():
+        """Whether the web cabinet offers to register."""
+        from . import registrations
+        with db.connect() as conn:
+            return {'open': registrations.read(conn)['open']}
+
+    @app.post('/api/v1/registrations/challenge', response_model=RegistrationChallenge, status_code=201)
+    def registration_challenge(request: Request):
+        from . import registrations
+        return registrations.challenge(db, source=client_source(request))
+
+    @app.post('/api/v1/registrations', response_model=AcceptedInvite, status_code=201)
+    def register(body: RegistrationInput, request: Request):
+        """Make an account without access and sign in; it asks for services itself."""
+        from . import registrations
+        return registrations.register(db, body.challenge_id, body.nonce, login=body.login, password=body.password,
+                                      device=body.device or header(request, 'User-Agent'),
+                                      source=client_source(request))
+
+    @app.get('/api/v1/system/registration', response_model=RegistrationSettings)
+    def registration_settings(current=Depends(actor)):
+        from . import registrations
+        return registrations.settings(db, current)
+
+    @app.patch('/api/v1/system/registration', response_model=RegistrationSettings)
+    def update_registration_settings(body: RegistrationSettingsInput, current=Depends(actor)):
+        """Open registration and the removal of registered accounts left empty; `cleanup_days: null` turns it off."""
+        from . import registrations
+        if not body.model_fields_set:
+            raise AccessDenied('invalid_input', 422)
+        return registrations.update(db, current, open=body.open,
+                                    cleanup_days=body.cleanup_days if 'cleanup_days' in body.model_fields_set else ...)
+
+    @app.get('/api/v1/me/service-access', response_model=ServiceAccessPage)
+    def my_service_access(current=Depends(actor)):
+        """The installation's services and where the account stands with each."""
+        from . import registrations
+        return registrations.service_access(db, current)
+
     @app.post('/api/v1/invites', response_model=CreatedInvite, status_code=201)
     def create_invite(body: InviteInput, current=Depends(actor)):
         """A one-time link: a new account with a template, or an account's own sign-in."""
@@ -2590,8 +2672,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.get('/api/v1/accounts', response_model=AccountPage)
     def list_accounts(current=Depends(actor), limit: Annotated[int, Query(ge=1, le=100)] = 25,
-                      cursor: Annotated[str | None, Query(max_length=512)] = None):
-        return accounts.list(current, limit=limit, cursor=cursor)
+                      cursor: Annotated[str | None, Query(max_length=512)] = None,
+                      access: Literal['with', 'without', 'all'] = 'with'):
+        """Accounts; those without access or requests are listed apart (`access=without`)."""
+        return accounts.list(current, limit=limit, cursor=cursor, access=access)
 
     @app.post('/api/v1/accounts', status_code=201)
     def provision_account(body: AccountProvisionInput, request: Request, current=Depends(actor)):

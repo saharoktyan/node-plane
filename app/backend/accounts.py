@@ -116,19 +116,23 @@ class AccountService:
             remove_all(conn, account_id)
         return self.get(actor, account_id)
 
-    def list(self, actor, *, limit=25, cursor=None):
+    def list(self, actor, *, limit=25, cursor=None, access='all'):
         require_permission(actor, 'accounts.manage')
         if type(limit) is not int or not 1 <= limit <= 100:
             raise AccessDenied('invalid_input', 422)
         after = _cursor(cursor, 'accounts')
         with self.db.connect() as conn:
-            rows = conn.execute('''SELECT a.id, a.role, a.status, a.revision,
+            from .registrations import WITHOUT_ACCESS_SQL
+            access_filter = {'with': f'AND NOT ({WITHOUT_ACCESS_SQL})', 'without': f'AND {WITHOUT_ACCESS_SQL}',
+                             'all': ''}[access]
+            rows = conn.execute(f'''SELECT a.id, a.role, a.status, a.revision,
                 i.subject AS telegram_subject, a.display_name, d.username, d.first_name, d.last_name,
                 d.language_code, a.locale, a.locale_selected, (SELECT l.login FROM backend_logins l WHERE l.account_id = a.id AND l.released_at IS NULL) AS login
                 FROM backend_accounts a
                 LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
                 LEFT JOIN backend_telegram_identity_details d ON d.subject = i.subject
-                WHERE a.id > ? AND NOT EXISTS (SELECT 1 FROM backend_account_deletions x WHERE x.account_id=a.id) ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
+                WHERE a.id > ? AND NOT EXISTS (SELECT 1 FROM backend_account_deletions x WHERE x.account_id=a.id)
+                {access_filter} ORDER BY a.id LIMIT ?''', (after, limit + 1)).fetchall()
             rows = [{**dict(row), 'roles': _roles(conn, row)} for row in rows]
         return _page([self.public(row) for row in rows], limit, 'accounts', 'id')
 
