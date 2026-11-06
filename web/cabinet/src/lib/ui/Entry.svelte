@@ -16,6 +16,9 @@
     margin: 12vh auto;
     padding: 0 1rem;
   }
+  h1 {
+    margin-bottom: 1.75rem;
+  }
   .brand {
     font-family: var(--serif);
     font-size: 1.15rem;
