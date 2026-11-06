@@ -1415,6 +1415,10 @@ async fn execute_inner(
                             &format!("/api/v1/profiles/{id}"), None, None).await?;
                         value["_profile"] = profile;
                     }
+                    if let crate::access::Command::List(crate::access::Tab::Invites) = &command {
+                        value["_telegram_bot"] = backend::request(session, &credential, Method::GET,
+                            "/api/v1/invites/telegram-bot", None, None).await?;
+                    }
                     if let crate::access::Command::List(tab) = &command {
                         let mut cursors = BTreeSet::new();
                         while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {

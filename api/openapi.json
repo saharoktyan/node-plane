@@ -1912,6 +1912,28 @@
             ],
             "title": "Tariff Id"
           },
+          "telegram_bot_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Bot Username"
+          },
+          "telegram_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Link"
+          },
           "token": {
             "title": "Token",
             "type": "string"
@@ -1957,7 +1979,9 @@
           "used_account_id",
           "status",
           "token",
-          "cabinet_link"
+          "cabinet_link",
+          "telegram_link",
+          "telegram_bot_username"
         ],
         "title": "CreatedInvite",
         "type": "object"
@@ -6102,6 +6126,46 @@
         "title": "TariffInput",
         "type": "object"
       },
+      "TelegramBotUsername": {
+        "properties": {
+          "telegram_enabled": {
+            "title": "Telegram Enabled",
+            "type": "boolean"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "username",
+          "telegram_enabled"
+        ],
+        "title": "TelegramBotUsername",
+        "type": "object"
+      },
+      "TelegramBotUsernameInput": {
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "maxLength": 64,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "title": "TelegramBotUsernameInput",
+        "type": "object"
+      },
       "TemporaryConfigInput": {
         "properties": {
           "duration_seconds": {
@@ -8561,6 +8625,117 @@
           }
         },
         "summary": "Preview Invite"
+      }
+    },
+    "/api/v1/invites/telegram-bot": {
+      "get": {
+        "operationId": "invite_telegram_bot_api_v1_invites_telegram_bot_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramBotUsername"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Invite Telegram Bot"
+      },
+      "put": {
+        "description": "The bot's username, needed for invite links while Telegram is on.",
+        "operationId": "set_invite_telegram_bot_api_v1_invites_telegram_bot_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramBotUsernameInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramBotUsername"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Invite Telegram Bot"
       }
     },
     "/api/v1/invites/{invite_id}": {

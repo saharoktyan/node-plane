@@ -253,9 +253,23 @@ class InviteOutput(BaseModel):
 
 
 class CreatedInvite(InviteOutput):
-    # Shown only once. In the bot: `https://t.me/<bot>?start=<token>`.
+    # Shown only once.
     token: str
     cabinet_link: str | None
+    # `https://t.me/<bot>?start=<token>`; it stops opening if the bot's username changes.
+    telegram_link: str | None
+    telegram_bot_username: str | None
+
+
+class TelegramBotUsername(BaseModel):
+    # The bot's username for invite links, without `@`.
+    username: str | None
+    telegram_enabled: bool
+
+
+class TelegramBotUsernameInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    username: StrictStr = Field(max_length=64)
 
 
 class InvitePage(BaseModel):
@@ -1698,6 +1712,17 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def list_invites(current=Depends(actor)):
         from . import invites
         return {'items': invites.listed(db, current)}
+
+    @app.get('/api/v1/invites/telegram-bot', response_model=TelegramBotUsername)
+    def invite_telegram_bot(current=Depends(actor)):
+        from . import invites
+        return invites.telegram_settings(db, current)
+
+    @app.put('/api/v1/invites/telegram-bot', response_model=TelegramBotUsername)
+    def set_invite_telegram_bot(body: TelegramBotUsernameInput, current=Depends(actor)):
+        """The bot's username, needed for invite links while Telegram is on."""
+        from . import invites
+        return invites.set_bot_username(db, current, body.username)
 
     @app.get('/api/v1/invites/{invite_id}', response_model=InviteOutput)
     def get_invite(invite_id: str, current=Depends(actor)):

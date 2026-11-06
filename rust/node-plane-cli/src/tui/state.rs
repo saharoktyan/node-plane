@@ -282,6 +282,10 @@ pub(super) enum Control {
     AccessInviteTemplate(usize),
     AccessInviteRevoke,
     AccessInviteAccount,
+    /// The bot's username for invite links: open the input, the input, save.
+    AccessBotUsername,
+    AccessBotUsernameInput,
+    AccessBotUsernameSave,
     /// Remove the open account's passkeys: ask, then confirm.
     AccessRemovePasskeys,
     AccessRemovePasskeysConfirm,

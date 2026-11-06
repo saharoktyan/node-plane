@@ -121,7 +121,9 @@ Expiry and revocation remove runtime authorization and close established VLESS c
 
 ## Invites
 
-An invite is a one-time link that registers someone without a request. In the bot, **Accounts → Invite** asks what the new account gets: nothing yet, VPN with the default access, or VPN with a tariff (its access and term). The link is `t.me/<bot>?start=inv_…`; when the person opens it, the bot creates their account with their Telegram and offers to set a login. With a relay, the same invite also has a web cabinet link, where the person picks a login and a password or passkey. In Workstation, invites have their own **Invites** tab: **New invite**, and **Revoke** on an active one. A link works once and for 7 days, and is shown only when it is made.
+An invite is a one-time link that registers someone without a request. In the bot, **Accounts → Invite** asks what the new account gets: nothing yet, VPN with the default access, or VPN with a tariff (its access and term). The link is `t.me/<bot>?start=inv_…`; when the person opens it, the bot creates their account with their Telegram and offers to set a login. With a relay, the same invite also has a web cabinet link, where the person picks a login and a password or passkey. In Workstation, invites have their own **Invites** tab: **New invite**, **Bot username**, and **Revoke** on an active one. A link works once and for 7 days, and is shown only when it is made.
+
+The bot's link names the bot by its username, which the controller keeps. While Telegram is on, an invite for a new account cannot be made without it: Workstation asks for it at the first **New invite** (later under **Bot username**), and the bot fills in its own. A link opens only while the bot keeps that username: after a change, links made before it stop working, so make new ones.
 
 The template is applied with the rights its author has when the link is used: if the author is blocked or loses the right to manage profiles, the invite stops working. Invites give member rights only; assign staff roles afterwards.
 

@@ -13,9 +13,13 @@ PASSWORD = 'correct horse battery'
 
 
 class InviteTests(unittest.TestCase):
-    setUp = http_fixture.BackendHTTPTests.setUp
+    setUp_http = http_fixture.BackendHTTPTests.setUp
     register = http_fixture.BackendHTTPTests.register
     provision = http_fixture.BackendHTTPTests.provision
+
+    def setUp(self):
+        self.setUp_http()
+        invites.set_bot_username(self.db, self.admin_actor(), '@np_test_bot')
 
     def admin_actor(self):
         return resolve_actor(Principal('test', PrincipalKind.ACCOUNT, PERMISSIONS, account_id=self.admin.id),
@@ -36,6 +40,28 @@ class InviteTests(unittest.TestCase):
     def profile(self, account_id):
         with self.db.connect() as conn:
             return conn.execute('SELECT * FROM backend_profiles WHERE owner_account_id=?', (account_id,)).fetchone()
+
+    def test_the_bots_username_is_needed_for_its_link(self):
+        with self.db.transaction() as conn:
+            conn.execute('DELETE FROM backend_system_settings WHERE key=?', (invites.BOT_SETTING,))
+        self.assertEqual(self.code(invites.create, self.db, self.admin_actor(), vpn=True),
+                         'telegram_bot_username_required')
+        for bad in ('np', 'np_test', 'np test bot', 'x' * 40 + 'bot'):
+            self.assertEqual(self.code(invites.set_bot_username, self.db, self.admin_actor(), bad),
+                             'telegram_bot_username_invalid', bad)
+        self.assertEqual(invites.set_bot_username(self.db, self.admin_actor(), ' @Np_Test_Bot ')['username'],
+                         'Np_Test_Bot')
+        created = invites.create(self.db, self.admin_actor(), vpn=True)
+        self.assertEqual(created['telegram_link'], 'https://t.me/Np_Test_Bot?start=' + created['token'])
+        # An account's sign-in is not for the bot.
+        account = invites.create(self.db, self.admin_actor(), account_id=self.admin.id)
+        self.assertIsNone(account['telegram_link'])
+        # Without Telegram the bot's username is not needed.
+        from backend.account_channels import set_enabled
+        with self.db.transaction() as conn:
+            conn.execute('DELETE FROM backend_system_settings WHERE key=?', (invites.BOT_SETTING,))
+            set_enabled(conn, frozenset())
+        self.assertIsNone(invites.create(self.db, self.admin_actor(), vpn=True)['telegram_link'])
 
     def test_a_new_account_with_vpn_and_a_tariff_signs_in(self):
         tariff = self.tariff()
@@ -145,7 +171,12 @@ class InviteTests(unittest.TestCase):
         listed = self.client.get('/api/v1/invites', headers=admin).json()['items']
         self.assertEqual((listed[0]['status'], listed[0]['note']), ('used', 'Ivy'))
         self.assertNotIn('token', listed[0])
+        response = self.client.put('/api/v1/invites/telegram-bot', headers=admin, json={'username': 'other_bot'})
+        self.assertEqual(response.json(), {'username': 'other_bot', 'telegram_enabled': True})
+        self.assertEqual(self.client.get('/api/v1/invites/telegram-bot', headers=admin).json()['username'],
+                         'other_bot')
         second = self.client.post('/api/v1/invites', headers=admin, json={}).json()
+        self.assertTrue(second['telegram_link'].startswith('https://t.me/other_bot?start=inv_'))
         self.assertEqual(self.client.get(f"/api/v1/invites/{second['id']}", headers=admin).json()['status'], 'active')
         self.assertEqual(self.client.delete(f"/api/v1/invites/{second['id']}", headers=admin).json()['status'],
                          'revoked')

@@ -42,9 +42,14 @@ def _back(locale, callback='accounts'):
     return [InlineKeyboardButton(text=tr(locale, 'back'), callback_data=callback)]
 
 
-async def _link(bot, token):
-    me = await bot.me()
-    return f'https://t.me/{me.username}?start={token}'
+async def _own_username(query, bot, backend):
+    """The controller builds the bot's links from the username it keeps; the
+    bot knows its own, so it puts it right before making an invite."""
+    username = (await bot.me()).username
+    stored = await backend.request('GET', '/api/v1/invites/telegram-bot', telegram_user_id=query.from_user.id)
+    if stored.get('username') != username:
+        await backend.request('PUT', '/api/v1/invites/telegram-bot', telegram_user_id=query.from_user.id,
+                              command=True, body={'username': username})
 
 
 async def _templates(query, bot, backend, state, locale):
@@ -59,7 +64,10 @@ async def _templates(query, bot, backend, state, locale):
 
 
 async def _made(query, bot, state, locale, invite):
-    lines = [tr(locale, 'invite.ready', date=_date(invite['expires_at'])), await _link(bot, invite['token'])]
+    lines = [tr(locale, 'invite.ready', date=_date(invite['expires_at']))]
+    if invite.get('telegram_link'):
+        lines += [invite['telegram_link'],
+                  tr(locale, 'invite.username_warning', username=invite['telegram_bot_username'])]
     if invite.get('cabinet_link'):
         lines += [tr(locale, 'invite.cabinet'), invite['cabinet_link']]
     await render(bot, query.message.chat.id, Screen(tr(locale, 'invite.title'), tuple(lines),
@@ -106,6 +114,7 @@ async def invites_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, sta
             body = {'vpn': template != 'none'}
             if template.startswith('t:'):
                 body['tariff_id'] = template.removeprefix('t:')
+            await _own_username(query, bot, backend)
             invite = await backend.request('POST', '/api/v1/invites', telegram_user_id=query.from_user.id,
                                            command=True, body=body)
             return await _made(query, bot, state, locale, invite)

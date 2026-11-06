@@ -66,7 +66,11 @@
   or `/accept/telegram` in the bot (`t.me/<bot>?start=inv_…`). Wrong tokens
   count toward the sign-in limit by address. In the bot: Accounts → Invite
   and Invites; in Workstation: the Invites tab and Sign-in link on an
-  account card. A restore voids invites.
+  account card. A restore voids invites. The bot's link is built from the
+  bot's username the controller keeps (`GET/PUT /api/v1/invites/telegram-bot`):
+  while Telegram is on, a new-account invite needs it
+  (`telegram_bot_username_required`). Workstation asks for it, the bot puts
+  its own, and both warn that links stop opening if the username changes.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

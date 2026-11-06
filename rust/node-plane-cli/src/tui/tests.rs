@@ -9707,8 +9707,38 @@ fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
         "New account with VPN · active · until 2026-11-13 · Dana"
     );
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    // While Telegram is on, a new invite needs the bot's username first.
+    app.access.telegram_bot = serde_json::json!({"telegram_enabled":true,"username":null});
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
     assert!(app.access_controls().contains(&Control::AccessInviteNew));
+    app.activate(Control::AccessInviteNew);
+    assert!(app.nodes_requested.is_none());
+    assert_eq!(app.access.bot_username_input.as_deref(), Some(""));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(format!("{:?}", terminal.backend().buffer()).contains("stop opening"));
+    app.activate(Control::AccessBotUsernameInput);
+    for c in "@np_bot".chars() {
+        app.access_key(KeyCode::Char(c).into());
+    }
+    app.access_key(KeyCode::Enter.into());
+    let Some(crate::nodes::Command::Access(
+        command @ crate::access::Command::SetBotUsername { .. },
+    )) = app.nodes_requested.take()
+    else {
+        panic!("the username is saved");
+    };
+    assert_eq!(
+        command.request().2,
+        Some(serde_json::json!({"username":"np_bot"}))
+    );
+    app.access.apply(
+        command,
+        serde_json::json!({"telegram_enabled":true,"username":"np_bot"}),
+    );
+    assert!(app.access.bot_username_input.is_none());
+    app.access.result = None;
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(format!("{:?}", terminal.backend().buffer()).contains("Bot @np_bot"));
     app.activate(Control::AccessInviteNew);
     assert!(matches!(
         app.nodes_requested.take(),
@@ -9736,12 +9766,14 @@ fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
         crate::access::Command::InviteCreate { body, key },
         serde_json::json!({"id":"i2","kind":"new","vpn":true,"tariff_id":"t1","status":"active",
             "expires_at":"2026-11-13T00:00:00+00:00","note":"","token":"inv_tok",
-            "cabinet_link":"https://cab.example/invite#inv_tok"}),
+            "cabinet_link":"https://cab.example/invite#inv_tok",
+            "telegram_link":"https://t.me/np_bot?start=inv_tok","telegram_bot_username":"np_bot"}),
     );
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
     let screen = format!("{:?}", terminal.backend().buffer());
     assert!(screen.contains("https://cab.example/invite#inv_tok"));
-    assert!(screen.contains("start=inv_tok"));
+    assert!(screen.contains("t.me/np_bot?start=inv_tok"));
+    assert!(screen.contains("while the bot is @np_bot"));
     app.activate(Control::AccessInviteRevoke);
     assert!(matches!(
         app.nodes_requested.take(),

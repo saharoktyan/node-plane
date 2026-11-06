@@ -496,6 +496,21 @@ impl App {
                         return;
                     }
 
+                    if self.access.bot_username_input.is_some() && !error.is_empty() {
+                        self.error = crate::access::bot_username_error(&error);
+                        return;
+                    }
+
+                    if error.contains("telegram_bot_username_required") {
+                        // Telegram was turned on, or the username cleared, since the list loaded.
+                        self.access.invite_templates = None;
+                        self.access.telegram_bot["telegram_enabled"] = true.into();
+                        self.access.telegram_bot["username"] = serde_json::Value::Null;
+                        self.access.bot_username_input = Some(String::new());
+                        self.error.clear();
+                        return;
+                    }
+
                     if self.access.password_input.is_some() && !error.is_empty() {
                         // The fields stay open; what was typed is not shown anyway.
                         self.error = crate::access::password_error(&error);

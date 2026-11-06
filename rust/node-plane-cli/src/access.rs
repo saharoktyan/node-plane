@@ -73,6 +73,11 @@ pub enum Command {
         id: String,
         key: Uuid,
     },
+    /// The bot's username, which invite links name.
+    SetBotUsername {
+        username: String,
+        key: Uuid,
+    },
     /// Sets or changes the password of the Workstation's own account.
     SetPassword {
         body: Value,
@@ -158,6 +163,12 @@ impl Command {
                 hyper::Method::DELETE,
                 format!("/api/v1/invites/{id}"),
                 None,
+                Some(*key),
+            ),
+            Self::SetBotUsername { username, key } => (
+                hyper::Method::PUT,
+                "/api/v1/invites/telegram-bot".into(),
+                Some(json!({ "username": username.trim() })),
                 Some(*key),
             ),
             Self::RemovePasskeys { id, key } => (
@@ -767,6 +778,10 @@ pub struct Browser {
     pub passkeys_confirm: bool,
     /// The template choice of a new invite, with the tariffs it can carry.
     pub invite_templates: Option<Vec<Value>>,
+    /// The bot's username for invite links and whether Telegram is on.
+    pub telegram_bot: Value,
+    /// The bot's username being typed.
+    pub bot_username_input: Option<String>,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -1025,6 +1040,17 @@ impl Browser {
                 self.tab = tab;
                 self.items = value["items"].as_array().cloned().unwrap_or_default();
                 self.card = None;
+                if tab == Tab::Invites {
+                    self.telegram_bot = value["_telegram_bot"].clone();
+                }
+            }
+            Command::SetBotUsername { .. } => {
+                self.telegram_bot = value;
+                self.bot_username_input = None;
+                self.result = Some(
+                    "Bot username saved. Invite links made before a username change stop opening."
+                        .into(),
+                );
             }
             Command::Card(tab, _) => {
                 self.tab = tab;
@@ -1074,6 +1100,20 @@ pub fn text(value: &Value) -> String {
         }
     })
 }
+/// Invites need the bot's username while Telegram is on.
+pub fn bot_username_missing(telegram_bot: &Value) -> bool {
+    telegram_bot["telegram_enabled"] == true && !telegram_bot["username"].is_string()
+}
+
+pub fn bot_username_error(error: &str) -> String {
+    if error.contains("telegram_bot_username_invalid") {
+        "A bot's username is 5–32 letters, digits or _ and ends in \"bot\"."
+    } else {
+        "The username was not saved."
+    }
+    .into()
+}
+
 /// What an invite gives, as its card and list show it.
 pub fn invite_template(item: &Value) -> &'static str {
     if item["kind"] == "account" {

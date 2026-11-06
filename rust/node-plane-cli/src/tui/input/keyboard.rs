@@ -29,6 +29,7 @@ impl App {
                             | Control::AccessDeviceName
                             | Control::AccessLoginInput
                             | Control::AccessPasswordField(_)
+                            | Control::AccessBotUsernameInput
                             | Control::AccessDurationInput
                             | Control::AccessIdentity
                     )
@@ -297,6 +298,29 @@ impl App {
                 }
                 KeyCode::Enter => {
                     self.activate(Control::AccessLoginSave);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if controls.get(self.access.selected) == Some(&Control::AccessBotUsernameInput)
+            && let Some(username) = self.access.bot_username_input.as_mut()
+        {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) && !c.is_control() =>
+                {
+                    if username.chars().count() < 33 {
+                        username.push(c);
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    super::super::text_input::delete_backwards(username, key);
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.activate(Control::AccessBotUsernameSave);
                     return;
                 }
                 _ => {}

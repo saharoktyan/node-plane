@@ -325,6 +325,9 @@ impl App {
             | Control::AccessInviteTemplate(..)
             | Control::AccessInviteRevoke
             | Control::AccessInviteAccount
+            | Control::AccessBotUsername
+            | Control::AccessBotUsernameInput
+            | Control::AccessBotUsernameSave
             | Control::AccessRemovePasskeysConfirm
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)

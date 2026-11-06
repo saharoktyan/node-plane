@@ -498,8 +498,40 @@ impl App {
                 }
                 None
             }
+            Control::AccessInviteNew
+                if crate::access::bot_username_missing(&self.access.telegram_bot) =>
+            {
+                // A new invite's link names the bot: its username comes first.
+                self.activate(Control::AccessBotUsername);
+                None
+            }
             Control::AccessInviteNew => {
                 self.access_command(crate::access::Command::InviteTemplates);
+                None
+            }
+            Control::AccessBotUsername => {
+                self.access.bot_username_input = Some(
+                    self.access.telegram_bot["username"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned(),
+                );
+                self.error.clear();
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessBotUsernameInput => {
+                self.focus(control);
+                None
+            }
+            Control::AccessBotUsernameSave => {
+                if let Some(username) = &self.access.bot_username_input {
+                    let command = crate::access::Command::SetBotUsername {
+                        username: username.trim().trim_start_matches('@').to_owned(),
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
                 None
             }
             Control::AccessInviteTemplate(index) => {
@@ -734,6 +766,7 @@ impl App {
                     || self.access.password_input.take().is_some()
                     || std::mem::take(&mut self.access.passkeys_confirm)
                     || self.access.invite_templates.take().is_some()
+                    || self.access.bot_username_input.take().is_some()
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -864,6 +897,9 @@ impl App {
                         | Control::AccessInviteTemplate(_)
                         | Control::AccessInviteRevoke
                         | Control::AccessInviteAccount
+                        | Control::AccessBotUsername
+                        | Control::AccessBotUsernameInput
+                        | Control::AccessBotUsernameSave
                         | Control::AccessRemovePasskeysConfirm
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew

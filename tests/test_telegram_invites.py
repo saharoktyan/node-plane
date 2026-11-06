@@ -10,7 +10,8 @@ from tests import test_telegram_admin_profiles_rich as fixture
 
 TOKEN = 'inv_' + 'a' * 43
 INVITE = {'id': 'f' * 32, 'kind': 'new', 'vpn': True, 'tariff_id': None, 'status': 'active',
-          'expires_at': '2026-11-13T00:00:00+00:00', 'token': TOKEN, 'cabinet_link': None}
+          'expires_at': '2026-11-13T00:00:00+00:00', 'token': TOKEN, 'cabinet_link': None,
+          'telegram_link': 'https://t.me/np_bot?start=' + TOKEN, 'telegram_bot_username': 'np_bot'}
 
 
 class Backend:
@@ -21,6 +22,8 @@ class Backend:
         self.calls.append((method, path, kwargs.get('body')))
         if self.error:
             raise BackendError(self.error, 404)
+        if path == '/api/v1/invites/telegram-bot':
+            return {'username': 'old_bot', 'telegram_enabled': True}
         if path == '/api/v1/tariffs':
             return {'items': [{'id': 't' * 36, 'title': 'Month'}]}
         if path == '/api/v1/invites' and method == 'GET':
@@ -49,8 +52,11 @@ class InviteTests(IsolatedAsyncioTestCase):
         self.assertTrue(all(len(row[0].callback_data) <= 64 for row in rows))
         self.assertEqual([c.label for c in screen_parents(screen, rows, 'en', self.data)][-1], 'Accounts')
         screen, rows = await self.press('inv:make:t:' + 't' * 36, backend)
+        # The bot puts its own username first, since it changed.
+        self.assertEqual(backend.calls[-2], ('PUT', '/api/v1/invites/telegram-bot', {'username': 'np_bot'}))
         self.assertEqual(backend.calls[-1], ('POST', '/api/v1/invites', {'vpn': True, 'tariff_id': 't' * 36}))
         self.assertIn('https://t.me/np_bot?start=' + TOKEN, screen.plain())
+        self.assertIn('while the bot is @np_bot', screen.plain())
         self.assertEqual([c.label for c in screen_parents(screen, rows, 'en', self.data)][-2:], ['Accounts', 'Invites'])
         screen, rows = await self.press('inv:list', backend)
         # Only active invites are listed.

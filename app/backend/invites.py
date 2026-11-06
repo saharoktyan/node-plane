@@ -10,6 +10,10 @@ and password and is signed in; a password it sets replaces the old one and
 ends the other sessions, so the same invite recovers a lost password.
 
 Invites give member rights only; staff roles are assigned afterwards.
+
+The bot's link, `t.me/<bot>?start=<token>`, names the bot by its username,
+which the controller keeps (`telegram_bot_username`): while Telegram is on, a
+new-account invite needs it. A link stops opening if the bot's username changes.
 """
 from __future__ import annotations
 
@@ -28,6 +32,9 @@ DAYS = (1, 30)
 DEFAULT_DAYS = 7
 ACTIVE_LIMIT = 200
 NOTE_LENGTH = 128
+BOT_SETTING = 'telegram_bot_username'
+# A bot's username: 5–32 letters, digits or `_`, ending in "bot".
+BOT_USERNAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]\Z')
 
 
 def _now():
@@ -64,6 +71,39 @@ def public(row, now=None):
             'used_account_id': row['used_account_id'], 'status': status(row, now)}
 
 
+def bot_username(conn):
+    row = conn.execute('SELECT value FROM backend_system_settings WHERE key=?', (BOT_SETTING,)).fetchone()
+    return row['value'] if row else None
+
+
+def telegram_enabled(conn):
+    from .account_channels import enabled
+    return 'telegram' in enabled(conn)
+
+
+def telegram_settings(db, actor):
+    require_permission(actor, 'accounts.manage')
+    with db.connect() as conn:
+        return {'username': bot_username(conn), 'telegram_enabled': telegram_enabled(conn)}
+
+
+def set_bot_username(db, actor, username):
+    """Keeps the bot's username for invite links; links made before a change stop opening."""
+    require_permission(actor, 'accounts.manage')
+    username = username.strip().removeprefix('@') if isinstance(username, str) else ''
+    if not BOT_USERNAME.fullmatch(username):
+        raise AccessDenied('telegram_bot_username_invalid', 422)
+    with db.transaction() as conn:
+        conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value''', (BOT_SETTING, username))
+        return {'username': username, 'telegram_enabled': telegram_enabled(conn)}
+
+
+def telegram_link(conn, token):
+    username = bot_username(conn)
+    return f'https://t.me/{username}?start={token}' if username else None
+
+
 def cabinet_link(conn, token):
     """The link into the web cabinet, when there is a relay. The token is in
     the fragment, so it reaches no server log."""
@@ -95,6 +135,9 @@ def create(db, actor, *, account_id=None, vpn=False, tariff_id=None, days=DEFAUL
     if vpn:
         require_permission(actor, 'profiles.manage')
     with db.transaction() as conn:
+        if account_id is None and telegram_enabled(conn) and bot_username(conn) is None:
+            # Without it there is no link to give for the bot.
+            raise AccessDenied('telegram_bot_username_required', 409)
         if account_id is not None:
             row = conn.execute('SELECT status FROM backend_accounts WHERE id=?', (str(account_id),)).fetchone()
             if row is None or conn.execute('SELECT 1 FROM backend_account_deletions WHERE account_id=?',
@@ -122,7 +165,10 @@ def create(db, actor, *, account_id=None, vpn=False, tariff_id=None, days=DEFAUL
             (invite_id, _digest(token), 'account' if account_id else 'new', str(account_id) if account_id else None,
              int(vpn), tariff_id, note, actor.account.id, now.isoformat(), (now + timedelta(days=days)).isoformat()))
         row = conn.execute('SELECT * FROM backend_invites WHERE id=?', (invite_id,)).fetchone()
-        return {**public(row, now), 'token': token, 'cabinet_link': cabinet_link(conn, token)}
+        return {**public(row, now), 'token': token, 'cabinet_link': cabinet_link(conn, token),
+                # Only a new account registers through the bot.
+                'telegram_link': telegram_link(conn, token) if account_id is None and telegram_enabled(conn)
+                else None, 'telegram_bot_username': bot_username(conn)}
 
 
 def listed(db, actor, now=None):

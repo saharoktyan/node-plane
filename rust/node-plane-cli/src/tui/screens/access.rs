@@ -822,6 +822,8 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             count
         };
         count.div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
+    } else if app.access.bot_username_input.is_some() {
+        3u16.div_ceil(if inner.width >= 32 { 2 } else { 1 }) * 3
     } else if let Some(tariffs) = &app.access.invite_templates {
         // Nothing, VPN, the tariffs and Cancel.
         (tariffs.len().min(20) + 3).div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
@@ -1084,9 +1086,11 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 if let Some(link) = card["cabinet_link"].as_str() {
                     lines.push(Line::from(format!("Web cabinet: {link}")));
                 }
-                if card["kind"] == "new" {
+                if let Some(link) = card["telegram_link"].as_str() {
+                    lines.push(Line::from(format!("Telegram: {link}")));
                     lines.push(Line::from(format!(
-                        "Telegram: t.me/<bot>?start={token}, or send the bot /start {token}"
+                        "The link works while the bot is @{}. If the bot's username changes, it stops opening: make a new one.",
+                        crate::access::text(&card["telegram_bot_username"])
                     )));
                 } else {
                     lines.push(Line::from(format!("Token: {token}")));
@@ -1310,6 +1314,35 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             Paragraph::new(lines).wrap(Wrap { trim: false }),
             sections[1],
         );
+    } else if let Some(username) = &app.access.bot_username_input {
+        let mut lines = vec![
+            Line::from(
+                if crate::access::bot_username_missing(&app.access.telegram_bot) {
+                    "Invite links open the bot by its username. Set it before making an invite."
+                } else {
+                    "Invite links open the bot by its username."
+                },
+            ),
+            Line::from(
+                "Links made before the bot's username changes stop opening; make new ones after a change.",
+            ),
+            Line::from(format!("Bot username: @{username}▏")),
+        ];
+        if !app.error.is_empty() {
+            lines.push(Line::styled(
+                app.error.as_str(),
+                Style::default().fg(Color::Red),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        buttons = vec![
+            ("Type the username", Control::AccessBotUsernameInput),
+            ("Save", Control::AccessBotUsernameSave),
+            ("Cancel", Control::AccessBack),
+        ];
     } else if let Some(tariffs) = &app.access.invite_templates {
         frame.render_widget(
             Paragraph::new(
@@ -1336,10 +1369,18 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         draw_field(
             frame,
             content[0],
-            if app.access.tab == Tab::Accounts && !app.access.notice.is_empty() {
-                "Create profile · Choose account · Search"
+            &if app.access.tab == Tab::Accounts && !app.access.notice.is_empty() {
+                "Create profile · Choose account · Search".to_owned()
+            } else if app.access.tab == Tab::Invites {
+                match app.access.telegram_bot["username"].as_str() {
+                    Some(username) => format!("Search · Bot @{username}"),
+                    None if app.access.telegram_bot["telegram_enabled"] == true => {
+                        "Search · Bot username not set: invites need it".to_owned()
+                    }
+                    None => "Search".to_owned(),
+                }
             } else {
-                "Search"
+                "Search".to_owned()
             },
             &app.access.search,
             app.access_controls().get(app.access.selected) == Some(&Control::AccessSearch),
@@ -1393,6 +1434,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
         if app.access.tab == Tab::Invites {
             buttons.push(("New invite", Control::AccessInviteNew));
+            buttons.push(("Bot username", Control::AccessBotUsername));
         }
         if page > 0 {
             buttons.push(("Previous page", Control::AccessPage(false)));

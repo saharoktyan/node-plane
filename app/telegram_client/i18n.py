@@ -4105,6 +4105,8 @@ CATALOG['en'].update({
     'invite.template.account': 'Sign-in of an account',
     'invite.ready': 'Send this link to the person. It works once, until {date}:',
     'invite.cabinet': 'Or in the web cabinet:',
+    'invite.username_warning': 'The link works while the bot is @{username}. If the bot\'s username changes, '
+                               'the link stops opening: make a new one.',
     'invite.revoke': 'Revoke', 'invite.revoke_item': 'Revoke #{index}', 'invite.revoked': 'Invite revoked.',
     'invite.item': '{template} — until {date}', 'invite.empty': 'No active invites.',
     'invite.welcome_title': 'Welcome', 'invite.continue': 'Continue',
@@ -4140,6 +4142,8 @@ CATALOG['ru'].update({
     'invite.template.account': 'Вход в аккаунт',
     'invite.ready': 'Отправьте эту ссылку человеку. Она одноразовая и действует до {date}:',
     'invite.cabinet': 'Или в веб-кабинете:',
+    'invite.username_warning': 'Ссылка работает, пока у бота username @{username}. Если его сменить, '
+                               'ссылка перестанет открываться — создайте новую.',
     'invite.revoke': 'Отозвать', 'invite.revoke_item': 'Отозвать №{index}', 'invite.revoked': 'Приглашение отозвано.',
     'invite.item': '{template} — до {date}', 'invite.empty': 'Активных приглашений нет.',
     'invite.welcome_title': 'Добро пожаловать', 'invite.continue': 'Продолжить',

@@ -23,6 +23,7 @@ class SignInPostgresTests(unittest.TestCase):
         CredentialService(self.db).initialize_schema()
         admin = resolve_actor(Principal('test', PrincipalKind.ACCOUNT, PERMISSIONS, account_id=self.admin.id),
                               SQLIdentityRepository(self.db))
+        invites.set_bot_username(self.db, admin, 'np_test_bot')
         token = invites.create(self.db, admin, vpn=True, now=NOW)['token']
         account = invites.accept(self.db, token, login='Dana', password='correct horse battery',
                                  source='10.0.0.1', now=NOW)['account']
