@@ -114,7 +114,7 @@
               {#if options.length}
                 <div class="row">
                   {#each options as option (id(option))}
-                    <button class:primary={pending === id(option)} disabled={pending !== null}
+                    <button class="chip" class:busy={pending === id(option)} disabled={pending !== null}
                       onclick={() => issue(option)}>{label(option)}</button>
                   {/each}
                 </div>
@@ -139,5 +139,26 @@
 <style>
   .device {
     max-width: 20rem;
+  }
+  /* Protocols read as a list of what the server offers; one press issues. */
+  .chip {
+    border: none;
+    border-radius: 999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.9rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .chip:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .chip.busy {
+    background: var(--accent);
+    color: var(--accent-text);
+    opacity: 1;
+  }
+  .row {
+    gap: 0.35rem;
   }
 </style>

@@ -76,5 +76,6 @@
   "import_awg": "Import the .vpn file in AmneziaVPN or scan the QR code; the .conf file goes to a compatible AmneziaWG client.",
   "close": "Close",
   "about_tariff": "Details",
-  "no_description": "The tariff has no description."
+  "no_description": "The tariff has no description.",
+  "device_actions": "Actions for {name}"
 }

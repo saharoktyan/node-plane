@@ -6,6 +6,7 @@
   import { t } from '$lib/i18n/index.svelte';
   import { errorText } from '$lib/ui/errors';
   import { key } from '$lib/ui/format';
+  import Menu from '$lib/ui/Menu.svelte';
 
   type Device = Schemas['DeviceOutput'];
   let { profileId, list, onchange }: {
@@ -110,14 +111,13 @@
             {/if}
           </div>
           {#if device.status === 'active'}
-            <div class="row">
-              <button onclick={() => { renaming = { id: device.id, name: device.display_name }; confirming = null; }}>
-                {t('vpn.rename')}</button>
-              <button onclick={() => (confirming = { id: device.id, action: 'rotate_xray', key: key() })}>{t('vpn.rotate_xray')}</button>
-              <button onclick={() => (confirming = { id: device.id, action: 'rotate_awg', key: key() })}>{t('vpn.rotate_awg')}</button>
-              <button class="danger" onclick={() => (confirming = { id: device.id, action: 'delete', key: key() })}>
-                {t('vpn.delete')}</button>
-            </div>
+            <Menu label={t('vpn.device_actions', { name: device.display_name })} items={[
+              { label: t('vpn.rename'), select: () => { renaming = { id: device.id, name: device.display_name }; confirming = null; } },
+              { label: t('vpn.rotate_xray'), select: () => (confirming = { id: device.id, action: 'rotate_xray', key: key() }) },
+              { label: t('vpn.rotate_awg'), select: () => (confirming = { id: device.id, action: 'rotate_awg', key: key() }) },
+              { label: t('vpn.delete'), danger: true,
+                select: () => (confirming = { id: device.id, action: 'delete', key: key() }) }
+            ]} />
           {/if}
         {/if}
         {#if confirming?.id === device.id}
