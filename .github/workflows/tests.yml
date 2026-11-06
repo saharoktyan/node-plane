@@ -154,10 +154,40 @@ jobs:
           NODE_PLANE_TEST_DOCKER: '1'
         run: uv run --locked python scripts/run_ci_tests.py docker
 
+  cabinet:
+    name: Web cabinet
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web/cabinet
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/cabinet/package-lock.json
+      - run: npm ci
+      - name: API types follow the contract
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - name: Every page on mocks in a browser
+        env:
+          # Google Chrome comes with GitHub's Ubuntu images.
+          NODE_PLANE_CHROMIUM: /usr/bin/google-chrome
+        run: node scripts/smoke.mjs
+
   passed:
     name: Server and Python tests passed
     if: ${{ always() }}
-    needs: [python, postgres, rust, docker]
+    needs: [python, postgres, rust, docker, cabinet]
     runs-on: ubuntu-22.04
     steps:
       - name: Require every suite to pass

@@ -1,0 +1,18 @@
+{
+  "devices_count": "Devices: {count}",
+  "until": "until {date}",
+  "unlimited": "no end date",
+  "status": "Status",
+  "term": "Term",
+  "tariff": "Tariff",
+  "quota": "Traffic",
+  "quota_used": "{used} of {limit}",
+  "renewal": "Renewal",
+  "renewal_pending": "A renewal request is waiting",
+  "renew": "Ask for a renewal",
+  "renewal_sent": "Renewal request sent.",
+  "servers": "Servers",
+  "no_servers": "No servers yet.",
+  "protocol_xray": "VLESS",
+  "protocol_awg": "AmneziaWG"
+}

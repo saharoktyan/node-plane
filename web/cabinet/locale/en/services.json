@@ -1,0 +1,20 @@
+{
+  "title": "My services",
+  "none": "No services yet.",
+  "available": "Available",
+  "request": "Request access",
+  "requested": "Request sent. The answer comes to the Inbox.",
+  "access_requestable": "You can request access.",
+  "access_pending": "Your request is waiting.",
+  "access_unavailable": "Requests are closed now.",
+  "access_active": "You have access.",
+  "status_active": "Active",
+  "status_frozen": "Frozen",
+  "status_expired": "Expired",
+  "status_suspended": "Suspended: quota used up",
+  "name_vpn": "VPN",
+  "name_relay": "Web cabinet (relay)",
+  "name_telegram_bot": "Telegram bot",
+  "name_xray": "Xray",
+  "name_awg": "AmneziaWG"
+}

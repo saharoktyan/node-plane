@@ -113,6 +113,16 @@
   status, a summary and what can be done. They replace
   `/api/v1/me/service-access`. In the bot: Admin → Services; in Workstation:
   Settings → Services, with the relay and Telegram pages one step away.
+- The web cabinet, first on mocks (`web/cabinet`, SvelteKit and
+  TypeScript, a static single-page app): sign-in with a password or a
+  passkey, open registration with the controller's puzzle, invites; my
+  services (VPN with its term, tariff, quota and servers; services from
+  manifests through a generic page), the Inbox, settings (language, theme,
+  password, passkeys, sessions); the administration under `/admin` for
+  staff, its sections by role (overview, people, nodes, services). API
+  types come from the contract and type the mock data; texts are in
+  `locale/<language>/<section>.json`. CI type-checks, tests, builds it and
+  opens every page on mocks in Chrome.
 - The `runtime_assets` directory is gone: nodes get only the release
   version and `node.env` from the driver, and the annotated
   `node.env.example` that used to be copied next to it is now

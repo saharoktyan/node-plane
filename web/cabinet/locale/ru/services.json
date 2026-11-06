@@ -1,0 +1,20 @@
+{
+  "title": "Мои сервисы",
+  "none": "Пока нет ни одного сервиса.",
+  "available": "Можно подключить",
+  "request": "Запросить доступ",
+  "requested": "Заявка отправлена. Ответ придёт во «Входящие».",
+  "access_requestable": "Доступ можно запросить.",
+  "access_pending": "Заявка ждёт решения.",
+  "access_unavailable": "Заявки сейчас не принимаются.",
+  "access_active": "Доступ есть.",
+  "status_active": "Активен",
+  "status_frozen": "Заморожен",
+  "status_expired": "Срок истёк",
+  "status_suspended": "Приостановлен: квота исчерпана",
+  "name_vpn": "VPN",
+  "name_relay": "Веб-кабинет (relay)",
+  "name_telegram_bot": "Telegram-бот",
+  "name_xray": "Xray",
+  "name_awg": "AmneziaWG"
+}
