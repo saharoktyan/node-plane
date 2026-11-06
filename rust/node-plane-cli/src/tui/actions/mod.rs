@@ -320,6 +320,8 @@ impl App {
             | Control::AccessPasswordField(..)
             | Control::AccessPasswordSave
             | Control::AccessEndSessions
+            | Control::AccessRemovePasskeys
+            | Control::AccessRemovePasskeysConfirm
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)
             | Control::AccessProfileConfirm

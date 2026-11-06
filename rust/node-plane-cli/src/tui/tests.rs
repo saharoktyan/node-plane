@@ -9632,6 +9632,25 @@ fn the_own_account_sets_its_password_and_any_account_is_signed_out() {
         panic!("the sessions are ended");
     };
     assert_eq!(id, "other");
+    app.access.card.as_mut().unwrap()["passkeys"] = 1.into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::AccessRemovePasskeys);
+    // Removing passkeys asks first.
+    assert!(app.nodes_requested.is_none());
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessRemovePasskeysConfirm)
+    );
+    app.activate(Control::AccessRemovePasskeysConfirm);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(
+            crate::access::Command::RemovePasskeys { .. }
+        ))
+    ));
+    app.activate(Control::AccessBack);
+    assert!(!app.access.passkeys_confirm);
     app.access.card = Some(serde_json::json!(
         {"id":"me", "role":"admin", "status":"approved", "revision":3, "has_password":false, "sessions":0}
     ));

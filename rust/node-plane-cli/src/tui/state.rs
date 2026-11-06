@@ -276,6 +276,9 @@ pub(super) enum Control {
     AccessPasswordSave,
     /// Sign the open account out on every device.
     AccessEndSessions,
+    /// Remove the open account's passkeys: ask, then confirm.
+    AccessRemovePasskeys,
+    AccessRemovePasskeysConfirm,
     AccessAccountConfirm,
     AccessDeviceItem(usize),
     AccessDeviceNew,

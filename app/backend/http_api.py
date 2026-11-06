@@ -5,7 +5,7 @@ from contextlib import contextmanager, asynccontextmanager
 import fcntl
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -101,6 +101,7 @@ class MeOutput(AccountOutput):
     # The Telegram username as a login, offered while the account has none.
     login_suggestion: str | None = None
     has_password: bool = False
+    passkeys: int = 0
 
 
 class AdminAccountOutput(AccountOutput):
@@ -108,6 +109,7 @@ class AdminAccountOutput(AccountOutput):
     has_password: bool = False
     # Sessions the account is signed in with now.
     sessions: int = 0
+    passkeys: int = 0
     profile_id: str | None = None
     revision: int
     telegram_user_id: int | None
@@ -186,6 +188,41 @@ class SessionOutput(BaseModel):
 
 class SessionPage(BaseModel):
     items: list[SessionOutput]
+
+
+class WebAuthnOptions(BaseModel):
+    # Sent back with the browser's credential.
+    challenge_id: str
+    # `PublicKeyCredentialCreationOptions` or `...RequestOptions`, as JSON.
+    options: dict[str, Any]
+
+
+class PasskeyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    challenge_id: StrictStr = Field(max_length=64)
+    # The `PublicKeyCredential` as JSON (`toJSON()`).
+    credential: dict[str, Any]
+    name: StrictStr | None = Field(default=None, max_length=256)
+
+
+class PasskeySignInInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    challenge_id: StrictStr = Field(max_length=64)
+    credential: dict[str, Any]
+    device: StrictStr | None = Field(default=None, max_length=256)
+
+
+class PasskeyOutput(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    used_at: str | None
+    # Synced to other devices, such as through iCloud Keychain.
+    backed_up: bool
+
+
+class PasskeyPage(BaseModel):
+    items: list[PasskeyOutput]
 
 
 class AccountPreferencesInput(BaseModel):
@@ -1464,9 +1501,10 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from . import logins
         value = logins.current(conn, account_id)
         from .sessions import has_password
+        from .passkeys import count
         return {'login': value, 'login_change_available_at': logins.change_available_at(conn, account_id),
                 'login_suggestion': None if value else logins.suggestion(conn, account_id, username),
-                'has_password': has_password(conn, account_id)}
+                'has_password': has_password(conn, account_id), 'passkeys': count(conn, account_id)}
 
     def client_source(request):
         """The client's address: as the relay saw it when the request came through it."""
@@ -1528,6 +1566,51 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             sessions.set_password(conn, current.account.id, body.password, current=body.current_password,
                                   keep_session=sessions.current(conn, current.principal.id))
         return me(current)
+
+    @app.post('/api/v1/sessions/passkey/options', response_model=WebAuthnOptions)
+    def passkey_sign_in_options(request: Request):
+        """Start signing in with a passkey; the device offers its passkeys for the cabinet."""
+        from . import passkeys
+        return passkeys.sign_in_options(db, source=client_source(request))
+
+    @app.post('/api/v1/sessions/passkey', response_model=SessionTokens, status_code=201)
+    def passkey_sign_in(body: PasskeySignInInput, request: Request):
+        from . import passkeys
+        return passkeys.sign_in(db, body.challenge_id, body.credential,
+                                device=body.device or header(request, 'User-Agent'), source=client_source(request))
+
+    def passkey_owner(current):
+        require_permission(current, 'account.self.preferences.write')
+        if current.principal.kind == PrincipalKind.ADAPTER:
+            # A sign-in method is added only by the account itself, never on Telegram's word.
+            raise AccessDenied('passkey_not_through_adapter', 403)
+        return current.account.id
+
+    @app.post('/api/v1/me/passkeys/options', response_model=WebAuthnOptions)
+    def passkey_registration_options(current=Depends(actor)):
+        """Start adding a passkey for the cabinet's domain."""
+        from . import passkeys
+        return passkeys.registration_options(db, passkey_owner(current))
+
+    @app.post('/api/v1/me/passkeys', response_model=PasskeyOutput, status_code=201)
+    def add_passkey(body: PasskeyInput, current=Depends(actor)):
+        from . import passkeys
+        return passkeys.register(db, passkey_owner(current), body.challenge_id, body.credential, body.name)
+
+    @app.get('/api/v1/me/passkeys', response_model=PasskeyPage)
+    def my_passkeys(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import passkeys
+        with db.connect() as conn:
+            return {'items': passkeys.listed(conn, current.account.id)}
+
+    @app.delete('/api/v1/me/passkeys/{passkey_id}', status_code=204)
+    def remove_my_passkey(passkey_id: str, current=Depends(actor)):
+        require_permission(current, 'account.self.preferences.write')
+        from . import passkeys
+        with db.transaction() as conn:
+            passkeys.remove(conn, current.account.id, passkey_id)
+        return Response(status_code=204)
 
     @app.put('/api/v1/me/login', response_model=MeOutput)
     def set_my_login(body: LoginInput, current=Depends(actor)):
@@ -2377,6 +2460,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def end_account_sessions(account_id: UUID, current=Depends(actor)):
         """Sign the account out on every device."""
         return accounts.end_sessions(current, str(account_id))
+
+    @app.delete('/api/v1/accounts/{account_id}/passkeys', response_model=AdminAccountOutput)
+    def remove_account_passkeys(account_id: UUID, current=Depends(actor)):
+        """Remove every passkey of the account, such as after a lost device."""
+        return accounts.remove_passkeys(current, str(account_id))
 
     @app.patch('/api/v1/accounts/{account_id}', response_model=AdminAccountOutput)
     def update_account(account_id: UUID, body: AccountEditInput, request: Request, response: Response,

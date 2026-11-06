@@ -15,6 +15,7 @@ dependencies = [
 [dependency-groups]
 backend = [
     "argon2-cffi==25.1.0",
+    "webauthn==3.0.1",
     "fastapi==0.141.1",
     "uvicorn==0.54.0",
 ]

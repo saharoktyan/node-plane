@@ -144,6 +144,7 @@ class VpnPolicyTests(unittest.TestCase):
         payload['tables'].pop('backend_role_assignments', None)
         payload['tables'].pop('backend_logins', None)
         payload['tables'].pop('backend_passwords', None)
+        payload['tables'].pop('backend_passkeys', None)
         payload['format'] = 'node-plane-backend-v3'
         payload['checksum'] = hashlib.sha256(encoded(payload['tables'])).hexdigest()
         path.write_bytes(encoded(payload))

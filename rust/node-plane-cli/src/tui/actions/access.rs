@@ -498,15 +498,22 @@ impl App {
                 }
                 None
             }
-            Control::AccessEndSessions => {
+            Control::AccessRemovePasskeys => {
+                self.access.passkeys_confirm = true;
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessEndSessions | Control::AccessRemovePasskeysConfirm => {
                 if let Some(id) = self.access.card.as_ref().and_then(|card| {
                     card.get("_account").unwrap_or(card)["id"]
                         .as_str()
                         .map(str::to_owned)
                 }) {
-                    let command = crate::access::Command::EndSessions {
-                        id,
-                        key: uuid::Uuid::new_v4(),
+                    let key = uuid::Uuid::new_v4();
+                    let command = if control == Control::AccessEndSessions {
+                        crate::access::Command::EndSessions { id, key }
+                    } else {
+                        crate::access::Command::RemovePasskeys { id, key }
                     };
                     self.access_command(command);
                 }
@@ -673,6 +680,7 @@ impl App {
                 if std::mem::take(&mut self.access.role_picker)
                     || self.access.login_input.take().is_some()
                     || self.access.password_input.take().is_some()
+                    || std::mem::take(&mut self.access.passkeys_confirm)
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -798,6 +806,8 @@ impl App {
                         | Control::AccessPasswordField(_)
                         | Control::AccessPasswordSave
                         | Control::AccessEndSessions
+                        | Control::AccessRemovePasskeys
+                        | Control::AccessRemovePasskeysConfirm
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit

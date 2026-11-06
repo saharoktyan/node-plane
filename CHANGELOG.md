@@ -42,9 +42,19 @@
   list and end their sessions with `/api/v1/me/sessions`; administrators see
   whether an account has a password and how many sessions, and end them
   with `DELETE /api/v1/accounts/{id}/sessions`. Backups keep passwords; a
-  restore ends every session. In the bot: Settings → Password and sessions
+  restore ends every session. In the bot: Settings → Sign-in and sessions
   and the account card; in Workstation: Password on the own account card
   and End sessions on any.
+- Passkeys (WebAuthn, migration r0042): the relying party is the relay's
+  domain. `POST /api/v1/me/passkeys/options` and `POST /api/v1/me/passkeys`
+  add one (discoverable, user verification required, not through the
+  Telegram adapter), `POST /api/v1/sessions/passkey/options` and
+  `POST /api/v1/sessions/passkey` sign in without a login; the controller
+  issues single-use challenges and checks origin, signature, counter and
+  user handle. Members list and remove theirs (`/api/v1/me/passkeys`, also
+  in the bot); administrators see the count and remove all with
+  `DELETE /api/v1/accounts/{id}/passkeys` in the bot and Workstation.
+  Backups keep passkeys.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

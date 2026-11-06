@@ -612,6 +612,11 @@
             ],
             "title": "Login"
           },
+          "passkeys": {
+            "default": 0,
+            "title": "Passkeys",
+            "type": "integer"
+          },
           "profile_id": {
             "anyOf": [
               {
@@ -2416,6 +2421,11 @@
             "title": "Onboarding Completed",
             "type": "boolean"
           },
+          "passkeys": {
+            "default": 0,
+            "title": "Passkeys",
+            "type": "integer"
+          },
           "permissions": {
             "items": {
               "type": "string"
@@ -3791,6 +3801,128 @@
           "status"
         ],
         "title": "OperationTaskOutput",
+        "type": "object"
+      },
+      "PasskeyInput": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_id": {
+            "maxLength": 64,
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "PasskeyInput",
+        "type": "object"
+      },
+      "PasskeyOutput": {
+        "properties": {
+          "backed_up": {
+            "title": "Backed Up",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "used_at",
+          "backed_up"
+        ],
+        "title": "PasskeyOutput",
+        "type": "object"
+      },
+      "PasskeyPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PasskeyOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PasskeyPage",
+        "type": "object"
+      },
+      "PasskeySignInInput": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_id": {
+            "maxLength": 64,
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "PasskeySignInInput",
         "type": "object"
       },
       "PasswordInput": {
@@ -5823,6 +5955,25 @@
         "title": "VpnPolicyInput",
         "type": "object"
       },
+      "WebAuthnOptions": {
+        "properties": {
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "options"
+        ],
+        "title": "WebAuthnOptions",
+        "type": "object"
+      },
       "WorkstationAuditItemOutput": {
         "properties": {
           "account_id": {
@@ -6534,6 +6685,68 @@
           }
         ],
         "summary": "Update Account"
+      }
+    },
+    "/api/v1/accounts/{account_id}/passkeys": {
+      "delete": {
+        "description": "Remove every passkey of the account, such as after a lost device.",
+        "operationId": "remove_account_passkeys_api_v1_accounts__account_id__passkeys_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Account Passkeys"
       }
     },
     "/api/v1/accounts/{account_id}/sessions": {
@@ -8080,6 +8293,221 @@
           }
         ],
         "summary": "Dismiss My Notification"
+      }
+    },
+    "/api/v1/me/passkeys": {
+      "get": {
+        "operationId": "my_passkeys_api_v1_me_passkeys_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Passkeys"
+      },
+      "post": {
+        "operationId": "add_passkey_api_v1_me_passkeys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Passkey"
+      }
+    },
+    "/api/v1/me/passkeys/options": {
+      "post": {
+        "description": "Start adding a passkey for the cabinet's domain.",
+        "operationId": "passkey_registration_options_api_v1_me_passkeys_options_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Passkey Registration Options"
+      }
+    },
+    "/api/v1/me/passkeys/{passkey_id}": {
+      "delete": {
+        "operationId": "remove_my_passkey_api_v1_me_passkeys__passkey_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "passkey_id",
+            "required": true,
+            "schema": {
+              "title": "Passkey Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove My Passkey"
       }
     },
     "/api/v1/me/password": {
@@ -13263,6 +13691,63 @@
           }
         },
         "summary": "Sign In"
+      }
+    },
+    "/api/v1/sessions/passkey": {
+      "post": {
+        "operationId": "passkey_sign_in_api_v1_sessions_passkey_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeySignInInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokens"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passkey Sign In"
+      }
+    },
+    "/api/v1/sessions/passkey/options": {
+      "post": {
+        "description": "Start signing in with a passkey; the device offers its passkeys for the cabinet.",
+        "operationId": "passkey_sign_in_options_api_v1_sessions_passkey_options_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Passkey Sign In Options"
       }
     },
     "/api/v1/sessions/refresh": {

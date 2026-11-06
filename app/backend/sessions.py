@@ -106,41 +106,68 @@ def _tokens(conn, session_id, account_id, now):
             'refresh_token': refresh, 'refresh_expires_at': expires.isoformat()}, _digest(refresh), expires
 
 
+def device_name(device):
+    return (device or '').strip()[:DEVICE_LENGTH] or 'Unknown device'
+
+
+def open_session(conn, account_id, method, device, now):
+    """Tokens of a new session of the account, signed in by `method`."""
+    session_id = uuid4().hex
+    result, refresh_hash, expires = _tokens(conn, session_id, account_id, now)
+    conn.execute('''INSERT INTO backend_sessions(id, account_id, method, device, refresh_hash,
+        created_at, used_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+        (session_id, account_id, method, device_name(device), refresh_hash, now.isoformat(), now.isoformat(),
+         expires.isoformat()))
+    return result
+
+
+# Accounts that may sign in: approved and not being deleted.
+ACTIVE_ACCOUNT_SQL = '''a.status = 'approved'
+    AND NOT EXISTS (SELECT 1 FROM backend_account_deletions d WHERE d.account_id = a.id)'''
+
+
+def limited(conn, scopes, now):
+    """Refuses sign-in while a scope has too many recent failures."""
+    for scope in scopes:
+        if _failures(conn, scope, now) >= (LOGIN_FAILURES if scope.startswith('login:') else SOURCE_FAILURES):
+            raise AccessDenied('sign_in_rate_limited', 429)
+
+
+def failed(conn, scopes, now):
+    for scope in scopes:
+        conn.execute('INSERT INTO backend_login_attempts(scope, attempted_at) VALUES (?, ?)', (scope, now.isoformat()))
+    # Older attempts no longer count.
+    conn.execute('DELETE FROM backend_login_attempts WHERE attempted_at<=?', ((now - WINDOW).isoformat(),))
+
+
+def source_scope(source):
+    return 'source:' + (source or 'unknown')
+
+
 def sign_in(db, login, password, *, device, source, now=None):
     """Tokens of a new session, or `sign_in_failed` for any wrong pair."""
     now = now or _now()
     key = login.lower() if isinstance(login, str) and len(login) <= 32 else ''
-    device = (device or '').strip()[:DEVICE_LENGTH] or 'Unknown device'
-    scopes = ('login:' + key, 'source:' + (source or 'unknown'))
+    scopes = ('login:' + key, source_scope(source))
     with db.transaction() as conn:
-        if _failures(conn, scopes[0], now) >= LOGIN_FAILURES or _failures(conn, scopes[1], now) >= SOURCE_FAILURES:
-            raise AccessDenied('sign_in_rate_limited', 429)
-        row = conn.execute('''SELECT a.id, p.hash FROM backend_logins l
+        limited(conn, scopes, now)
+        row = conn.execute(f'''SELECT a.id, p.hash FROM backend_logins l
             JOIN backend_accounts a ON a.id = l.account_id
             JOIN backend_passwords p ON p.account_id = a.id
-            WHERE l.key = ? AND l.released_at IS NULL AND a.status = 'approved'
-            AND NOT EXISTS (SELECT 1 FROM backend_account_deletions d WHERE d.account_id = a.id)''',
+            WHERE l.key = ? AND l.released_at IS NULL AND {ACTIVE_ACCOUNT_SQL}''',
             (key,)).fetchone() if key else None
         valid = _verify(row['hash'] if row else _DUMMY, password if isinstance(password, str) else '')
         if not (row and valid):
-            for scope in scopes:
-                conn.execute('INSERT INTO backend_login_attempts(scope, attempted_at) VALUES (?, ?)',
-                             (scope, now.isoformat()))
-            # Older attempts no longer count.
-            conn.execute('DELETE FROM backend_login_attempts WHERE attempted_at<=?', ((now - WINDOW).isoformat(),))
-            failed = True
+            failed(conn, scopes, now)
+            refused = True
         else:
-            failed = False
+            refused = False
             if _hasher.check_needs_rehash(row['hash']):
                 conn.execute('UPDATE backend_passwords SET hash=? WHERE account_id=?',
                              (_hasher.hash(password), row['id']))
             conn.execute('DELETE FROM backend_login_attempts WHERE scope=?', (scopes[0],))
-            session_id = uuid4().hex
-            result, refresh_hash, expires = _tokens(conn, session_id, row['id'], now)
-            conn.execute('''INSERT INTO backend_sessions(id, account_id, method, device, refresh_hash,
-                created_at, used_at, expires_at) VALUES (?, ?, 'password', ?, ?, ?, ?, ?)''',
-                (session_id, row['id'], device, refresh_hash, now.isoformat(), now.isoformat(), expires.isoformat()))
-    if failed:
+            result = open_session(conn, row['id'], 'password', device, now)
+    if refused:
         # Outside the transaction, so the counted attempt stays.
         raise AccessDenied('sign_in_failed', 401)
     return result

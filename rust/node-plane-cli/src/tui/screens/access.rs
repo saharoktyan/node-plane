@@ -1066,13 +1066,14 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
         if app.access.tab == Tab::Accounts && card["has_password"].is_boolean() {
             lines.push(Line::from(format!(
-                "Password: {} · Sessions: {}",
+                "Password: {} · Sessions: {} · Passkeys: {}",
                 if card["has_password"] == true {
                     "set"
                 } else {
                     "not set"
                 },
-                card["sessions"].as_u64().unwrap_or(0)
+                card["sessions"].as_u64().unwrap_or(0),
+                card["passkeys"].as_u64().unwrap_or(0)
             )));
         }
         if app.access.tab == Tab::Profiles {
@@ -1136,6 +1137,14 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             buttons = vec![
                 ("Type the login", Control::AccessLoginInput),
                 ("Save", Control::AccessLoginSave),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else if app.access.passkeys_confirm {
+            lines.push(Line::from(
+                "Remove every passkey of this account? It signs in with a password or Telegram until it adds a new one in the web cabinet.",
+            ));
+            buttons = vec![
+                ("Remove", Control::AccessRemovePasskeysConfirm),
                 ("Cancel", Control::AccessBack),
             ];
         } else if let Some(fields) = &app.access.password_input {
@@ -1204,6 +1213,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     }
                     if account["sessions"].as_u64().unwrap_or(0) > 0 {
                         buttons.push(("End sessions", Control::AccessEndSessions));
+                    }
+                    if account["passkeys"].as_u64().unwrap_or(0) > 0 {
+                        buttons.push(("Remove passkeys", Control::AccessRemovePasskeys));
                     }
                 }
                 if account["role"] != "admin" {

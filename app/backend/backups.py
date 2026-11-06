@@ -47,6 +47,7 @@ TABLES = (
     "backend_role_assignments",
     "backend_logins",
     "backend_passwords",
+    "backend_passkeys",
 )
 ADDITIVE_COLUMNS = {
     "backend_access_requests": ("telegram_subject", "service"),
@@ -56,6 +57,7 @@ CLEAR = (
     # Everyone signs in again after a restore.
     "backend_login_attempts",
     "backend_sessions",
+    "backend_webauthn_challenges",
     # Rebuilt from the restored Telegram logins.
     "backend_account_channels",
     # Rebuilt from the restored nodes.
@@ -263,7 +265,7 @@ class BackupService:
                 - ({'backend_retired_peers', 'backend_quota_state', 'backend_quota_periods'} if before_v6 else set())
                 - ({'backend_tariffs', 'backend_profile_tariffs'} if before_v7 else set())
                 - ({'backend_role_assignments'} if before_v8 else set())
-                - ({'backend_logins', 'backend_passwords'} if before_v9 else set()))
+                - ({'backend_logins', 'backend_passwords', 'backend_passkeys'} if before_v9 else set()))
             if payload['format'] not in ('node-plane-backend-v1', 'node-plane-backend-v2', 'node-plane-backend-v3',
                                          'node-plane-backend-v4', 'node-plane-backend-v5', 'node-plane-backend-v6',
                                          'node-plane-backend-v7', 'node-plane-backend-v8',
@@ -349,6 +351,9 @@ class BackupService:
                 payload['tables']['backend_logins'] = {
                     'columns': ['key', 'login', 'account_id', 'kind', 'claimed_at', 'released_at'], 'rows': []}
                 payload['tables']['backend_passwords'] = {'columns': ['account_id', 'hash', 'set_at'], 'rows': []}
+                payload['tables']['backend_passkeys'] = {'columns': [
+                    'id', 'account_id', 'rp_id', 'public_key', 'sign_count', 'transports_json', 'name', 'aaguid',
+                    'backed_up', 'created_at', 'used_at'], 'rows': []}
             return payload
         except (ValueError, KeyError, TypeError, RecursionError):
             raise AccessDenied("backup_invalid", 409) from None
@@ -636,7 +641,7 @@ class BackupService:
                 elif table == "backend_profiles":
                     rows = [r for r in rows if r['id'] not in deleted_profiles]
                 elif table in {"backend_external_identities", "backend_access_requests", "backend_role_assignments",
-                               "backend_logins", "backend_passwords"}:
+                               "backend_logins", "backend_passwords", "backend_passkeys"}:
                     rows = [r for r in rows if r['account_id'] not in deleted_accounts]
                 if table == "backend_access_requests":
                     rows = [{**r,'decided_by':None} if r.get('decided_by') in deleted_accounts else r for r in rows]
@@ -733,6 +738,8 @@ class BackupService:
                 "SELECT * FROM backend_logins WHERE account_id=?", (actor.account.id,)).fetchall()]
             own_password = [dict(r) for r in conn.execute(
                 "SELECT * FROM backend_passwords WHERE account_id=?", (actor.account.id,)).fetchall()]
+            own_passkeys = [dict(r) for r in conn.execute(
+                "SELECT * FROM backend_passkeys WHERE account_id=?", (actor.account.id,)).fetchall()]
             own_roles = [
                 dict(r)
                 for r in conn.execute(
@@ -805,6 +812,9 @@ class BackupService:
                 for row in tables[table]["rows"]:
                     if table == "backend_passwords" and row["account_id"] == actor.account.id:
                         continue
+                    if table == "backend_passkeys" and (row["account_id"] == actor.account.id
+                                                        or row["id"] in {k["id"] for k in own_passkeys}):
+                        continue
                     if table == "backend_logins" and (row["account_id"] == actor.account.id or row["key"] in own_keys):
                         # The restoring administrator's own logins are put back below.
                         continue
@@ -832,7 +842,8 @@ class BackupService:
                         f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
                         tuple(row[c] for c in columns),
                     )
-            for table, rows in (("backend_logins", own_logins), ("backend_passwords", own_password)):
+            for table, rows in (("backend_logins", own_logins), ("backend_passwords", own_password),
+                                ("backend_passkeys", own_passkeys)):
                 for row in rows:
                     conn.execute(f"INSERT INTO {table} ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
                                  tuple(row.values()))

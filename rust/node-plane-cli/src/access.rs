@@ -54,6 +54,11 @@ pub enum Command {
         id: String,
         key: Uuid,
     },
+    /// Removes every passkey of the account.
+    RemovePasskeys {
+        id: String,
+        key: Uuid,
+    },
     /// Sets or changes the password of the Workstation's own account.
     SetPassword {
         body: Value,
@@ -125,6 +130,12 @@ impl Command {
             Self::EndSessions { id, key } => (
                 hyper::Method::DELETE,
                 format!("/api/v1/accounts/{id}/sessions"),
+                None,
+                Some(*key),
+            ),
+            Self::RemovePasskeys { id, key } => (
+                hyper::Method::DELETE,
+                format!("/api/v1/accounts/{id}/passkeys"),
                 None,
                 Some(*key),
             ),
@@ -725,6 +736,8 @@ pub struct Browser {
     pub password_input: Option<[String; 3]>,
     /// Which of the password fields takes typing.
     pub password_field: usize,
+    /// Removing the open account's passkeys waits for confirmation.
+    pub passkeys_confirm: bool,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -914,9 +927,16 @@ impl Browser {
                 }
                 self.result = Some("Password saved.".into());
             }
-            command @ (Command::AccountMutate { .. } | Command::EndSessions { .. }) => {
+            command @ (Command::AccountMutate { .. }
+            | Command::EndSessions { .. }
+            | Command::RemovePasskeys { .. }) => {
                 let body = match &command {
                     Command::AccountMutate { body, .. } => body.clone(),
+                    Command::RemovePasskeys { .. } => {
+                        self.passkeys_confirm = false;
+                        self.result = Some("The account's passkeys were removed.".into());
+                        Value::Null
+                    }
                     _ => {
                         self.result = Some("The account was signed out on every device.".into());
                         Value::Null

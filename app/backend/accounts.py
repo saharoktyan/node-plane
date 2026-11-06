@@ -55,6 +55,7 @@ class AccountService:
         if 'has_password' in row.keys():
             result['has_password'] = bool(row['has_password'])
             result['sessions'] = row['sessions']
+            result['passkeys'] = row['passkeys']
         if 'roles' in row.keys():
             result['roles'] = row['roles']
         result['deleted'] = bool(row['deleted']) if 'deleted' in row.keys() else False
@@ -68,6 +69,7 @@ class AccountService:
             EXISTS (SELECT 1 FROM backend_passwords w WHERE w.account_id = a.id) AS has_password,
             (SELECT COUNT(*) FROM backend_sessions s WHERE s.account_id = a.id AND s.revoked_at IS NULL
                 AND s.expires_at > ?) AS sessions,
+            (SELECT COUNT(*) FROM backend_passkeys k WHERE k.account_id = a.id) AS passkeys,
             (SELECT p.id FROM backend_profiles p WHERE p.owner_account_id=a.id ORDER BY p.id LIMIT 1) AS profile_id
             FROM backend_accounts a
             LEFT JOIN backend_external_identities i ON i.account_id = a.id AND i.provider = 'telegram'
@@ -102,6 +104,16 @@ class AccountService:
             if conn.execute('SELECT 1 FROM backend_accounts WHERE id=?', (account_id,)).fetchone() is None:
                 raise AccessDenied('resource_not_found', 404)
             revoke_all(conn, account_id)
+        return self.get(actor, account_id)
+
+    def remove_passkeys(self, actor, account_id):
+        """Removes every passkey of the account; its sessions stay."""
+        require_permission(actor, 'accounts.manage')
+        from .passkeys import remove_all
+        with self.db.transaction() as conn:
+            if conn.execute('SELECT 1 FROM backend_accounts WHERE id=?', (account_id,)).fetchone() is None:
+                raise AccessDenied('resource_not_found', 404)
+            remove_all(conn, account_id)
         return self.get(actor, account_id)
 
     def list(self, actor, *, limit=25, cursor=None):

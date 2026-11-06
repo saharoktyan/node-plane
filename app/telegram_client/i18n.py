@@ -4082,22 +4082,36 @@ CATALOG['ru'].update({
 })
 
 CATALOG['en'].update({
-    'sessions.title': 'Password and sessions',
+    'sessions.title': 'Sign-in and sessions',
     'sessions.no_password': 'No password set. It is not entered in Telegram: set it in the web cabinet or in Workstation.',
     'sessions.password_set': 'Password set. A session is a device signed in with it.',
-    'sessions.open': 'Sessions', 'sessions.empty': 'No sessions.',
+    'sessions.open': 'Sessions and passkeys', 'sessions.empty': 'No sessions.',
     'sessions.item': '{device} — last active {used}',
     'sessions.end': 'End: {device}', 'sessions.end_all': 'Sign out everywhere',
     'sessions.card_password': 'Password: set', 'sessions.card_no_password': 'Password: not set',
     'sessions.card_count': 'Sessions: {count}', 'sessions.end_account': 'End sessions',
+    'sessions.passkeys': 'Passkeys: {count}. They are added in the web cabinet.',
+    'sessions.passkeys_title': 'Passkeys:', 'sessions.passkey': '{name} — added {created}',
+    'sessions.remove_passkey': 'Remove passkey: {name}',
+    'sessions.card_passkeys': 'Passkeys: {count}', 'sessions.remove_passkeys': 'Remove passkeys',
+    'sessions.remove_passkeys_confirm': 'Remove every passkey of this account? It will sign in with a password '
+                                        'or Telegram until it adds a new one in the web cabinet.',
+    'sessions.confirm_remove': 'Remove',
 })
 CATALOG['ru'].update({
-    'sessions.title': 'Пароль и сессии',
+    'sessions.title': 'Вход и сессии',
     'sessions.no_password': 'Пароль не задан. В Telegram он не вводится: задайте его в веб-кабинете или в Workstation.',
     'sessions.password_set': 'Пароль задан. Сессия — устройство, на котором с ним выполнен вход.',
-    'sessions.open': 'Сессии', 'sessions.empty': 'Сессий нет.',
+    'sessions.open': 'Сессии и passkeys', 'sessions.empty': 'Сессий нет.',
     'sessions.item': '{device} — активна {used}',
     'sessions.end': 'Завершить: {device}', 'sessions.end_all': 'Выйти везде',
     'sessions.card_password': 'Пароль: задан', 'sessions.card_no_password': 'Пароль: не задан',
     'sessions.card_count': 'Сессий: {count}', 'sessions.end_account': 'Завершить сессии',
+    'sessions.passkeys': 'Passkeys: {count}. Они добавляются в веб-кабинете.',
+    'sessions.passkeys_title': 'Passkeys:', 'sessions.passkey': '{name} — добавлен {created}',
+    'sessions.remove_passkey': 'Удалить passkey: {name}',
+    'sessions.card_passkeys': 'Passkeys: {count}', 'sessions.remove_passkeys': 'Удалить passkeys',
+    'sessions.remove_passkeys_confirm': 'Удалить все passkeys этого аккаунта? Входить он сможет по паролю '
+                                        'или через Telegram, пока не добавит новый в веб-кабинете.',
+    'sessions.confirm_remove': 'Удалить',
 })

@@ -125,11 +125,13 @@ An account can have a login: the name it will sign in to the web cabinet with. A
 
 A member sets their login in the bot's **Settings → Login**; the bot offers their Telegram username when it fits and is free. A member can change it once in 30 days, and the old login stays reserved for them for 30 days. Administrators change any account's login at any time: on the account card in the bot, or with **Login** on the account card in Workstation's **Accounts**. Deleting an account frees its login after 30 days.
 
-## Password and sessions
+## Password, passkeys and sessions
 
 With a login, an account can have a password for the web cabinet. A password is never entered in Telegram: an administrator sets their own with **Password** on their account card in Workstation's **Accounts**, and members will set theirs in the web cabinet. A password is 10–256 characters and differs from the login; changing it needs the current one and signs the account out everywhere else.
 
-Each device signed in with a password is a session. A session lasts 30 days from its last use. Repeated wrong passwords pause signing in to that login, or from that address, for 15 minutes. In the bot, **Settings → Password and sessions** shows whether a password is set and lists the sessions, each with its own **End** and **Sign out everywhere** for all of them. Administrators see on the account card, in the bot and in Workstation, whether an account has a password and how many sessions it has, and **End sessions** signs it out on every device. Restoring a backup ends every session; passwords are kept.
+A passkey signs in without a login or password: Face ID or Touch ID with iCloud Keychain, Google Password Manager, Windows Hello or a hardware key. Passkeys are added in the web cabinet and work only on the cabinet's domain, the relay's, so they need a relay; an account can have up to 20. Like a password, a passkey is never added through Telegram.
+
+Each device signed in with a password or passkey is a session. A session lasts 30 days from its last use. Repeated wrong passwords pause signing in to that login, or from that address, for 15 minutes. In the bot, **Settings → Sign-in and sessions** shows whether a password is set and how many passkeys there are, and lists the sessions, each with its own **End** and **Sign out everywhere** for all of them, and the passkeys, each with **Remove passkey**. Administrators see on the account card, in the bot and in Workstation, whether an account has a password and how many sessions and passkeys it has; **End sessions** signs it out on every device, and **Remove passkeys** (after a confirmation) removes its passkeys, such as after a lost device. Restoring a backup ends every session; passwords and passkeys are kept.
 
 ## Delete an account
 
