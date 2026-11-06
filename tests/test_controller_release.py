@@ -43,7 +43,11 @@ class ControllerReleaseTests(unittest.TestCase):
         subprocess.run(['git', 'init', '-q', str(self.source)], check=True, timeout=30)
         subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True, timeout=30)
         self.archive = self.root / release.ASSET
-        release.build(self.source, self.archive, self.tag, self.commit)
+        self.cabinet = self.root / 'cabinet-build'
+        (self.cabinet / '_app/immutable').mkdir(parents=True)
+        (self.cabinet / 'index.html').write_text('<html>cabinet</html>')
+        (self.cabinet / '_app/immutable/start.js').write_text('js')
+        release.build(self.source, self.archive, self.tag, self.commit, self.cabinet)
 
     def catalog_fetch(self, entries):
         def fetch(url, limit=release.LIMIT):
@@ -78,6 +82,27 @@ class ControllerReleaseTests(unittest.TestCase):
         result = subprocess.run(['python3', '-m', 'compileall', '-q', str(destination / 'app')],
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_package_carries_the_web_cabinet_build(self):
+        _, contents = release.verify(self.archive, self.tag, self.commit)
+        self.assertEqual(contents['cabinet/index.html'], b'<html>cabinet</html>')
+        self.assertEqual(contents['cabinet/_app/immutable/start.js'], b'js')
+        destination = self.root / 'with-cabinet'
+        release.extract(self.archive, destination, self.tag, self.commit)
+        self.assertTrue((destination / 'cabinet/index.html').is_file())
+
+    def test_build_refuses_a_cabinet_without_its_page_or_with_odd_files(self):
+        empty = self.root / 'no-page'
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, 'no index.html'):
+            release.build(self.source, self.root / 'a.tar.gz', self.tag, self.commit, empty)
+        (self.cabinet / 'app.js.map').write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'Unexpected file'):
+            release.build(self.source, self.root / 'b.tar.gz', self.tag, self.commit, self.cabinet)
+        (self.cabinet / 'app.js.map').unlink()
+        (self.cabinet / 'link.js').symlink_to(self.cabinet / 'index.html')
+        with self.assertRaisesRegex(ValueError, 'Unexpected file'):
+            release.build(self.source, self.root / 'c.tar.gz', self.tag, self.commit, self.cabinet)
 
     def test_dependency_layout_requires_project_and_lock_without_manifest_hint(self):
         base_manifest, base_contents = release.verify(self.archive)
@@ -334,16 +359,16 @@ trap 'on_error $?' ERR
     def test_build_refuses_missing_or_empty_legal_file(self):
         subprocess.run(['git', '-C', str(self.source), 'rm', '-f', '-q', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Missing controller runtime files.*THIRD_PARTY_LICENSES'):
-            release.build(self.source, self.root / 'missing.tar.gz', self.tag, self.commit)
+            release.build(self.source, self.root / 'missing.tar.gz', self.tag, self.commit, self.cabinet)
         (self.source / 'THIRD_PARTY_LICENSES').write_text('')
         subprocess.run(['git', '-C', str(self.source), 'add', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: THIRD_PARTY_LICENSES'):
-            release.build(self.source, self.root / 'empty.tar.gz', self.tag, self.commit)
+            release.build(self.source, self.root / 'empty.tar.gz', self.tag, self.commit, self.cabinet)
         (self.source / 'THIRD_PARTY_LICENSES').write_text('fixture\n')
         (self.source / 'LICENSE').write_text('')
         subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE', 'THIRD_PARTY_LICENSES'], check=True, capture_output=True, timeout=30)
         with self.assertRaisesRegex(ValueError, 'Legal file must not be empty: LICENSE'):
-            release.build(self.source, self.root / 'empty-license.tar.gz', self.tag, self.commit)
+            release.build(self.source, self.root / 'empty-license.tar.gz', self.tag, self.commit, self.cabinet)
         shutil.copyfile(ROOT / 'LICENSE', self.source / 'LICENSE')
         subprocess.run(['git', '-C', str(self.source), 'add', 'LICENSE'], check=True, capture_output=True, timeout=30)
 

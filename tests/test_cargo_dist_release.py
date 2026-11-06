@@ -27,6 +27,8 @@ class CargoDistReleaseTests(unittest.TestCase):
             (root / 'VERSION').write_text('0.4.3-alpha.59\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
+            shutil.copyfile(ROOT / 'scripts/build_cabinet.sh', root / 'scripts/build_cabinet.sh')
+            (root / 'web/cabinet').mkdir(parents=True)
             shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')
             (root / 'app/services').mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / 'app/services/release_versions.py', root / 'app/services/release_versions.py')
@@ -51,6 +53,9 @@ class CargoDistReleaseTests(unittest.TestCase):
             for name, content in {
                 'cargo': '#!/bin/sh\nexit 0\n',
                 'protoc': '#!/bin/sh\nexit 0\n',
+                # The cabinet's build: a page is enough for packaging.
+                'npm': '#!/bin/sh\n[ "$1" != run ] || { mkdir -p build && echo "<html></html>" > build/index.html; }\n'
+                       'exit 0\n',
                 'readelf': '#!/bin/sh\n[ "$1" != --version-info ] || echo GLIBC_2.35\nexit 0\n',
             }.items():
                 path = commands / name
@@ -122,6 +127,10 @@ class CargoDistReleaseTests(unittest.TestCase):
             self.assertEqual(payload['THIRD_PARTY_LICENSES'], b'fixture\n')
             self.assertNotIn('.env', payload)
             self.assertNotIn('scripts/build_release_stack.sh', payload)
+            self.assertEqual(payload['cabinet/index.html'], b'<html></html>\n')
+            with tarfile.open(out / 'node-plane-cabinet.tar.gz', 'r:gz') as archive:
+                self.assertIn('cabinet/index.html', archive.getnames())
+                self.assertIn('LICENSE', archive.getnames())
             # The global packaging job consumes the parallel job's artifacts,
             # and must not fall back to compiling when an artifact is missing.
             incoming = root / 'dist/server-input'
@@ -150,6 +159,8 @@ class CargoDistReleaseTests(unittest.TestCase):
             (root / 'VERSION').write_text('0.4.3-alpha.59\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
+            shutil.copyfile(ROOT / 'scripts/build_cabinet.sh', root / 'scripts/build_cabinet.sh')
+            (root / 'web/cabinet').mkdir(parents=True)
             shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')
             (root / 'app/services').mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / 'app/services/release_versions.py', root / 'app/services/release_versions.py')
@@ -173,6 +184,9 @@ class CargoDistReleaseTests(unittest.TestCase):
             for name, content in {
                 'cargo': '#!/bin/sh\nexit 0\n',
                 'protoc': '#!/bin/sh\nexit 0\n',
+                # The cabinet's build: a page is enough for packaging.
+                'npm': '#!/bin/sh\n[ "$1" != run ] || { mkdir -p build && echo "<html></html>" > build/index.html; }\n'
+                       'exit 0\n',
                 'readelf': '#!/bin/sh\n[ "$1" != --version-info ] || echo GLIBC_2.35\nexit 0\n',
             }.items():
                 path = commands / name

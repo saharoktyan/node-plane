@@ -35,6 +35,12 @@ ROOT_FILES = {'VERSION', 'RELEASE_CHANNEL', '.env.example'} | PYTHON_PROJECT_FIL
 REQUIRED = (ROOT_FILES - {'THIRD_PARTY_LICENSES'}) | {'app/backend/http_api.py', 'app/backend/executor.py',
                         'app/telegram_client/main.py', 'app/services/release_versions.py'} | {'scripts/' + s for s in SCRIPTS}
 BUILD_REQUIRED = REQUIRED | LEGAL_FILES
+# The web cabinet's build rides in the controller's package under cabinet/:
+# the controller hands it to the nodes that serve it, and it updates with
+# the controller. Only the file types the build makes and the relay serves.
+CABINET = 'cabinet/'
+CABINET_SUFFIXES = {'.html', '.js', '.css', '.json', '.svg', '.png', '.ico', '.woff', '.woff2', '.txt',
+                    '.webmanifest'}
 TAG = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 LIMIT = 64 * 1024 * 1024
@@ -50,10 +56,26 @@ def allowed(name, *, forward_compatible=False):
     if forward_compatible:
         return True
     return name in ROOT_FILES or name in {'scripts/' + s for s in SCRIPTS} or (
-        name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts)
+        name.startswith('app/') and path.suffix == '.py' and '__pycache__' not in path.parts) or (
+        name.startswith(CABINET) and path.suffix in CABINET_SUFFIXES)
 
 
-def build(root, output, ref, commit):
+def cabinet_files(cabinet):
+    """The cabinet's built files by their package names."""
+    if not (cabinet / 'index.html').is_file():
+        raise ValueError('The web cabinet build has no index.html')
+    files = {}
+    for path in sorted(cabinet.rglob('*')):
+        if path.is_dir() and not path.is_symlink():
+            continue
+        name = CABINET + path.relative_to(cabinet).as_posix()
+        if path.is_symlink() or not path.is_file() or not allowed(name):
+            raise ValueError('Unexpected file in the web cabinet build: ' + name)
+        files[name] = path.read_bytes()
+    return files
+
+
+def build(root, output, ref, commit, cabinet):
     if not TAG.fullmatch(ref) or not COMMIT.fullmatch(commit):
         raise ValueError('A release tag and full commit SHA are required')
     # Only tracked files: no local credentials, test outputs or build caches.
@@ -76,6 +98,7 @@ def build(root, output, ref, commit):
         if name in LEGAL_FILES and path.stat().st_size == 0:
             raise ValueError(f'Legal file must not be empty: {name}')
         payload[name] = path.read_bytes()
+    payload.update(cabinet_files(cabinet))
     payload['BUILD_COMMIT'] = (commit + '\n').encode()
     manifest = {'format': 1, 'ref': ref, 'version': version, 'commit': commit,
                 'python_dependencies': 'uv', 'channel': channel,
@@ -343,6 +366,8 @@ def main():
             cmd.add_argument('--commit')
         if name in {'build', 'copy', 'source-refs', 'validate-source'}:
             cmd.add_argument('--root', type=Path, required=True)
+        if name == 'build':
+            cmd.add_argument('--cabinet', type=Path, required=True)
         if name in {'extract', 'download', 'copy'}:
             cmd.add_argument('--destination', type=Path, required=True)
         if name in {'build', 'verify', 'extract', 'download', 'validate-source'}:
@@ -364,7 +389,7 @@ def main():
             for ref in sorted(refs, key=sort_key, reverse=True):
                 print(ref)
         elif args.command == 'build':
-            build(args.root, args.archive, args.ref, args.commit or '')
+            build(args.root, args.archive, args.ref, args.commit or '', args.cabinet)
         elif args.command == 'copy':
             copy_package(args.root, args.destination)
         elif args.command == 'verify':

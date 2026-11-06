@@ -33,6 +33,7 @@ local-artifacts-jobs = ["./release-server"]
 build = ["bash", "scripts/build_release_stack.sh", "--from-ci"]
 artifacts = [
   "dist/release-stack/node-plane-controller.tar.gz",
+  "dist/release-stack/node-plane-cabinet.tar.gz",
   "dist/release-stack/node-plane-driver-linux-amd64.tar.gz",
   "dist/release-stack/node-plane-agent-linux-amd64.tar.gz",
   "dist/release-stack/node-plane-agent-linux-amd64.release",

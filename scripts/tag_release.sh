@@ -239,15 +239,21 @@ build_release_artifacts() {
   set_step "package agent artifact"
   tar -C "$tmp_dir" -czf "${release_dir}/${agent_name}.tar.gz" "$agent_name" LICENSE THIRD_PARTY_LICENSES
 
+  set_step "build web cabinet"
+  bash scripts/build_cabinet.sh "${tmp_dir}/cabinet"
+  mv "${tmp_dir}/node-plane-cabinet.tar.gz" "${release_dir}/node-plane-cabinet.tar.gz"
+
   set_step "package controller runtime"
   python3 scripts/controller_release.py build --root "$ROOT_DIR" \
-    --archive "${release_dir}/${controller_name}" --ref "$tag" --commit "$(git rev-parse HEAD)"
+    --archive "${release_dir}/${controller_name}" --ref "$tag" --commit "$(git rev-parse HEAD)" \
+    --cabinet "${tmp_dir}/cabinet"
   python3 scripts/validate_release.py --tag "$tag" --commit "$(git rev-parse HEAD)" \
     --metadata "${release_dir}/RELEASE_METADATA.txt"
 
   (
     cd "$release_dir"
-    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "$controller_name" RELEASE_METADATA.txt > "$checksums_file"
+    sha256sum "${driver_name}.tar.gz" "${agent_name}.tar.gz" "$controller_name" node-plane-cabinet.tar.gz \
+      RELEASE_METADATA.txt > "$checksums_file"
   )
 
   rm -rf "$tmp_dir"

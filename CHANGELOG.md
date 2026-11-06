@@ -9,6 +9,10 @@
   The page runs only its own scripts (a content policy with their hashes)
   and may be framed only by Telegram, for the Mini App. Without the files the
   relay answers only the API, as before.
+- Releases build the web cabinet: the controller's package carries it under
+  `cabinet/` (it reaches the nodes from the controller and updates with it),
+  and `node-plane-cabinet.tar.gz` holds the same files on their own. Building
+  a release needs npm.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

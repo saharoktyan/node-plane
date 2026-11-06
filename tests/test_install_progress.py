@@ -146,7 +146,10 @@ esac
         subprocess.run(['git', 'init', '-q', str(self.source)], check=True, timeout=30)
         subprocess.run(['git', '-C', str(self.source), 'add', '-f', '.'], check=True, timeout=30)
         archive = self.root / release.ASSET
-        release.build(self.source, archive, 'v0.4.3-alpha.99', 'a' * 40)
+        cabinet = self.root / 'cabinet-build'
+        cabinet.mkdir()
+        (cabinet / 'index.html').write_text('<html></html>')
+        release.build(self.source, archive, 'v0.4.3-alpha.99', 'a' * 40, cabinet)
         archive_source = self.root / 'controller'
         release.extract(archive, archive_source)
         self.source = archive_source

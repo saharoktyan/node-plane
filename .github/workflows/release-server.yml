@@ -33,6 +33,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/cargo-about.tar.gz" -C "$RUNNER_TEMP/license-tools" --strip-components=1
           python3 -m unittest tests.test_third_party_licenses
           python3 scripts/generate_third_party_licenses.py --check --cargo-about "$RUNNER_TEMP/license-tools/cargo-about"
+      # The web cabinet's build goes into the controller's package.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/cabinet/package-lock.json
       - name: Build server artifacts
         # Exercise the packaged installer before publishing its archive.
         env:
