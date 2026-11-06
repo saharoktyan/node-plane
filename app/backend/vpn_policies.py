@@ -217,6 +217,19 @@ def effective(conn, *, profile_id=None, device_id=None, node_key=None, protocol=
     return result
 
 
+# The limits a profile's holder is shown: every node's value, and whether the
+# profile sets it itself rather than taking the tariff's or the installation's.
+MEMBER_KEYS = ('devices.max', 'quota.bytes', 'quota.reset', 'quota.interval_days', 'quota.on_exhausted',
+               'speed.up_kbit', 'speed.down_kbit', 'connections.mode', 'connections.max_sources')
+
+
+def member_limits(conn, profile_id):
+    values = effective(conn, profile_id=profile_id, keys=MEMBER_KEYS)
+    own = {row['key'] for row in _rows(conn, 'profile', profile_id)
+           if row['node_key'] is None and row['protocol'] is None}
+    return [{'key': name, 'value': values[name], 'own': name in own} for name in MEMBER_KEYS]
+
+
 class VpnPolicies:
     def __init__(self, db):
         self.db = db

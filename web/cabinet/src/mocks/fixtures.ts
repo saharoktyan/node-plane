@@ -37,6 +37,10 @@ export function me(role: Role, scenario: Scenario, locale: 'ru' | 'en'): Schemas
 // Tariff titles are the administrator's text, in whatever language they wrote;
 // the mocks follow the chosen language so screenshots read in one.
 const MONTH = { ru: 'Месяц', en: 'Month' };
+const DESCRIPTION = {
+  ru: 'Все серверы, до трёх устройств и 100 ГиБ в месяц.\nПосле лимита скорость снижается до сброса.',
+  en: 'Every server, up to three devices and 100 GiB a month.\nAfter the limit the speed drops until the reset.'
+};
 
 export function myServices(scenario: Scenario, lang: 'ru' | 'en'): Schemas['ServiceProfileOutput'][] {
   if (scenario === 'empty') return [];
@@ -75,7 +79,15 @@ export function catalog(role: Role, scenario: Scenario): Schemas['ServiceOutput'
 export function summary(id: string, lang: 'ru' | 'en'): Schemas['MemberProfileSummary'] {
   return {
     profile_id: id, display_name: 'saharoktyan', frozen: false, expired: false, quota_suspended: false,
-    tariff: { id: 't1', title: MONTH[lang], duration_days: 30, assigned_at: '2026-11-06T00:00:00+00:00' },
+    tariff: { id: 't1', title: MONTH[lang], duration_days: 30, assigned_at: '2026-11-06T00:00:00+00:00',
+      description: DESCRIPTION[lang] },
+    limits: [
+      { key: 'devices.max', value: 3, own: false }, { key: 'quota.bytes', value: 107374182400, own: false },
+      { key: 'quota.reset', value: 'calendar_month', own: false }, { key: 'quota.interval_days', value: 30, own: false },
+      { key: 'quota.on_exhausted', value: 'throttle', own: false }, { key: 'speed.up_kbit', value: null, own: false },
+      { key: 'speed.down_kbit', value: 50000, own: true }, { key: 'connections.mode', value: 'enforce', own: false },
+      { key: 'connections.max_sources', value: 2, own: false }
+    ],
     renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720, period_end: '2026-12-01T00:00:00+00:00',
       on_exhausted: 'block', throttled_kbit: null },
     expires_at: '2026-12-06T00:00:00+00:00', created_at: '2026-10-01T00:00:00+00:00',
@@ -146,3 +158,44 @@ export const inbox = [
   { id: 'n2', announcement_id: 'a2', text: 'Доступ к VPN продлён до 6 декабря.',
     created_at: '2026-11-01T10:00:00+00:00', viewed_at: '2026-11-01T11:00:00+00:00' }
 ];
+
+export const devices: Schemas['DeviceOutput'][] = [
+  { id: 'd1000000-0000-4000-8000-000000000001', profile_id: VPN_ID, display_name: 'Phone', status: 'active',
+    revision: 2, created_at: '2026-10-01T00:00:00+00:00', networks: { active: 1, limit: 2 } },
+  { id: 'd1000000-0000-4000-8000-000000000002', profile_id: VPN_ID, display_name: 'Laptop', status: 'active',
+    revision: 1, created_at: '2026-10-02T00:00:00+00:00', networks: null }
+];
+
+export function deviceList(scenario: Scenario): Schemas['DeviceList'] {
+  return { items: scenario === 'empty' ? [] : devices, device_limit: 3 };
+}
+
+export function profile(id: string): Schemas['ProfileOutput'] {
+  return { id, display_name: 'saharoktyan', owner_account_id: '2b0c6d3a-1111-4222-8333-944455556666',
+    frozen: false, expires_at: '2026-12-06T00:00:00+00:00', desired_revision: 7, deleting: false };
+}
+
+export const availableNodes: Schemas['AvailableNode'][] = [
+  { key: 'de1', title: 'Frankfurt', flag: '🇩🇪', region: 'Europe',
+    protocols: [{ kind: 'xray', transports: ['tcp', 'xhttp'] }, { kind: 'awg', transports: ['vpn', 'conf'] }] }
+];
+
+export function issuance(body: Schemas['ConfigIssuanceInput']): Schemas['ConfigIssuanceOutput'] {
+  return { id: `i-${body.node_key}-${body.protocol}-${body.transport}`, profile_id: VPN_ID, node_key: body.node_key,
+    protocol: body.protocol, transport: body.transport, status: 'succeeded',
+    expires_at: new Date(Date.now() + 900_000).toISOString(), device_id: body.device_id ?? null };
+}
+
+export function artifact(id: string): Schemas['ConfigArtifactOutput'] {
+  const [, node, protocol, transport] = id.split('-');
+  if (protocol === 'awg')
+    return { filename: 'Frankfurt · AWG · Phone.vpn', display_name: '🇩🇪 Frankfurt · AWG · Phone', media_type: 'text/plain',
+      content: 'vpn://AAAAeJyrVkrLzFGyUlAqS8wpTVWqBQAfZgSs',
+      files: [{ filename: 'Frankfurt · AWG · Phone.vpn', content: 'vpn://AAAAeJyrVkrLzFGyUlAqS8wpTVWqBQAfZgSs' },
+        { filename: 'Frankfurt · AWG · Phone.conf', content: '[Interface]\nPrivateKey = mock\nAddress = 10.8.0.2/32\n' }] };
+  const name = `🇩🇪 Frankfurt · VLESS · ${transport.toUpperCase()} · Phone`;
+  const uri = `vless://00000000-0000-4000-8000-000000000000@${node}.example.org:443?encryption=none&security=reality` +
+    `&type=${transport}#${encodeURIComponent(name)}`;
+  return { filename: `Frankfurt · VLESS · ${transport.toUpperCase()} · Phone.txt`, display_name: name,
+    media_type: 'text/plain', content: uri, files: [] };
+}

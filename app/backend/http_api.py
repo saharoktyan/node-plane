@@ -670,6 +670,13 @@ class ProfileTrafficSummary(BaseModel):
     nodes: list[ProfileNodeTrafficItem] = []
 
 
+class MemberLimit(BaseModel):
+    key: str
+    value: int | str | None
+    # Set on the profile itself, not taken from its tariff or the installation.
+    own: bool
+
+
 class MemberProfileSummary(BaseModel):
     profile_id: UUID
     display_name: str
@@ -681,6 +688,8 @@ class MemberProfileSummary(BaseModel):
     tariff: dict[str, str | int | None] | None = None
     # The latest renewal request: id, status, created_at, decided_at, days, expires_at.
     renewal: dict[str, str | int | None] | None = None
+    # The limits in force on every node (backend.vpn_policies.member_limits).
+    limits: list[MemberLimit] = []
     # The open quota period: limit_bytes, used_bytes, period_end, on_exhausted,
     # throttled_kbit (speed while throttled, else None).
     quota: dict[str, int | str | None] | None = None

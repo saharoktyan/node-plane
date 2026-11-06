@@ -3120,6 +3120,39 @@
         "title": "MeOutput",
         "type": "object"
       },
+      "MemberLimit": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "own": {
+            "title": "Own",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "own"
+        ],
+        "title": "MemberLimit",
+        "type": "object"
+      },
       "MemberProfileNode": {
         "properties": {
           "flag": {
@@ -3214,6 +3247,14 @@
               }
             ],
             "title": "Last Issued At"
+          },
+          "limits": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MemberLimit"
+            },
+            "title": "Limits",
+            "type": "array"
           },
           "node_count": {
             "title": "Node Count",

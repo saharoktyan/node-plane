@@ -51,6 +51,19 @@ try {
         failures.push(`${scenario}/${role} ${path}: no error shown`);
       if (shots) await page.screenshot({ path: `${shots}/${scenario}-${role}${path.replace(/\//g, '_') || '_'}.png`, fullPage: true });
     }
+    // A configuration is issued on the VPN page and opens with its QR code.
+    if (scenario === 'default') {
+      await page.goto(base + '/services/6f1c1a52-8f3e-4c8e-9b8a-0f6f2d0c1a11');
+      await page.getByRole('button', { name: 'VLESS · XHTTP' }).click();
+      try {
+        await page.waitForSelector('.config svg', { timeout: 5000 });
+        if (!(await page.inputValue('.config textarea')).startsWith('vless://'))
+          failures.push(`${scenario}/${role}: the configuration has no link`);
+      } catch {
+        failures.push(`${scenario}/${role}: the configuration did not open`);
+      }
+      if (shots) await page.screenshot({ path: `${shots}/${scenario}-${role}_config.png`, fullPage: true });
+    }
     if (role === 'member') {
       await page.goto(base + '/admin');
       await page.waitForURL(`${base}/`);

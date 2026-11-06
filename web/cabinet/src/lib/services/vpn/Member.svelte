@@ -1,25 +1,41 @@
-<!-- VPN, the built-in service: term, tariff and traffic in one line, then
-     the servers the profile reaches. Devices, configurations, QR codes and
-     charts come next. -->
+<!-- VPN, the built-in service: term, tariff, traffic and devices in one line;
+     what the tariff includes; the devices; getting a configuration for one
+     of them on a server. -->
 <script lang="ts">
-  import { api, call, ApiError } from '$lib/api/client';
+  import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import type { ServiceProfile } from '$lib/services/registry';
   import { t } from '$lib/i18n/index.svelte';
   import Async from '$lib/ui/Async.svelte';
   import { errorText } from '$lib/ui/errors';
   import { bytes, date, key } from '$lib/ui/format';
+  import Connect from './Connect.svelte';
+  import Devices from './Devices.svelte';
+  import { lines } from './limits';
 
   let { profile }: { profile: ServiceProfile } = $props();
-  const fetchSummary = () =>
-    call(api.GET('/api/v1/me/profiles/{profile_id}/summary', { params: { path: { profile_id: profile.id } } }));
+  const path = () => ({ profile_id: profile.id });
+  const fetchSummary = () => call(api.GET('/api/v1/me/profiles/{profile_id}/summary', { params: { path: path() } }));
   let load = $state(fetchSummary());
   let notice = $state('');
+
+  let devices = $state<Schemas['DeviceList'] | null>(null);
+  let devicesError = $state('');
+  async function reloadDevices() {
+    try {
+      devices = await call(api.GET('/api/v1/profiles/{profile_id}/devices', { params: { path: path() } }));
+      devicesError = '';
+    } catch (error) {
+      devicesError = error instanceof ApiError ? errorText(error) : t('common.error');
+    }
+  }
+  reloadDevices();
+  const active = $derived((devices?.items ?? []).filter((item) => item.status === 'active'));
 
   async function renew() {
     notice = '';
     try {
-      await call(api.POST('/api/v1/me/profiles/{profile_id}/renewal', {
-        params: { path: { profile_id: profile.id } }, headers: { 'Idempotency-Key': key() } }));
+      await call(api.POST('/api/v1/me/profiles/{profile_id}/renewal', { params: { path: path() },
+        headers: { 'Idempotency-Key': key() } }));
       notice = t('vpn.renewal_sent');
       load = fetchSummary();
     } catch (error) {
@@ -53,7 +69,7 @@
       </div>
       <div>
         <div class="label">{t('vpn.devices')}</div>
-        <div class="value">{profile.summary.devices ?? 0}</div>
+        <div class="value">{devices ? active.length : (profile.summary.devices ?? 0)}</div>
       </div>
     </div>
     {#if profile.actions.includes('renewal') || notice}
@@ -64,24 +80,37 @@
     {/if}
 
     <section class="block">
-      <h2>{t('vpn.servers')}</h2>
-      {#if summary.nodes.length}
-        <table>
-          <thead><tr><th>{t('vpn.server')}</th><th>{t('vpn.region')}</th><th>{t('vpn.protocols')}</th></tr></thead>
-          <tbody>
-            {#each summary.nodes as node (node.key)}
-              <tr>
-                <td>{node.flag} {node.title}</td>
-                <td class="muted">{node.region || '—'}</td>
-                <td>{node.protocols.map((protocol) => t('vpn.protocol_' + protocol)).join(', ')}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <h2>{t('vpn.included')}</h2>
+      {#if summary.tariff}
+        <p><strong>{summary.tariff.title}</strong></p>
+        {#if summary.tariff.description}<p class="description">{summary.tariff.description}</p>{/if}
+        {#if summary.tariff.duration_days}<p class="muted">{t('vpn.tariff_days', { days: summary.tariff.duration_days })}</p>{/if}
       {:else}
-        <p class="muted">{t('vpn.no_servers')}</p>
+        <p class="muted">{t('vpn.no_tariff')}</p>
       {/if}
+      <table class="limits">
+        <tbody>
+          {#each lines(summary.limits ?? []) as line (line.label)}
+            <tr>
+              <th scope="row">{line.label}</th>
+              <td>{line.value}{#if line.own} <span class="badge">{t('vpn.own')}</span>{/if}</td>
+            </tr>
+          {/each}
+          <tr>
+            <th scope="row">{t('vpn.servers')}</th>
+            <td>{summary.node_count}</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
+
+    {#if devices}
+      <Devices profileId={profile.id} list={devices} onchange={reloadDevices} />
+      <Connect profileId={profile.id} nodes={summary.nodes} devices={active}
+        issuing={profile.actions.includes('configs')} />
+    {:else if devicesError}
+      <p class="error">{devicesError}</p>
+    {/if}
   {/snippet}
 </Async>
 
@@ -101,5 +130,13 @@
   }
   .actions {
     margin: -0.75rem 0 1.5rem;
+  }
+  .description {
+    white-space: pre-line;
+    max-width: 48rem;
+  }
+  .limits th {
+    width: 40%;
+    max-width: 22rem;
   }
 </style>

@@ -25,5 +25,17 @@
   "passkey_limit": "No more passkeys can be added.",
   "access_requests_disabled": "Requests are closed now.",
   "request_already_pending": "A request is already waiting.",
-  "renewal_not_needed": "No renewal is needed."
+  "renewal_not_needed": "No renewal is needed.",
+  "profile_not_synced": "The servers are still applying your access. Try again in a minute.",
+  "node_settings_pending": "The server is applying new settings. Try again in a minute.",
+  "node_agent_unavailable": "The server does not answer now. Try another one or later.",
+  "config_stale": "The configuration changed meanwhile. Get it again.",
+  "config_expired": "This configuration page expired. Get it again.",
+  "config_not_ready": "The configuration is not ready yet.",
+  "configuration_unavailable": "This configuration is unavailable.",
+  "device_limit_reached": "The device limit is reached.",
+  "device_name_conflict": "A device with this name exists.",
+  "invalid_device_name": "This name is not allowed.",
+  "device_unavailable": "The device is unavailable.",
+  "revision_conflict": "It changed meanwhile. Look again and repeat."
 }

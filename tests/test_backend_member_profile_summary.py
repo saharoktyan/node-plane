@@ -101,3 +101,27 @@ class MemberProfileSummaryTests(unittest.TestCase):
             self.actor, self.profile_id)['expired'])
         with self.assertRaises(AccessDenied):
             ProfileService(self.repo).own_summary(self.actor, self.other_id)
+
+    def test_summary_tells_the_limits_and_which_the_profile_sets_itself(self):
+        from backend.tariffs import Tariffs
+        from backend.vpn_policies import VpnPolicies
+        VpnPolicies(self.db).initialize_schema()
+        Tariffs(self.db).initialize_schema()
+        with self.db.transaction() as conn:
+            now = '2026-11-06T00:00:00+00:00'
+            conn.execute('''INSERT INTO backend_vpn_policies(id, subject_kind, key, value_json, updated_at)
+                VALUES ('i1', 'installation', 'devices.max', '3', ?)''', (now,))
+            conn.execute('''INSERT INTO backend_vpn_policies(id, subject_kind, profile_id, key, value_json, updated_at)
+                VALUES ('p1', 'profile', ?, 'speed.down_kbit', '5000', ?)''', (self.profile_id, now))
+            conn.execute('''INSERT INTO backend_tariffs(id, title, canonical, duration_days, policies_json,
+                created_at, updated_at) VALUES ('t1', 'Month', 'month', 30, ?, ?, ?)''',
+                (json.dumps({'quota.bytes': 10 ** 11, 'speed.down_kbit': 1000}), now, now))
+            conn.execute("INSERT INTO backend_profile_tariffs VALUES (?, 't1', ?)", (self.profile_id, now))
+        limits = {item['key']: (item['value'], item['own']) for item in
+                  ProfileService(self.repo).own_summary(self.actor, self.profile_id)['limits']}
+        self.assertEqual(limits['devices.max'], (3, False))
+        self.assertEqual(limits['quota.bytes'], (10 ** 11, False))
+        # The profile's own value wins over its tariff's.
+        self.assertEqual(limits['speed.down_kbit'], (5000, True))
+        self.assertEqual(limits['speed.up_kbit'], (None, False))
+        self.assertEqual(limits['connections.mode'], ('off', False))

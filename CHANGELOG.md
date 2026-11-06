@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The web cabinet's VPN page: what the tariff includes (name, description,
+  limits in force), the devices (add, rename, a new VLESS or AWG key,
+  remove) and configurations for a device on a server, with the link, a QR
+  code drawn in the page and the files. The member profile summary gains
+  `limits` (each key's value on every node and whether the profile sets it
+  itself); the bot's profile details show the same.
 - Texts in several languages (migration r0047): tariff names and
   descriptions, announcements and the bot's welcome and stub messages are
   written per supported language (`GET /api/v1/system/languages`, now en

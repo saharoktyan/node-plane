@@ -4271,6 +4271,15 @@ export interface components {
             /** Username */
             username?: string | null;
         };
+        /** MemberLimit */
+        MemberLimit: {
+            /** Key */
+            key: string;
+            /** Own */
+            own: boolean;
+            /** Value */
+            value: number | string | null;
+        };
         /** MemberProfileNode */
         MemberProfileNode: {
             /** Flag */
@@ -4302,6 +4311,11 @@ export interface components {
             issued_count: number;
             /** Last Issued At */
             last_issued_at: string | null;
+            /**
+             * Limits
+             * @default []
+             */
+            limits: components["schemas"]["MemberLimit"][];
             /** Node Count */
             node_count: number;
             /** Nodes */

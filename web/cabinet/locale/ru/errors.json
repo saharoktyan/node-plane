@@ -25,5 +25,17 @@
   "passkey_limit": "Больше passkeys добавить нельзя.",
   "access_requests_disabled": "Заявки сейчас не принимаются.",
   "request_already_pending": "Заявка уже ждёт решения.",
-  "renewal_not_needed": "Продление не нужно."
+  "renewal_not_needed": "Продление не нужно.",
+  "profile_not_synced": "Серверы ещё применяют ваш доступ. Попробуйте через минуту.",
+  "node_settings_pending": "Сервер применяет новые настройки. Попробуйте через минуту.",
+  "node_agent_unavailable": "Сервер сейчас не отвечает. Попробуйте другой или позже.",
+  "config_stale": "Конфиг тем временем изменился. Получите его заново.",
+  "config_expired": "Страница этого конфига устарела. Получите его заново.",
+  "config_not_ready": "Конфиг ещё не готов.",
+  "configuration_unavailable": "Этот конфиг недоступен.",
+  "device_limit_reached": "Достигнут лимит устройств.",
+  "device_name_conflict": "Устройство с таким названием уже есть.",
+  "invalid_device_name": "Такое название нельзя.",
+  "device_unavailable": "Устройство недоступно.",
+  "revision_conflict": "Тем временем что-то изменилось. Посмотрите ещё раз и повторите."
 }

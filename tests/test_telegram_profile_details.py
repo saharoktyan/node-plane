@@ -42,3 +42,26 @@ class ProfileDetailsTests(IsolatedAsyncioTestCase):
         for item in screen.rich().blocks[0].text:
             if getattr(item, 'type', None) == 'button':
                 self.assertTrue(item.button.callback_data or item.button.url)
+
+    async def test_details_tell_what_the_tariff_includes(self):
+        summary = {'display_name': 'Alice', 'frozen': False, 'expired': False, 'nodes': [],
+            'tariff': {'title': 'Month', 'description': 'Every server.', 'duration_days': 30},
+            'limits': [{'key': 'devices.max', 'value': 3, 'own': False},
+                       {'key': 'quota.bytes', 'value': 100 * 1024 ** 3, 'own': False},
+                       {'key': 'quota.reset', 'value': 'interval', 'own': False},
+                       {'key': 'quota.interval_days', 'value': 14, 'own': False},
+                       {'key': 'quota.on_exhausted', 'value': 'throttle', 'own': False},
+                       {'key': 'speed.down_kbit', 'value': 50000, 'own': True},
+                       {'key': 'speed.up_kbit', 'value': None, 'own': False},
+                       {'key': 'connections.mode', 'value': 'off', 'own': False}]}
+        section = user.included_section(summary, 'en')
+        self.assertEqual(section.title, 'What the tariff includes')
+        self.assertEqual(section.lines, ('Month', 'Every server.', 'Each renewal adds 30 days.'))
+        self.assertEqual(section.tables[0].rows, (
+            ('Devices', '3'), ('Traffic', '100.0 GiB · every 14 days'),
+            ('When the traffic runs out', 'the speed drops until the reset'),
+            ('Speed per device', '↓ 50 Mbit/s · ↑ ∞ · set for you')))
+        bare = user.included_section({'limits': []}, 'ru')
+        self.assertEqual(bare.lines, ('Без тарифа: лимиты заданы лично для вас.',))
+        self.assertEqual(bare.tables[0].rows, (('Устройства', 'без ограничения'), ('Трафик', 'без ограничения'),
+                                               ('Скорость на устройство', 'без ограничения')))

@@ -72,6 +72,24 @@ export const handlers = [
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),
+  http.get('/api/v1/profiles/:id', guarded(({ url }) => fixtures.profile(new URL(url).pathname.split('/')[4]))),
+  http.get('/api/v1/profiles/:id/devices', guarded(() => fixtures.deviceList(choice().scenario))),
+  http.post('/api/v1/profiles/:id/devices', guarded(() => HttpResponse.json({ device: fixtures.devices[0],
+    profile_revision: 8, operation_id: null, runtime_status: 'ready' }, { status: 201 }))),
+  http.patch('/api/v1/profiles/:id/devices/:device', guarded(() => ({ device: fixtures.devices[0],
+    profile_revision: 8, operation_id: null, runtime_status: 'ready' }))),
+  http.delete('/api/v1/profiles/:id/devices/:device', guarded(() => HttpResponse.json({ device: fixtures.devices[0],
+    profile_revision: 8, operation_id: null, runtime_status: 'pending' }, { status: 202 }))),
+  http.post('/api/v1/profiles/:id/devices/:device/rotate', guarded(() => HttpResponse.json({ device: fixtures.devices[0],
+    profile_revision: 8, operation_id: null, runtime_status: 'pending' }, { status: 202 }))),
+  http.get('/api/v1/profiles/:id/nodes', guarded(() => ({ items: fixtures.availableNodes, next_cursor: null }))),
+  http.post('/api/v1/profiles/:id/config-issuances', async ({ request }) => {
+    await delay(300);
+    return HttpResponse.json(fixtures.issuance((await request.json()) as Schemas['ConfigIssuanceInput']),
+      { status: 202 });
+  }),
+  http.get('/api/v1/config-issuances/:id/artifact', guarded(({ url }) =>
+    fixtures.artifact(new URL(url).pathname.split('/')[4]))),
   http.get('/api/v1/me/notifications', guarded(() => ({ items: fixtures.inbox, total: fixtures.inbox.length,
     offset: 0, page_size: 10 }))),
   http.post('/api/v1/me/notifications/:id/dismiss', guarded(() => ({ dismissed: true }))),

@@ -489,7 +489,7 @@ async def show_account_profile(chat_id: int, user_id: int, message_id: int,
             divider_after=node['key'] != nodes[-1]['key'])),
         rows=server_pagination(user_id, locale, page_index, pages,
             'account_nodes_page', profile_id, back_to))
-    sections = (access, identity, statistics, *((traffic,) if traffic else ()), servers)
+    sections = (access, included_section(summary, locale), identity, statistics, *((traffic,) if traffic else ()), servers)
     await render(bot, chat_id, Screen(tr(locale, 'account.details'),
         (summary['display_name'],), sections=sections, embedded_buttons=True, navigation=True,
         breadcrumbs=profile_path),
@@ -504,6 +504,39 @@ def quota_text(quota, locale):
         from .admin_speed_limits import rate_label
         text += ' · ' + tr(locale, 'quota.throttled', speed=rate_label(locale, quota['throttled_kbit']))
     return text
+
+
+def included_section(summary, locale):
+    """What the tariff includes: its name and description, then the limits in
+    force on every node, those set on the profile itself marked."""
+    from .admin_speed_limits import rate_label
+    tariff = summary.get('tariff')
+    lines = ((tariff['title'], *((tariff['description'],) if tariff.get('description') else ()),
+              *((tr(locale, 'included.days', days=tariff['duration_days']),) if tariff.get('duration_days') else ()))
+             if tariff else (tr(locale, 'included.none'),))
+    limits = {item['key']: item for item in summary.get('limits') or ()}
+    value = lambda key: (limits.get(key) or {}).get('value')
+    own = lambda *keys: any((limits.get(key) or {}).get('own') for key in keys)
+    none = tr(locale, 'included.no_limit')
+    rows = [(tr(locale, 'included.devices'), str(value('devices.max')) if value('devices.max') else none, own('devices.max'))]
+    if value('quota.bytes'):
+        period = tr(locale, 'included.reset.' + (value('quota.reset') or 'calendar_month'), days=value('quota.interval_days') or 30)
+        rows += [(tr(locale, 'included.traffic'), f"{_traffic_bytes(value('quota.bytes'))} · {period}",
+                  own('quota.bytes', 'quota.reset', 'quota.interval_days')),
+                 (tr(locale, 'included.exhausted'), tr(locale, 'included.exhausted.' + (value('quota.on_exhausted') or 'freeze')),
+                  own('quota.on_exhausted'))]
+    else:
+        rows.append((tr(locale, 'included.traffic'), none, own('quota.bytes')))
+    down, up = value('speed.down_kbit'), value('speed.up_kbit')
+    rows.append((tr(locale, 'included.speed'), tr(locale, 'included.speed_value',
+                 down=rate_label(locale, down) if down else '∞', up=rate_label(locale, up) if up else '∞')
+                 if down or up else none, own('speed.down_kbit', 'speed.up_kbit')))
+    if value('connections.mode') == 'enforce':
+        rows.append((tr(locale, 'included.networks'), str(value('connections.max_sources') or 1),
+                     own('connections.mode', 'connections.max_sources')))
+    facts = (tr(locale, 'account.rich.field'), tr(locale, 'account.rich.value'))
+    return Section(tr(locale, 'included.title'), lines, tables=(Table(facts, tuple(
+        (label, text + (' · ' + tr(locale, 'included.own') if mine else '')) for label, text, mine in rows)),))
 
 
 def profile_traffic_section(summary, locale):
