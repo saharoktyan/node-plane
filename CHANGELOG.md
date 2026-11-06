@@ -21,6 +21,11 @@
   the files again after a controller update. The cabinet's address is now
   the passkeys' domain and where invite links lead; the relay stays while
   the cabinet is served beside it.
+- The relay's node serves the web cabinet: the driver reads the cabinet's
+  files from the controller's release and the agent writes each version
+  whole into `/var/lib/node-plane-cabinet/` before switching to it, and has
+  the relay serve it (`/etc/node-plane/relay-cabinet.env`, read by the
+  relay's unit). The agent's API takes messages up to 48 MiB for this.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

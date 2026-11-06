@@ -34,6 +34,7 @@ fn paths(name: &str) -> Paths {
         env: dir.join("relay.env"),
         state: dir.join("state"),
         version: dir.join("relay.version"),
+        cabinet_env: dir.join("relay-cabinet.env"),
     }
 }
 

@@ -73,6 +73,8 @@ This limits mistakes, not a compromised agent. The agent needs the Docker socket
 
 A node can run the web cabinet's relay. The agent starts it from its own binary (`node-plane-agent relay-serve`), so the relay updates with the agent and restarts into the new binary after an update. It runs as the `node-plane-relay` user in a sandbox: it may bind its port and reach the network, write only `/var/lib/node-plane-relay/`, and has no other privileges, because it faces the internet. Its key stays on the server; the controller pins the public half, and the relay pins the controller's link key, which comes with the relay settings. With an active ufw the agent opens the relay's port (not behind a reverse proxy). With certificate files on the server, the relay reads them itself, so the `node-plane-relay` user must be able to read the key (for example `root:node-plane-relay`, mode 0640). If the relay's certificate comes from a private CA, give the controller that CA in `NODE_PLANE_RELAY_CA_FILE` in `shared/.env` and restart `node-plane-driver`. Removing the relay or the agent removes its unit, settings, keys and certificates; the `node-plane-relay` system user stays.
 
+The relay's node can also serve the web cabinet, on the relay's domain beside the API. The controller sends the cabinet's files with its release version; the agent writes each version whole into `/var/lib/node-plane-cabinet/<version>/`, then points `current` at it and removes the older one, so the relay never serves half a version. The relay learns the directory from `/etc/node-plane/relay-cabinet.env`, an optional environment file of its unit: the first files restart the relay, a new version needs no restart. The files are public, like the cabinet; the agent accepts only plain relative paths of the build's file types. Removing the cabinet removes the files and that environment file and restarts the relay, which then answers only the API.
+
 ## Agent updates
 
 **Updates** updates agents together with the controller. The controller names its release; the agent downloads it from GitHub itself and checks it:
@@ -110,5 +112,7 @@ The agent's own removal is not verified: the controller cannot look at the serve
 | `/opt/node-plane-runtime/` | Protocol runtime files and client configurations |
 | `/etc/systemd/system/node-plane-relay.service`, `/etc/node-plane/relay.env` | Relay service and settings, when the node runs the relay |
 | `/var/lib/node-plane-relay/` | Relay key, the controller's pinned key, link state, ACME certificates |
+| `/var/lib/node-plane-cabinet/` | The web cabinet's files, one directory per version and `current` |
+| `/etc/node-plane/relay-cabinet.env` | Where the relay finds the cabinet's files |
 
 Full node removal deletes the agent and its resources and verifies the host. See [Nodes](nodes.md#remove-a-node).

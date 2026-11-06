@@ -15,21 +15,24 @@ pub(crate) struct RelayApi {
     pub(crate) ctx: DriverContext,
 }
 
+/// The node's agent, once it has shown it is that node's.
+pub(crate) async fn agent(ctx: &DriverContext, node_key: &str) -> Result<AgentTransport, Status> {
+    if node_key.is_empty() {
+        return Err(Status::invalid_argument("node key is required"));
+    }
+    let target = ctx
+        .agent_target(node_key)
+        .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
+    let transport = AgentTransport::new(target);
+    if transport.get_runtime_facts().await?.node_key != node_key {
+        return Err(Status::failed_precondition("agent node identity mismatch"));
+    }
+    Ok(transport)
+}
+
 impl RelayApi {
-    /// The node's agent, once it has shown it is that node's.
     async fn agent(&self, node_key: &str) -> Result<AgentTransport, Status> {
-        if node_key.is_empty() {
-            return Err(Status::invalid_argument("node key is required"));
-        }
-        let target = self
-            .ctx
-            .agent_target(node_key)
-            .ok_or_else(|| Status::failed_precondition("no node-agent target configured"))?;
-        let transport = AgentTransport::new(target);
-        if transport.get_runtime_facts().await?.node_key != node_key {
-            return Err(Status::failed_precondition("agent node identity mismatch"));
-        }
-        Ok(transport)
+        agent(&self.ctx, node_key).await
     }
 
     fn status(&self, node_key: &str, agent: Option<&RelayState>) -> RelayStatus {

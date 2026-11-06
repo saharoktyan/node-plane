@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 mod api;
+mod cabinet;
 mod config;
 mod enforcement;
 mod enrollment;
@@ -172,7 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| err as Box<dyn std::error::Error>)?;
     Server::builder()
         .tls_config(tls)?
-        .add_service(NodeAgentServiceServer::new(api))
+        // The web cabinet's files come in one message (see src/cabinet).
+        .add_service(NodeAgentServiceServer::new(api).max_decoding_message_size(48 << 20))
         .serve_with_incoming_shutdown(incoming, async {
             let _ = tokio::signal::ctrl_c().await;
             println!("node-plane-agent stopping");

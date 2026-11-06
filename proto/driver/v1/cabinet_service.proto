@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+// The web cabinet's files on the relay's node. The backend names the
+// controller's build on this host; the driver reads it and hands the files
+// to the node's agent, which has the relay serve them.
+service CabinetService {
+  rpc ApplyCabinet(ApplyCabinetRequest) returns (CabinetStatus);
+  rpc RemoveCabinet(CabinetNodeRequest) returns (CabinetStatus);
+}
+
+message ApplyCabinetRequest {
+  string node_key = 1;
+  // The build's directory on the controller, with index.html in it.
+  string root = 2;
+  // The controller release the build comes from.
+  string version = 3;
+}
+
+message CabinetNodeRequest {
+  string node_key = 1;
+}
+
+message CabinetStatus {
+  // The version the node serves now; empty when it serves none.
+  string version = 1;
+}

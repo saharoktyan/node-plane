@@ -16,7 +16,7 @@ use tonic::Status;
 use crate::agent::v1::{ApplyRelayRequest, RelayState};
 
 pub(crate) const USER: &str = "node-plane-relay";
-const SERVICE: &str = "node-plane-relay.service";
+pub(crate) const SERVICE: &str = "node-plane-relay.service";
 const VERSION: &str = env!("NODE_PLANE_BINARY_VERSION");
 
 /// Where the relay lives on the host; tests use a directory of their own.
@@ -26,6 +26,9 @@ pub(crate) struct Paths {
     pub state: PathBuf,
     /// The agent version that last started the relay.
     pub version: PathBuf,
+    /// Where the web cabinet's files are, when the node serves them
+    /// (`crate::cabinet`); optional for the unit.
+    pub cabinet_env: PathBuf,
 }
 
 impl Paths {
@@ -35,6 +38,7 @@ impl Paths {
             env: PathBuf::from("/etc/node-plane/relay.env"),
             state: PathBuf::from("/var/lib/node-plane-relay"),
             version: PathBuf::from("/etc/node-plane/relay.version"),
+            cabinet_env: PathBuf::from("/etc/node-plane/relay-cabinet.env"),
         }
     }
 }
@@ -221,7 +225,7 @@ impl Settings {
 
 /// The relay's unit. It may bind low ports and reach the network, and
 /// little else: no other files, no privileges, no other address families.
-fn unit(paths: &Path, env: &Path) -> String {
+fn unit(paths: &Path, env: &Path, cabinet_env: &Path) -> String {
     format!(
         "# Written by node-plane-agent; see docs/agent.md.
 [Unit]
@@ -234,6 +238,7 @@ Type=simple
 User={USER}
 Group={USER}
 EnvironmentFile={env}
+EnvironmentFile=-{cabinet_env}
 ExecStart=/usr/local/bin/node-plane-agent relay-serve
 Restart=always
 RestartSec=3
@@ -266,12 +271,13 @@ SystemCallFilter=@system-service
 WantedBy=multi-user.target
 ",
         env = env.display(),
+        cabinet_env = cabinet_env.display(),
         state = paths.display(),
     )
 }
 
 /// Writes `content` when it differs; true when it changed.
-fn write(path: &Path, content: &[u8], mode: u32) -> Result<bool, String> {
+pub(crate) fn write(path: &Path, content: &[u8], mode: u32) -> Result<bool, String> {
     if fs::read(path).is_ok_and(|current| current == content) {
         return Ok(false);
     }
@@ -321,7 +327,7 @@ pub(crate) fn apply(
     let changed = write(&paths.env, settings.env(&paths.state).as_bytes(), 0o600)?
         | write(
             &paths.unit,
-            unit(&paths.state, &paths.env).as_bytes(),
+            unit(&paths.state, &paths.env, &paths.cabinet_env).as_bytes(),
             0o644,
         )?;
     if let Some(port) =
@@ -341,6 +347,20 @@ pub(crate) fn apply(
     }
     let _ = write(&paths.version, VERSION.as_bytes(), 0o644);
     Ok(state(host, paths))
+}
+
+/// Brings an installed relay's unit up to this agent's; true when it
+/// changed, and systemd has read it again.
+pub(crate) fn refresh_unit(host: &dyn Host, paths: &Paths) -> Result<bool, String> {
+    let changed = write(
+        &paths.unit,
+        unit(&paths.state, &paths.env, &paths.cabinet_env).as_bytes(),
+        0o644,
+    )?;
+    if changed {
+        host.systemctl(&["daemon-reload"])?;
+    }
+    Ok(changed)
 }
 
 pub(crate) fn remove(host: &dyn Host, paths: &Paths) -> Result<RelayState, String> {

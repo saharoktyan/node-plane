@@ -230,6 +230,20 @@ class GrpcIntentDriver:
         return self._relay_status(self._relays().GetRelay(
             relay_service_pb2.RelayNodeRequest(node_key=node_key), timeout=20))
 
+    def apply_cabinet(self, node_key, root, version):
+        """Have the relay's node serve the cabinet's build from `root` on this host."""
+        from driver.v1 import cabinet_service_pb2, cabinet_service_pb2_grpc
+        response = cabinet_service_pb2_grpc.CabinetServiceStub(self.channel).ApplyCabinet(
+            cabinet_service_pb2.ApplyCabinetRequest(node_key=node_key, root=root, version=version),
+            timeout=max(self.timeout, 180))
+        return {'version': response.version or None}
+
+    def remove_cabinet(self, node_key):
+        from driver.v1 import cabinet_service_pb2, cabinet_service_pb2_grpc
+        response = cabinet_service_pb2_grpc.CabinetServiceStub(self.channel).RemoveCabinet(
+            cabinet_service_pb2.CabinetNodeRequest(node_key=node_key), timeout=max(self.timeout, 120))
+        return {'version': response.version or None}
+
     def read_xray_public(self, node_key):
         """Read the live Reality public identity; no legacy registry access."""
         from driver.v1 import runtime_service_pb2

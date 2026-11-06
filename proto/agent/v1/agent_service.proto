@@ -56,6 +56,27 @@ service NodeAgentService {
   rpc ApplyRelay(ApplyRelayRequest) returns (RelayState);
   rpc GetRelayState(AgentEmpty) returns (RelayState);
   rpc RemoveRelay(AgentEmpty) returns (RelayState);
+  // The web cabinet's files, served by this node's relay; see src/cabinet.
+  rpc ApplyCabinet(ApplyCabinetRequest) returns (CabinetState);
+  rpc RemoveCabinet(AgentEmpty) returns (CabinetState);
+}
+
+message CabinetFile {
+  // A plain relative path inside the cabinet, such as "_app/immutable/x.js".
+  string path = 1;
+  bytes content = 2;
+}
+
+message ApplyCabinetRequest {
+  // The controller release the files come from; the same version again
+  // changes nothing.
+  string version = 1;
+  repeated CabinetFile files = 2;
+}
+
+message CabinetState {
+  // The version served now; empty when there is none.
+  string version = 1;
 }
 
 message ApplyRelayRequest {

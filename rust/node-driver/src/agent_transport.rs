@@ -85,6 +85,26 @@ impl AgentTransport {
         Ok(client.remove_relay(AgentEmpty {}).await?.into_inner())
     }
 
+    /// The cabinet's files go in one message, as large as the build.
+    pub async fn apply_cabinet(
+        &self,
+        request: crate::agent::v1::ApplyCabinetRequest,
+    ) -> Result<crate::agent::v1::CabinetState, tonic::Status> {
+        let client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(request);
+        request.set_timeout(Duration::from_secs(120));
+        Ok(client
+            .max_encoding_message_size(48 << 20)
+            .apply_cabinet(request)
+            .await?
+            .into_inner())
+    }
+
+    pub async fn remove_cabinet(&self) -> Result<crate::agent::v1::CabinetState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.remove_cabinet(AgentEmpty {}).await?.into_inner())
+    }
+
     pub async fn get_backend_xray_public(
         &self,
     ) -> Result<crate::agent::v1::BackendXrayPublic, tonic::Status> {

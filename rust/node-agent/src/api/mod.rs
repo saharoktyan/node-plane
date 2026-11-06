@@ -435,6 +435,38 @@ impl NodeAgentService for NodeAgentApi {
     ) -> Result<Response<agent::v1::RelayState>, Status> {
         relay_blocking(|host, paths| crate::relay::remove(host, paths)).await
     }
+
+    async fn apply_cabinet(
+        &self,
+        request: Request<agent::v1::ApplyCabinetRequest>,
+    ) -> Result<Response<agent::v1::CabinetState>, Status> {
+        let request = request.into_inner();
+        crate::cabinet::check(&request).map_err(crate::cabinet::status)?;
+        cabinet_blocking(move |host, paths| crate::cabinet::apply(host, paths, &request)).await
+    }
+
+    async fn remove_cabinet(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::CabinetState>, Status> {
+        cabinet_blocking(|host, paths| crate::cabinet::remove(host, paths)).await
+    }
+}
+
+/// The cabinet's files and the relay's restart stay off the async workers.
+async fn cabinet_blocking(
+    work: impl FnOnce(
+        &crate::relay::System,
+        &crate::cabinet::Paths,
+    ) -> Result<agent::v1::CabinetState, String>
+    + Send
+    + 'static,
+) -> Result<Response<agent::v1::CabinetState>, Status> {
+    tokio::task::spawn_blocking(move || work(&crate::relay::System, &crate::cabinet::Paths::host()))
+        .await
+        .map_err(|_| Status::internal("cabinet worker unavailable"))?
+        .map(Response::new)
+        .map_err(crate::cabinet::status)
 }
 
 /// The relay's host work waits on systemd; keep it off the async workers.

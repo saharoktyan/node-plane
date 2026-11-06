@@ -31,7 +31,8 @@ mkdir -p app/driver/v1
   proto/driver/v1/provisioning_service.proto \
   proto/driver/v1/runtime_service.proto \
   proto/driver/v1/operation_service.proto \
-  proto/driver/v1/relay_service.proto
+  proto/driver/v1/relay_service.proto \
+  proto/driver/v1/cabinet_service.proto
 
 touch app/driver/__init__.py
 touch app/driver/v1/__init__.py
