@@ -10,15 +10,14 @@
   const kinds = ['system', 'builtin', 'user'] as const;
 </script>
 
-<h1>{t('admin.services')}</h1>
+<div class="page-head"><h1>{t('admin.services')}</h1></div>
 <Async {load}>
   {#snippet children(catalog)}
     {#each kinds as kind (kind)}
       {@const items = catalog.items.filter((item) => item.kind === kind)}
       {#if items.length || kind === 'user'}
-        <h2>{t('admin.kind_' + kind)}</h2>
-        <p class="muted">{t('admin.kind_hint_' + kind)}</p>
-      {/if}
+      <section class="block">
+        <h2>{t('admin.kind_' + kind)} <span class="muted hint">{t('admin.kind_hint_' + kind)}</span></h2>
       {#if items.length}
         <table>
           <thead><tr><th>{t('admin.service')}</th><th>{t('admin.state')}</th><th>{t('admin.instances')}</th></tr></thead>
@@ -32,9 +31,19 @@
             {/each}
           </tbody>
         </table>
-      {:else if kind === 'user'}
+      {:else}
         <p class="muted">{t('admin.manifests_later')}</p>
+      {/if}
+      </section>
       {/if}
     {/each}
   {/snippet}
 </Async>
+
+<style>
+  .hint {
+    font-weight: 400;
+    font-size: 0.9rem;
+    margin-left: 0.5rem;
+  }
+</style>

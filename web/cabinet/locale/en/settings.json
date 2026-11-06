@@ -29,5 +29,9 @@
   "method_passkey": "passkey",
   "method_invite": "invite",
   "method_registration": "registration",
-  "method_telegram": "Telegram"
+  "method_telegram": "Telegram",
+  "appearance_hint": "The language is kept with the account, the theme in this browser.",
+  "password_hint": "For signing in with your login. Changing it ends your other sessions.",
+  "passkeys_hint": "Sign in without a password: a fingerprint, face or key on this or another device.",
+  "sessions_hint": "Where you are signed in. End any you do not recognise."
 }

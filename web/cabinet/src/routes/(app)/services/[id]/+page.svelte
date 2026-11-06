@@ -16,10 +16,21 @@
   const load = $derived(open(page.params.id ?? ''));
 </script>
 
-<p><a href="/">← {t('services.title')}</a></p>
+<nav class="crumbs"><a href="/">{t('services.title')}</a> /</nav>
 <Async {load}>
   {#snippet children({ profile, panel: Panel })}
-    <h1>{serviceName(profile.service)}</h1>
+    <div class="page-head">
+      <h1>{serviceName(profile.service)}</h1>
+      <span class="badge">{t('services.status_' + profile.status)}</span>
+    </div>
     <Panel {profile} />
   {/snippet}
 </Async>
+
+<style>
+  .crumbs {
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+  }
+</style>

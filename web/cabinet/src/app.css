@@ -6,6 +6,7 @@
   --line: #dfe2e8;
   --accent: #2f6fed;
   --accent-text: #ffffff;
+  --accent-soft: #e8effd;
   --danger: #c62f3b;
   --ok: #1f8a4c;
   --warn: #b26a00;
@@ -22,6 +23,7 @@
     --muted: #9aa1ad;
     --line: #2c313a;
     --accent: #5b8ff5;
+    --accent-soft: #1d2a45;
     --danger: #ef5b66;
     --ok: #3cbf74;
     --warn: #e6a23c;
@@ -52,17 +54,6 @@ h1 {
 h2 {
   font-size: 1.1rem;
   margin: 1.5rem 0 0.75rem;
-}
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 1rem;
-}
-.grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
 }
 .muted {
   color: var(--muted);
@@ -148,4 +139,108 @@ th {
 }
 .error {
   color: var(--danger);
+}
+
+/* Page head: the title with the page's actions on the right. */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.page-head h1 {
+  margin: 0;
+}
+.page-head .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+/* Key numbers in one line, divided by rules, not boxes. */
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.5rem;
+}
+.stats > div {
+  flex: 1 1 10rem;
+  padding: 0.9rem 1.25rem;
+  border-left: 1px solid var(--line);
+}
+.stats > div:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+.stats .label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.stats .value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+.stats .note {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+/* A section of a page: heading, then rows or a table across the width. */
+section.block {
+  margin-bottom: 2rem;
+}
+section.block > h2 {
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+/* Rows that open something: full width, divided by rules. */
+.rows {
+  display: grid;
+}
+.rows > a,
+.rows > div {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 0.25rem;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+.rows > a:hover {
+  background: var(--surface);
+}
+.rows .grow {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.rows > a,
+.rows > div {
+  flex-wrap: wrap;
+}
+/* Settings: what a group is on the left, its controls on the right. */
+.setting {
+  display: grid;
+  grid-template-columns: minmax(12rem, 20rem) minmax(0, 36rem);
+  gap: 1rem 3rem;
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.setting h2 {
+  margin: 0 0 0.3rem;
+}
+.setting p {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .setting {
+    grid-template-columns: 1fr;
+  }
+  .stats > div {
+    padding-left: 0;
+    border-left: none;
+  }
 }

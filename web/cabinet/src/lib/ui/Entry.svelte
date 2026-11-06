@@ -5,7 +5,7 @@
 </script>
 
 <main>
-  <div class="card">
+  <div class="panel">
     <h1>{title}</h1>
     {@render children()}
   </div>
@@ -16,5 +16,11 @@
     max-width: 24rem;
     margin: 10vh auto;
     padding: 0 1rem;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.5rem;
   }
 </style>

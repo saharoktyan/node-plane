@@ -12,15 +12,15 @@
   // Sections follow the account's roles, as in the bot and Workstation.
   function adminSections() {
     const all = [
-      { href: '/admin', label: t('admin.overview'), allowed: true },
-      { href: '/admin/people', label: t('admin.people'),
+      { href: '/admin', label: t('admin.overview'), icon: 'overview', allowed: true },
+      { href: '/admin/users', label: t('admin.users'), icon: 'users',
         allowed: account.may('accounts.manage') || account.may('access_requests.manage') || account.may('profiles.manage') },
-      { href: '/admin/nodes', label: t('admin.nodes'), allowed: account.may('nodes.inspect') },
-      { href: '/admin/services', label: t('admin.services'), allowed: true },
-      { href: '/admin/announcements', label: t('admin.announcements'), allowed: account.may('settings.manage') },
-      { href: '/admin/system', label: t('admin.system'), allowed: account.may('settings.manage') }
+      { href: '/admin/nodes', label: t('admin.nodes'), icon: 'nodes', allowed: account.may('nodes.inspect') },
+      { href: '/admin/services', label: t('admin.services'), icon: 'catalog', allowed: true },
+      { href: '/admin/announcements', label: t('admin.announcements'), icon: 'announcements', allowed: account.may('settings.manage') },
+      { href: '/admin/system', label: t('admin.system'), icon: 'system', allowed: account.may('settings.manage') }
     ];
-    return all.filter((section) => section.allowed);
+    return all.filter((section) => section.allowed).map(({ allowed: _, ...section }) => section);
   }
 
   const load = account.require().then(async (me) => {
@@ -35,7 +35,7 @@
       <Shell
         title={t('admin.title')}
         sections={adminSections()}
-        switchTo={{ href: '/', label: t('common.cabinet') }}
+        switchTo={{ href: '/', label: t('common.cabinet'), icon: 'cabinet' }}
       >
         {@render content()}
       </Shell>

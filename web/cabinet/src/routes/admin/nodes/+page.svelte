@@ -9,31 +9,32 @@
   type Instance = { id: string; service: string; state: string };
 </script>
 
-<h1>{t('admin.nodes')}</h1>
+<div class="page-head"><h1>{t('admin.nodes')}</h1></div>
 <Async {load}>
   {#snippet children(page)}
-    <div class="grid">
-      {#each page.items as node (node.key)}
-        <div class="card">
-          <div class="row"><strong>{node.flag} {node.title}</strong>
-            {#if !node.enabled}<span class="badge warn">{t('admin.disabled')}</span>{/if}</div>
-          <div class="muted">{node.region}</div>
-          <div class="row instances">
-            {#each (node.service_instances ?? []) as Instance[] as instance (instance.id)}
-              <span class={'badge ' + (instance.state === 'active' ? 'ok' : 'warn')}>
-                {serviceName(instance.service)} · {t('admin.state_' + instance.state)}</span>
-            {/each}
-          </div>
-        </div>
-      {:else}
-        <p class="muted">{t('admin.no_nodes')}</p>
-      {/each}
-    </div>
+    <table>
+      <thead><tr><th>{t('admin.node')}</th><th>{t('admin.region')}</th><th>{t('admin.services')}</th>
+        <th>{t('admin.state')}</th></tr></thead>
+      <tbody>
+        {#each page.items as node (node.key)}
+          <tr>
+            <td>{node.flag} {node.title}</td>
+            <td class="muted">{node.region}</td>
+            <td>
+              <div class="row">
+                {#each (node.service_instances ?? []) as Instance[] as instance (instance.id)}
+                  <span class={'badge ' + (instance.state === 'active' ? 'ok' : 'warn')}
+                    title={t('admin.state_' + instance.state)}>{serviceName(instance.service)}</span>
+                {/each}
+              </div>
+            </td>
+            <td>{node.enabled ? (node.settings_apply_pending ? t('admin.state_changes_pending') : t('admin.state_active'))
+              : t('admin.disabled')}</td>
+          </tr>
+        {:else}
+          <tr><td colspan="4" class="muted">{t('admin.no_nodes')}</td></tr>
+        {/each}
+      </tbody>
+    </table>
   {/snippet}
 </Async>
-
-<style>
-  .instances {
-    margin-top: 0.5rem;
-  }
-</style>

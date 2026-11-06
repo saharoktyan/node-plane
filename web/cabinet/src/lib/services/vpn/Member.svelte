@@ -1,6 +1,6 @@
-<!-- VPN, the built-in service: term, tariff, quota, traffic and the
-     servers the profile reaches; renewal when the term ends. Devices,
-     configurations and QR codes come next. -->
+<!-- VPN, the built-in service: term, tariff and traffic in one line, then
+     the servers the profile reaches. Devices, configurations, QR codes and
+     charts come next. -->
 <script lang="ts">
   import { api, call, ApiError } from '$lib/api/client';
   import type { ServiceProfile } from '$lib/services/registry';
@@ -30,41 +30,76 @@
 
 <Async {load}>
   {#snippet children(summary)}
-    <div class="card">
-      <table>
-        <tbody>
-          <tr><th>{t('vpn.status')}</th><td>{t('services.status_' + profile.status)}</td></tr>
-          <tr><th>{t('vpn.term')}</th>
-            <td>{summary.expires_at ? t('vpn.until', { date: date(summary.expires_at) }) : t('vpn.unlimited')}</td></tr>
-          {#if summary.tariff}<tr><th>{t('vpn.tariff')}</th><td>{summary.tariff.title}</td></tr>{/if}
-          {#if summary.quota}
-            <tr><th>{t('vpn.quota')}</th>
-              <td>{t('vpn.quota_used', { used: bytes(Number(summary.quota.used_bytes)),
-                limit: bytes(Number(summary.quota.limit_bytes)) })}</td></tr>
-          {/if}
-          {#if summary.renewal?.status === 'pending'}
-            <tr><th>{t('vpn.renewal')}</th><td>{t('vpn.renewal_pending')}</td></tr>
-          {/if}
-        </tbody>
-      </table>
-      {#if profile.actions.includes('renewal')}
-        <p><button onclick={renew}>{t('vpn.renew')}</button></p>
-      {/if}
-      {#if notice}<p>{notice}</p>{/if}
-    </div>
-
-    <h2>{t('vpn.servers')}</h2>
-    {#if summary.nodes.length}
-      <div class="grid">
-        {#each summary.nodes as node (node.key)}
-          <div class="card">
-            <strong>{node.flag} {node.title}</strong>
-            <div class="muted">{node.protocols.map((protocol) => t('vpn.protocol_' + protocol)).join(', ')}</div>
-          </div>
-        {/each}
+    <div class="stats">
+      <div>
+        <div class="label">{t('vpn.term')}</div>
+        <div class="value">{summary.expires_at ? date(summary.expires_at) : t('vpn.unlimited')}</div>
+        {#if summary.renewal?.status === 'pending'}<div class="note">{t('vpn.renewal_pending')}</div>{/if}
       </div>
-    {:else}
-      <p class="muted">{t('vpn.no_servers')}</p>
+      <div>
+        <div class="label">{t('vpn.tariff')}</div>
+        <div class="value">{summary.tariff?.title ?? '—'}</div>
+      </div>
+      <div>
+        <div class="label">{t('vpn.quota')}</div>
+        {#if summary.quota}
+          <div class="value">{bytes(Number(summary.quota.used_bytes))}</div>
+          <div class="note">{t('vpn.quota_of', { limit: bytes(Number(summary.quota.limit_bytes)) })}</div>
+          <div class="meter"><span style:width={`${Math.min(100, (100 * Number(summary.quota.used_bytes)) /
+            Math.max(1, Number(summary.quota.limit_bytes)))}%`}></span></div>
+        {:else}
+          <div class="value">{t('vpn.no_quota')}</div>
+        {/if}
+      </div>
+      <div>
+        <div class="label">{t('vpn.devices')}</div>
+        <div class="value">{profile.summary.devices ?? 0}</div>
+      </div>
+    </div>
+    {#if profile.actions.includes('renewal') || notice}
+      <div class="row actions">
+        {#if profile.actions.includes('renewal')}<button onclick={renew}>{t('vpn.renew')}</button>{/if}
+        {#if notice}<span>{notice}</span>{/if}
+      </div>
     {/if}
+
+    <section class="block">
+      <h2>{t('vpn.servers')}</h2>
+      {#if summary.nodes.length}
+        <table>
+          <thead><tr><th>{t('vpn.server')}</th><th>{t('vpn.region')}</th><th>{t('vpn.protocols')}</th></tr></thead>
+          <tbody>
+            {#each summary.nodes as node (node.key)}
+              <tr>
+                <td>{node.flag} {node.title}</td>
+                <td class="muted">{node.region || '—'}</td>
+                <td>{node.protocols.map((protocol) => t('vpn.protocol_' + protocol)).join(', ')}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {:else}
+        <p class="muted">{t('vpn.no_servers')}</p>
+      {/if}
+    </section>
   {/snippet}
 </Async>
+
+<style>
+  .meter {
+    height: 4px;
+    margin-top: 0.4rem;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 12rem;
+  }
+  .meter span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .actions {
+    margin: -0.75rem 0 1.5rem;
+  }
+</style>

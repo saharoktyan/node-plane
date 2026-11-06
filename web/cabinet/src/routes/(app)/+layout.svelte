@@ -15,11 +15,11 @@
       <Shell
         title={t('common.cabinet')}
         sections={[
-          { href: '/', label: t('services.title') },
-          { href: '/inbox', label: t('inbox.title') },
-          { href: '/settings', label: t('settings.title') }
+          { href: '/', label: t('services.title'), icon: 'services' },
+          { href: '/inbox', label: t('inbox.title'), icon: 'inbox' },
+          { href: '/settings', label: t('settings.title'), icon: 'settings' }
         ]}
-        switchTo={account.staff ? { href: '/admin', label: t('admin.title') } : null}
+        switchTo={account.staff ? { href: '/admin', label: t('admin.title'), icon: 'admin' } : null}
       >
         {@render content()}
       </Shell>

@@ -34,11 +34,15 @@ export function me(role: Role, scenario: Scenario, locale: 'ru' | 'en'): Schemas
   };
 }
 
-export function myServices(scenario: Scenario): Schemas['ServiceProfileOutput'][] {
+// Tariff titles are the administrator's text, in whatever language they wrote;
+// the mocks follow the chosen language so screenshots read in one.
+const MONTH = { ru: 'Месяц', en: 'Month' };
+
+export function myServices(scenario: Scenario, lang: 'ru' | 'en'): Schemas['ServiceProfileOutput'][] {
   if (scenario === 'empty') return [];
   const vpn: Schemas['ServiceProfileOutput'] = {
     id: VPN_ID, service: 'vpn', kind: 'builtin', status: 'active', actions: ['devices', 'configs', 'renewal'],
-    summary: { title: 'Нина', devices: 2, tariff: 'Месяц', expires_at: '2026-12-06T00:00:00+00:00', renewal: null }
+    summary: { title: 'Нина', devices: 2, tariff: MONTH[lang], expires_at: '2026-12-06T00:00:00+00:00', renewal: null }
   };
   // A service from a manifest, drawn by the generic module.
   const own: Schemas['ServiceProfileOutput'] = {
@@ -68,10 +72,10 @@ export function catalog(role: Role, scenario: Scenario): Schemas['ServiceOutput'
   return items;
 }
 
-export function summary(id: string): Schemas['MemberProfileSummary'] {
+export function summary(id: string, lang: 'ru' | 'en'): Schemas['MemberProfileSummary'] {
   return {
     profile_id: id, display_name: 'Нина', frozen: false, expired: false, quota_suspended: false,
-    tariff: { id: 't1', title: 'Месяц', duration_days: 30, assigned_at: '2026-11-06T00:00:00+00:00' },
+    tariff: { id: 't1', title: MONTH[lang], duration_days: 30, assigned_at: '2026-11-06T00:00:00+00:00' },
     renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720, period_end: '2026-12-01T00:00:00+00:00',
       on_exhausted: 'block', throttled_kbit: null },
     expires_at: '2026-12-06T00:00:00+00:00', created_at: '2026-10-01T00:00:00+00:00',

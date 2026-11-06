@@ -29,5 +29,9 @@
   "method_passkey": "passkey",
   "method_invite": "приглашение",
   "method_registration": "регистрация",
-  "method_telegram": "Telegram"
+  "method_telegram": "Telegram",
+  "appearance_hint": "Язык сохраняется в аккаунте, тема — в этом браузере.",
+  "password_hint": "Для входа по логину. После смены остальные сессии завершаются.",
+  "passkeys_hint": "Вход без пароля: отпечаток, лицо или ключ на этом или другом устройстве.",
+  "sessions_hint": "Где выполнен вход. Чужую сессию можно завершить."
 }

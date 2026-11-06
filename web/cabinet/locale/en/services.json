@@ -13,7 +13,7 @@
   "status_expired": "Expired",
   "status_suspended": "Suspended: quota used up",
   "name_vpn": "VPN",
-  "name_relay": "Web cabinet (relay)",
+  "name_relay": "Relay",
   "name_telegram_bot": "Telegram bot",
   "name_xray": "Xray",
   "name_awg": "AmneziaWG"

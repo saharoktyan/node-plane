@@ -17,29 +17,34 @@
   }
 </script>
 
-<h1>{t('inbox.title')}</h1>
+<div class="page-head"><h1>{t('inbox.title')}</h1></div>
 <Async {load}>
   {#snippet children(inbox)}
-    {#each inbox.items as item (item.id)}
-      <article class="card" class:unread={!item.viewed_at}>
-        <div class="muted">{dateTime(item.created_at)}</div>
-        <p class="text">{item.text}</p>
-        <button onclick={() => dismiss(item.id)}>{t('inbox.dismiss')}</button>
-      </article>
-    {:else}
-      <p class="muted">{t('inbox.empty')}</p>
-    {/each}
+    <div class="rows">
+      {#each inbox.items as item (item.id)}
+        <div class:unread={!item.viewed_at}>
+          <span class="when muted">{dateTime(item.created_at)}</span>
+          <p class="grow text">{item.text}</p>
+          <button onclick={() => dismiss(item.id)}>{t('inbox.dismiss')}</button>
+        </div>
+      {:else}
+        <p class="muted">{t('inbox.empty')}</p>
+      {/each}
+    </div>
   {/snippet}
 </Async>
 
 <style>
-  article {
-    margin-bottom: 0.75rem;
-  }
   .unread {
-    border-left: 3px solid var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+    padding-left: 0.9rem !important;
+  }
+  .when {
+    min-width: 11rem;
+    font-size: 0.9rem;
   }
   .text {
     white-space: pre-wrap;
+    margin: 0;
   }
 </style>

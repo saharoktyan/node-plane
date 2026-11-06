@@ -21,9 +21,10 @@ await new Promise((resolve, reject) => {
 const browser = await chromium.launch({ executablePath: process.env.NODE_PLANE_CHROMIUM ?? '/usr/bin/chromium' });
 const failures = [];
 try {
-  for (const [scenario, role, lang, theme] of [['default', 'owner', 'ru', 'light'], ['many', 'support', 'en', 'dark'],
-    ['empty', 'member', 'ru', 'dark'], ['errors', 'owner', 'en', 'light']]) {
-    const context = await browser.newContext({ colorScheme: theme, viewport: { width: 1100, height: 800 } });
+  // A phone's width for the member: the side panel slides in over the page.
+  for (const [scenario, role, lang, theme, width] of [['default', 'owner', 'ru', 'light', 1440],
+    ['many', 'support', 'en', 'dark', 1440], ['empty', 'member', 'ru', 'dark', 390], ['errors', 'owner', 'en', 'light', 1100]]) {
+    const context = await browser.newContext({ colorScheme: theme, viewport: { width, height: 800 } });
     const page = await context.newPage();
     const errors = [];
     // Answers the page expects are not errors: 401 before a refreshed
@@ -36,7 +37,7 @@ try {
     await page.fill('input[type=password]', 'secret');
     await page.click('button.primary');
     await page.waitForURL(`${base}/`);
-    const pages = ['/', '/inbox', '/settings', ...(role === 'member' ? [] : ['/admin', '/admin/people', '/admin/nodes',
+    const pages = ['/', '/inbox', '/settings', ...(role === 'member' ? [] : ['/admin', '/admin/users', '/admin/nodes',
       '/admin/services'])];
     if (scenario !== 'empty' && scenario !== 'errors') pages.splice(1, 0, '/services/6f1c1a52-8f3e-4c8e-9b8a-0f6f2d0c1a11');
     if (scenario === 'many') pages.splice(2, 0, '/services/9a7c2d1e-3b4f-4a5b-8c6d-7e8f9a0b1c22');

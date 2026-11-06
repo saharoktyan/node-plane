@@ -16,7 +16,7 @@ const KINDS: [(&str, &str, &str); 3] = [
 pub fn name(service: &str) -> &str {
     match service {
         "vpn" => "VPN",
-        "relay" => "Web cabinet (relay)",
+        "relay" => "Relay",
         "telegram_bot" => "Telegram bot",
         other => other,
     }
@@ -88,7 +88,7 @@ mod tests {
         ]});
         let page = text(Some(&catalog));
         assert!(page.find("System").unwrap() < page.find("Built-in").unwrap());
-        assert!(page.contains("  Web cabinet (relay) · applying · instances: 1"));
+        assert!(page.contains("  Relay · applying · instances: 1"));
         assert!(page.contains("  Telegram bot · off\n"));
         assert!(page.ends_with("  VPN · instances: 3"));
         assert!(!page.contains("Your own"));

@@ -1,4 +1,4 @@
-<!-- People: accounts with access, without it, or all. -->
+<!-- Users: accounts with access, without it, or all. -->
 <script lang="ts">
   import { api, call } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -13,11 +13,13 @@
   }
 </script>
 
-<h1>{t('admin.people')}</h1>
-<div class="row filters">
-  {#each ['with', 'without', 'all'] as const as value (value)}
-    <button class:primary={access === value} onclick={() => (access = value)}>{t('admin.access_' + value)}</button>
-  {/each}
+<div class="page-head">
+  <h1>{t('admin.users')}</h1>
+  <div class="actions">
+    {#each ['with', 'without', 'all'] as const as value (value)}
+      <button class:primary={access === value} onclick={() => (access = value)}>{t('admin.access_' + value)}</button>
+    {/each}
+  </div>
 </div>
 <Async {load}>
   {#snippet children(page)}
@@ -39,8 +41,3 @@
   {/snippet}
 </Async>
 
-<style>
-  .filters {
-    margin-bottom: 1rem;
-  }
-</style>

@@ -1,5 +1,5 @@
-<!-- Settings: language and theme; sign-in — the password, passkeys and
-     the sessions of this account. -->
+<!-- Settings: what each group is on the left, its controls on the right —
+     appearance, the password, passkeys and the sessions of this account. -->
 <script lang="ts">
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
@@ -67,25 +67,26 @@
     }, 'settings.session_ended');
 </script>
 
-<h1>{t('settings.title')}</h1>
-{#if notice}<p>{notice}</p>{/if}
+<div class="page-head"><h1>{t('settings.title')}</h1>{#if notice}<span class="muted">{notice}</span>{/if}</div>
 
-<section class="card">
-  <h2>{t('settings.appearance')}</h2>
-  <label>{t('settings.language')}
-    <select value={i18n.language} onchange={(event) => setLanguage(event.currentTarget.value as 'ru' | 'en')}>
-      {#each LANGUAGES as language (language)}<option value={language}>{t('settings.language_' + language)}</option>{/each}
-    </select>
-  </label>
-  <label>{t('settings.theme')}
-    <select bind:value={theme} onchange={() => applyTheme(theme)}>
-      {#each ['system', 'light', 'dark'] as value (value)}<option {value}>{t('settings.theme_' + value)}</option>{/each}
-    </select>
-  </label>
-</section>
+<div class="setting">
+  <div><h2>{t('settings.appearance')}</h2><p class="muted">{t('settings.appearance_hint')}</p></div>
+  <div>
+    <label>{t('settings.language')}
+      <select value={i18n.language} onchange={(event) => setLanguage(event.currentTarget.value as 'ru' | 'en')}>
+        {#each LANGUAGES as language (language)}<option value={language}>{t('settings.language_' + language)}</option>{/each}
+      </select>
+    </label>
+    <label>{t('settings.theme')}
+      <select bind:value={theme} onchange={() => applyTheme(theme)}>
+        {#each ['system', 'light', 'dark'] as value (value)}<option {value}>{t('settings.theme_' + value)}</option>{/each}
+      </select>
+    </label>
+  </div>
+</div>
 
-<section class="card">
-  <h2>{t('settings.password')}</h2>
+<div class="setting">
+  <div><h2>{t('settings.password')}</h2><p class="muted">{t('settings.password_hint')}</p></div>
   <form onsubmit={setPassword}>
     {#if account.me?.has_password}
       <label>{t('settings.current_password')}
@@ -95,57 +96,47 @@
       <input type="password" bind:value={password} autocomplete="new-password" required /></label>
     <button class="primary">{t('settings.save_password')}</button>
   </form>
-</section>
+</div>
 
-<section class="card">
-  <h2>{t('settings.passkeys')}</h2>
-  <Async load={passkeys}>
-    {#snippet children(items)}
-      {#each items as item (item.id)}
-        <div class="row line">
-          <span>{item.name}</span>
-          <span class="muted">{t('settings.used', { date: dateTime(item.used_at) })}</span>
-          <button class="danger" onclick={() => removePasskey(item.id)}>{t('common.remove')}</button>
+<div class="setting">
+  <div><h2>{t('settings.passkeys')}</h2><p class="muted">{t('settings.passkeys_hint')}</p></div>
+  <div>
+    <Async load={passkeys}>
+      {#snippet children(items)}
+        <div class="rows">
+          {#each items as item (item.id)}
+            <div>
+              <span class="grow">{item.name}</span>
+              <span class="muted">{t('settings.used', { date: dateTime(item.used_at) })}</span>
+              <button class="danger" onclick={() => removePasskey(item.id)}>{t('common.remove')}</button>
+            </div>
+          {:else}
+            <p class="muted">{t('settings.no_passkeys')}</p>
+          {/each}
         </div>
-      {:else}
-        <p class="muted">{t('settings.no_passkeys')}</p>
-      {/each}
-    {/snippet}
-  </Async>
-  {#if webauthn.available()}<button onclick={addPasskey}>{t('settings.add_passkey')}</button>{/if}
-</section>
+      {/snippet}
+    </Async>
+    {#if webauthn.available()}<p><button onclick={addPasskey}>{t('settings.add_passkey')}</button></p>{/if}
+  </div>
+</div>
 
-<section class="card">
-  <h2>{t('settings.sessions')}</h2>
+<div class="setting">
+  <div><h2>{t('settings.sessions')}</h2><p class="muted">{t('settings.sessions_hint')}</p></div>
   <Async load={sessions}>
     {#snippet children(items)}
-      {#each items as item (item.id)}
-        <div class="row line">
-          <span>{item.device || t('settings.unknown_device')}</span>
-          <span class="muted">{t('settings.method_' + item.method)} · {dateTime(item.used_at)}</span>
-          {#if item.current}
-            <span class="badge ok">{t('settings.this_device')}</span>
-          {:else}
-            <button class="danger" onclick={() => endSession(item.id)}>{t('settings.end_session')}</button>
-          {/if}
-        </div>
-      {/each}
+      <div class="rows">
+        {#each items as item (item.id)}
+          <div>
+            <span class="grow">{item.device || t('settings.unknown_device')}
+              <span class="muted">· {t('settings.method_' + item.method)} · {dateTime(item.used_at)}</span></span>
+            {#if item.current}
+              <span class="badge ok">{t('settings.this_device')}</span>
+            {:else}
+              <button class="danger" onclick={() => endSession(item.id)}>{t('settings.end_session')}</button>
+            {/if}
+          </div>
+        {/each}
+      </div>
     {/snippet}
   </Async>
-</section>
-
-<style>
-  section {
-    margin-bottom: 1rem;
-  }
-  section h2 {
-    margin-top: 0;
-  }
-  .line {
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .line > :first-child {
-    flex: 1;
-  }
-</style>
+</div>

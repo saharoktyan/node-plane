@@ -3,5 +3,8 @@
   "loading": "Loading…",
   "error": "Something went wrong. Try again.",
   "remove": "Remove",
-  "sign_out": "Sign out"
+  "sign_out": "Sign out",
+  "expand": "Expand the panel",
+  "collapse": "Collapse the panel",
+  "menu": "Menu"
 }

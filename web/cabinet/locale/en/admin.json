@@ -1,7 +1,6 @@
 {
   "title": "Administration",
   "overview": "Overview",
-  "people": "People",
   "nodes": "Nodes",
   "services": "Services",
   "announcements": "Announcements",
@@ -42,5 +41,11 @@
   "kind_hint_builtin": "Part of Node Plane; people get access to them.",
   "kind_hint_user": "Services from manifests.",
   "manifests_later": "Manifests, the editor and test runs come here with your own services.",
-  "section_later": "This section comes in later steps; for now it is in the bot and Workstation."
+  "section_later": "This section comes in later steps; for now it is in the bot and Workstation.",
+  "users": "Users",
+  "enabled": "enabled: {count}",
+  "active": "active: {count}",
+  "no_problems": "No problems.",
+  "node": "Node",
+  "region": "Region"
 }

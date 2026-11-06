@@ -48,7 +48,7 @@ export const handlers = [
   http.post('/api/v1/invites/preview', async ({ request }) => {
     const body = (await request.json()) as Schemas['InviteTokenInput'];
     if (body.token === 'inv_used') return error(404, 'invite_invalid');
-    const preview: Schemas['InvitePreview'] = { kind: 'new', vpn: true, tariff: 'Месяц', login: null,
+    const preview: Schemas['InvitePreview'] = { kind: 'new', vpn: true, tariff: choice().lang === 'ru' ? 'Месяц' : 'Month', login: null,
       has_password: false, expires_at: new Date(Date.now() + 86_400_000).toISOString() };
     return HttpResponse.json(preview);
   }),
@@ -66,11 +66,11 @@ export const handlers = [
     const { role, scenario, lang } = choice();
     return fixtures.me(role, scenario, lang);
   })),
-  http.get('/api/v1/me/services', guarded(() => ({ items: fixtures.myServices(choice().scenario) }))),
+  http.get('/api/v1/me/services', guarded(() => ({ items: fixtures.myServices(choice().scenario, choice().lang) }))),
   http.get('/api/v1/services', guarded(() => ({ items: fixtures.catalog(choice().role, choice().scenario) }))),
   http.post('/api/v1/me/access-requests', guarded(() => HttpResponse.json({}, { status: 201 }))),
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
-    fixtures.summary(new URL(url).pathname.split('/')[5]))),
+    fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),
   http.get('/api/v1/me/notifications', guarded(() => ({ items: fixtures.inbox, total: fixtures.inbox.length,
     offset: 0, page_size: 10 }))),
