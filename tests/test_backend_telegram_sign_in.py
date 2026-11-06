@@ -18,14 +18,14 @@ TOKEN = '123456:' + 'A' * 35
 
 
 def widget(user_id, now=NOW, token=TOKEN, **fields):
-    data = {'id': user_id, 'first_name': 'Nina', 'username': 'nina_tg', 'auth_date': int(now.timestamp()), **fields}
+    data = {'id': user_id, 'first_name': 'Sahar', 'username': 'saharoktyan', 'auth_date': int(now.timestamp()), **fields}
     check = '\n'.join(f'{key}={data[key]}' for key in sorted(data))
     data['hash'] = hmac.new(hashlib.sha256(token.encode()).digest(), check.encode(), hashlib.sha256).hexdigest()
     return data
 
 
 def init_data(user_id, now=NOW, token=TOKEN):
-    fields = {'user': json.dumps({'id': user_id, 'username': 'nina_tg'}), 'auth_date': str(int(now.timestamp())),
+    fields = {'user': json.dumps({'id': user_id, 'username': 'saharoktyan'}), 'auth_date': str(int(now.timestamp())),
               'query_id': 'AAE'}
     check = '\n'.join(f'{key}={fields[key]}' for key in sorted(fields))
     secret = hmac.new(b'WebAppData', token.encode(), hashlib.sha256).digest()
@@ -87,7 +87,7 @@ class TelegramSignInTests(unittest.TestCase):
     def test_a_free_telegram_links_and_an_empty_account_moves(self):
         anna = self.cabinet_account()
         preview = telegram.link_preview(self.db, anna, kind='login', data=widget(404), source='s', now=NOW)
-        self.assertEqual((preview['state'], preview['username']), ('free', 'nina_tg'))
+        self.assertEqual((preview['state'], preview['username']), ('free', 'saharoktyan'))
         account = telegram.link_confirm(self.db, anna, preview['link_id'], now=NOW)
         self.assertEqual(account['telegram_user_id'], 404)
         self.assertEqual(self.owner(404), anna)

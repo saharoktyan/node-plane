@@ -36,7 +36,7 @@
   "instances": "Экземпляры",
   "kind_system": "Системные",
   "kind_builtin": "Встроенные",
-  "kind_user": "Свои",
+  "kind_user": "Пользовательские",
   "kind_hint_system": "То, что работает для самой установки.",
   "kind_hint_builtin": "Часть Node Plane; к ним люди получают доступ.",
   "kind_hint_user": "Сервисы из манифестов.",

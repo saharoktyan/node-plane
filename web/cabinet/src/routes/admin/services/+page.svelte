@@ -19,7 +19,8 @@
       <section class="block">
         <h2>{t('admin.kind_' + kind)} <span class="muted hint">{t('admin.kind_hint_' + kind)}</span></h2>
       {#if items.length}
-        <table>
+        <table class="aligned">
+          <colgroup><col class="name" /><col class="state" /><col class="count" /></colgroup>
           <thead><tr><th>{t('admin.service')}</th><th>{t('admin.state')}</th><th>{t('admin.instances')}</th></tr></thead>
           <tbody>
             {#each items as item (item.service)}
@@ -41,6 +42,16 @@
 </Async>
 
 <style>
+  /* The same columns in every kind's table, so they line up. */
+  .aligned {
+    table-layout: fixed;
+  }
+  .name {
+    width: 45%;
+  }
+  .state {
+    width: 30%;
+  }
   .hint {
     font-weight: 400;
     font-size: 0.9rem;

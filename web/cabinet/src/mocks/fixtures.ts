@@ -27,7 +27,7 @@ export function me(role: Role, scenario: Scenario, locale: 'ru' | 'en'): Schemas
     id: '2b0c6d3a-1111-4222-8333-944455556666', role: role === 'member' ? 'member' : 'admin',
     roles: role === 'member' ? [] : [role], status: 'approved',
     permissions: [...MEMBER_PERMISSIONS, ...ROLE_PERMISSIONS[role]],
-    login: 'nina', display_name: 'Нина', username: 'nina_tg', locale, locale_selected: true,
+    login: 'saharoktyan', display_name: 'saharoktyan', username: 'saharoktyan', locale, locale_selected: true,
     services: scenario === 'empty' ? [] : ['vpn'], has_password: true, passkeys: 1,
     account_created: true, announcement_silent: false, onboarding_completed: true, service_notifications: 'on',
     traffic_available: true
@@ -42,12 +42,12 @@ export function myServices(scenario: Scenario, lang: 'ru' | 'en'): Schemas['Serv
   if (scenario === 'empty') return [];
   const vpn: Schemas['ServiceProfileOutput'] = {
     id: VPN_ID, service: 'vpn', kind: 'builtin', status: 'active', actions: ['devices', 'configs', 'renewal'],
-    summary: { title: 'Нина', devices: 2, tariff: MONTH[lang], expires_at: '2026-12-06T00:00:00+00:00', renewal: null }
+    summary: { title: 'saharoktyan', devices: 2, tariff: MONTH[lang], expires_at: '2026-12-06T00:00:00+00:00', renewal: null }
   };
   // A service from a manifest, drawn by the generic module.
   const own: Schemas['ServiceProfileOutput'] = {
     id: OWN_ID, service: 'vaultwarden', kind: 'user', status: 'active', actions: ['open'],
-    summary: { address: 'https://vault.example.org', account: 'nina@example.org' }
+    summary: { address: 'https://vault.example.org', account: 'saharoktyan@example.org' }
   };
   return scenario === 'many' ? [vpn, own] : [vpn];
 }
@@ -74,7 +74,7 @@ export function catalog(role: Role, scenario: Scenario): Schemas['ServiceOutput'
 
 export function summary(id: string, lang: 'ru' | 'en'): Schemas['MemberProfileSummary'] {
   return {
-    profile_id: id, display_name: 'Нина', frozen: false, expired: false, quota_suspended: false,
+    profile_id: id, display_name: 'saharoktyan', frozen: false, expired: false, quota_suspended: false,
     tariff: { id: 't1', title: MONTH[lang], duration_days: 30, assigned_at: '2026-11-06T00:00:00+00:00' },
     renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720, period_end: '2026-12-01T00:00:00+00:00',
       on_exhausted: 'block', throttled_kbit: null },

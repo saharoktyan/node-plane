@@ -10,7 +10,7 @@ const KINDS: [(&str, &str, &str); 3] = [
         "Built-in",
         "Part of Node Plane; people get access to them.",
     ),
-    ("user", "Your own", "Added from manifests."),
+    ("user", "Custom", "Added from manifests."),
 ];
 
 pub fn name(service: &str) -> &str {
@@ -91,7 +91,7 @@ mod tests {
         assert!(page.contains("  Relay · applying · instances: 1"));
         assert!(page.contains("  Telegram bot · off\n"));
         assert!(page.ends_with("  VPN · instances: 3"));
-        assert!(!page.contains("Your own"));
+        assert!(!page.contains("Custom"));
         assert!(has(Some(&catalog), "relay"));
         assert!(text(None).ends_with("Loading services…"));
     }

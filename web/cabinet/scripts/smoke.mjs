@@ -33,7 +33,7 @@ try {
       && errors.push(message.text()));
     page.on('pageerror', (error) => errors.push(String(error)));
     await page.goto(`${base}/login?scenario=${scenario}&role=${role}&lang=${lang}`);
-    await page.fill('input[autocomplete=username]', 'nina');
+    await page.fill('input[autocomplete=username]', 'saharoktyan');
     await page.fill('input[type=password]', 'secret');
     await page.click('button.primary');
     await page.waitForURL(`${base}/`);
