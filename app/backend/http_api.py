@@ -346,6 +346,43 @@ class RegistrationInput(BaseModel):
     device: StrictStr | None = Field(default=None, max_length=256)
 
 
+class TelegramSignInInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    # `login`: the Login Widget's fields as an object; `webapp`: the Mini App's `initData` string.
+    kind: Literal['login', 'webapp']
+    data: dict[str, Any] | StrictStr
+    device: StrictStr | None = Field(default=None, max_length=256)
+
+
+class TelegramLinkPreviewInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    # Either a proven Telegram (`kind` and `data`) or a code from the bot.
+    kind: Literal['login', 'webapp'] | None = None
+    data: dict[str, Any] | StrictStr | None = None
+    code: StrictStr | None = Field(default=None, max_length=16)
+
+
+class TelegramLinkPreview(BaseModel):
+    link_id: str
+    telegram_user_id: int
+    username: str | None
+    # `free`; `own` (already this account's); `account_has_telegram` (this account has another);
+    # `other_empty` (it moves here and that empty account is deleted); `other_with_access` (refused).
+    state: Literal['free', 'own', 'account_has_telegram', 'other_empty', 'other_with_access']
+    other_login: str | None
+
+
+class TelegramLinkInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    link_id: StrictStr = Field(max_length=64)
+
+
+class TelegramLinkCode(BaseModel):
+    # Entered in the web cabinet; works once.
+    code: str
+    expires_at: str
+
+
 class ServiceAccessOutput(BaseModel):
     service: str
     # `active`, `pending` (a request waits), `requestable`, or `unavailable` (requests are off).
@@ -1776,6 +1813,53 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             raise AccessDenied('invalid_input', 422)
         return registrations.update(db, current, open=body.open,
                                     cleanup_days=body.cleanup_days if 'cleanup_days' in body.model_fields_set else ...)
+
+    @app.post('/api/v1/sessions/telegram', response_model=SessionTokens, status_code=201)
+    def telegram_sign_in(body: TelegramSignInInput, request: Request):
+        """Sign in with Telegram (Login Widget or Mini App) as the account it belongs to."""
+        from . import telegram_sign_in as telegram
+        return telegram.sign_in(db, body.kind, body.data, device=body.device or header(request, 'User-Agent'),
+                                source=client_source(request))
+
+    def cabinet_account(current):
+        require_permission(current, 'account.self.preferences.write')
+        if current.principal.kind == PrincipalKind.ADAPTER:
+            # The cabinet account confirms; the bot only hands out a code.
+            raise AccessDenied('telegram_link_not_through_adapter', 403)
+        return current.account.id
+
+    @app.post('/api/v1/me/telegram/link/preview', response_model=TelegramLinkPreview)
+    def telegram_link_preview(body: TelegramLinkPreviewInput, request: Request, current=Depends(actor)):
+        """What linking a Telegram to this account would do, before it is confirmed."""
+        from . import telegram_sign_in as telegram
+        if (body.code is None) == (body.kind is None or body.data is None):
+            raise AccessDenied('invalid_input', 422)
+        return telegram.link_preview(db, cabinet_account(current), kind=body.kind, data=body.data, code=body.code,
+                                     source=client_source(request))
+
+    @app.post('/api/v1/me/telegram/link', response_model=AdminAccountOutput)
+    def telegram_link(body: TelegramLinkInput, current=Depends(actor)):
+        """Link the Telegram; from an empty account it moves, and that account is deleted."""
+        from . import telegram_sign_in as telegram
+        return telegram.link_confirm(db, cabinet_account(current), body.link_id)
+
+    @app.post('/api/v1/me/telegram/link-code', response_model=TelegramLinkCode, status_code=201)
+    def telegram_link_code(current=Depends(session)):
+        """In the bot: a code to enter in the web cabinet, which takes this Telegram over."""
+        from . import telegram_sign_in as telegram
+        from .telegram_visitors import TelegramVisitor
+        if isinstance(current, TelegramVisitor):
+            current.require('account.self.preferences.write')
+            subject = current.subject
+        else:
+            require_permission(current, 'account.self.preferences.write')
+            if current.principal.kind != PrincipalKind.ADAPTER:
+                raise AccessDenied('telegram_link_code_through_bot', 403)
+            with db.connect() as conn:
+                row = conn.execute("SELECT subject FROM backend_external_identities WHERE provider='telegram' "
+                                   'AND account_id=?', (current.account.id,)).fetchone()
+            subject = row['subject']
+        return telegram.link_code(db, subject)
 
     @app.get('/api/v1/me/service-access', response_model=ServiceAccessPage)
     def my_service_access(current=Depends(actor)):

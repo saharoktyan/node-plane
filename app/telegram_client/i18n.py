@@ -4094,6 +4094,14 @@ CATALOG['en'].update({
     'sessions.passkeys_title': 'Passkeys:', 'sessions.passkey': '{name} — added {created}',
     'sessions.remove_passkey': 'Remove passkey: {name}',
     'sessions.card_passkeys': 'Passkeys: {count}', 'sessions.remove_passkeys': 'Remove passkeys',
+    'sessions.telegram_link': 'Move Telegram to a cabinet account',
+    'sessions.telegram_code': 'Code: {code}',
+    'sessions.telegram_code_hint': 'Sign in to the web cabinet with the account that should get this Telegram '
+                                   'and enter the code in its settings within 10 minutes. The account you have '
+                                   'here has no access, so it is deleted after the move.',
+    'sessions.telegram_has_access': 'This account has access to services, so its Telegram stays here: it would '
+                                    'otherwise keep the access with no way to sign in. To use it in the web '
+                                    'cabinet, sign in there with Telegram.',
     'sessions.remove_passkeys_confirm': 'Remove every passkey of this account? It will sign in with a password '
                                         'or Telegram until it adds a new one in the web cabinet.',
     'sessions.confirm_remove': 'Remove',
@@ -4142,6 +4150,14 @@ CATALOG['ru'].update({
     'sessions.passkeys_title': 'Passkeys:', 'sessions.passkey': '{name} — добавлен {created}',
     'sessions.remove_passkey': 'Удалить passkey: {name}',
     'sessions.card_passkeys': 'Passkeys: {count}', 'sessions.remove_passkeys': 'Удалить passkeys',
+    'sessions.telegram_link': 'Перенести Telegram в аккаунт кабинета',
+    'sessions.telegram_code': 'Код: {code}',
+    'sessions.telegram_code_hint': 'Войдите в веб-кабинет под аккаунтом, который должен получить этот Telegram, '
+                                   'и введите код в его настройках в течение 10 минут. У аккаунта здесь нет '
+                                   'доступов, поэтому после переноса он удаляется.',
+    'sessions.telegram_has_access': 'У этого аккаунта есть доступы к сервисам, поэтому его Telegram остаётся здесь: '
+                                    'иначе доступы остались бы без способа входа. Чтобы пользоваться им в '
+                                    'веб-кабинете, войдите туда через Telegram.',
     'sessions.remove_passkeys_confirm': 'Удалить все passkeys этого аккаунта? Входить он сможет по паролю '
                                         'или через Telegram, пока не добавит новый в веб-кабинете.',
     'sessions.confirm_remove': 'Удалить',

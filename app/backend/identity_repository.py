@@ -71,6 +71,8 @@ class SQLIdentityRepository:
             invites_schema(conn)
             from db.migration_revisions.r0044_registrations import create_schema as registrations_schema
             registrations_schema(conn)
+            from db.migration_revisions.r0045_telegram_sign_in import create_schema as telegram_sign_in_schema
+            telegram_sign_in_schema(conn)
 
         from .system_cleanup import SystemCleanupService
         SystemCleanupService(self.db).initialize_schema()

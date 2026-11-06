@@ -149,6 +149,18 @@ A passkey signs in without a login or password: Face ID or Touch ID with iCloud 
 
 Each device signed in with a password or passkey is a session. A session lasts 30 days from its last use. Repeated wrong passwords pause signing in to that login, or from that address, for 15 minutes. In the bot, **Settings → Sign-in and sessions** shows whether a password is set and how many passkeys there are, and lists the sessions, each with its own **End** and **Sign out everywhere** for all of them, and the passkeys, each with **Remove passkey**. Administrators see on the account card, in the bot and in Workstation, whether an account has a password and how many sessions and passkeys it has; **End sessions** signs it out on every device, and **Remove passkeys** (after a confirmation) removes its passkeys, such as after a lost device. Restoring a backup ends every session; passwords and passkeys are kept.
 
+## Telegram in the web cabinet
+
+An account with Telegram signs in to the web cabinet with it: with the Telegram Login button, or right away when the cabinet is opened as a Mini App from the bot. The controller checks Telegram's signature with the bot's token, accepts only fresh data and each set once, so this needs the bot on.
+
+A Telegram belongs to one account. To move it to the account you use in the cabinet, sign in there and link Telegram, or take a code in the bot's **Settings → Sign-in and sessions → Move Telegram to a cabinet account** and enter it in the cabinet within 10 minutes. Before you confirm, the cabinet shows what happens:
+
+- the Telegram belongs to no account: it is linked;
+- it belongs to an account without access, requests or staff roles: it moves, and that empty account is deleted;
+- it belongs to an account with access: the move is refused, since that account would keep its access with no way to sign in. Use that account instead: sign in to the cabinet with Telegram.
+
+Accounts and their access are never merged by a move.
+
 ## Delete an account
 
 **Delete account** removes the account, its VPN profile and devices. After deletion, submitting a new request alone does not recreate an account; a subsequent approval or explicit administrator provisioning creates a fresh account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.

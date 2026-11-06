@@ -35,11 +35,11 @@ class SessionTests(IsolatedAsyncioTestCase):
     def test_settings_and_card(self):
         section = sessions.settings_section('en', 123, {'has_password': False})
         self.assertIn('not entered in Telegram', section.lines[0])
-        self.assertEqual(section.rows, ())
+        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:tglink'])
         # Passkeys alone also give sessions.
-        self.assertEqual(len(sessions.settings_section('en', 123, {'passkeys': 1}).rows), 1)
+        self.assertEqual(len(sessions.settings_section('en', 123, {'passkeys': 1}).rows), 2)
         section = sessions.settings_section('en', 123, {'has_password': True})
-        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:list'])
+        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:list', 'msess:tglink'])
         account = {'id': ACCOUNT, 'has_password': True, 'sessions': 2, 'passkeys': 1}
         self.assertEqual(sessions.card_lines('en', account), ('Password: set', 'Sessions: 2', 'Passkeys: 1'))
         self.assertEqual([row[0].callback_data for row in sessions.card_rows('en', account)],
@@ -60,6 +60,25 @@ class SessionTests(IsolatedAsyncioTestCase):
         self.assertIn(('DELETE', '/api/v1/me/sessions'), backend.calls)
         await self.press('msess:key:0', backend)
         self.assertIn(('DELETE', '/api/v1/me/passkeys/' + 'k' * 43), backend.calls)
+
+    async def test_the_bot_gives_a_code_to_move_its_telegram(self):
+        class CodeBackend(Backend):
+            def __init__(self, error=None):
+                super().__init__()
+                self.error = error
+
+            async def request(self, method, path, **kwargs):
+                self.calls.append((method, path))
+                if self.error:
+                    from telegram_client.backend import BackendError
+                    raise BackendError(self.error, 409)
+                return {'code': 'ABCD-EFGH', 'expires_at': '2026-11-06T12:10:00+00:00'}
+        backend = CodeBackend()
+        (screen, _), _ = await self.press('msess:tglink', backend)
+        self.assertEqual(backend.calls, [('POST', '/api/v1/me/telegram/link-code')])
+        self.assertIn('Code: ABCD-EFGH', screen.plain())
+        (screen, _), _ = await self.press('msess:tglink', CodeBackend('telegram_account_has_access'))
+        self.assertIn('has access to services', screen.plain())
 
     async def test_administrator_ends_an_accounts_sessions(self):
         backend = Backend()

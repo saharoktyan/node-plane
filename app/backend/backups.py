@@ -62,6 +62,8 @@ CLEAR = (
     # Links are given out again after a restore.
     "backend_invites",
     "backend_registration_challenges",
+    "backend_telegram_auth_used",
+    "backend_telegram_links",
     # Rebuilt from the restored Telegram logins.
     "backend_account_channels",
     # Rebuilt from the restored nodes.

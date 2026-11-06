@@ -25,10 +25,11 @@ def settings_section(locale, user_id, current):
     """The member's password and passkeys in Settings, with their sessions."""
     lines = (tr(locale, 'sessions.password_set' if current.get('has_password') else 'sessions.no_password'),
              tr(locale, 'sessions.passkeys', count=current.get('passkeys', 0)))
-    if not (current.get('has_password') or current.get('passkeys')):
-        return Section(tr(locale, 'sessions.title'), lines)
-    return Section(tr(locale, 'sessions.title'), lines, rows=(
-        (InlineKeyboardButton(text=tr(locale, 'sessions.open'), callback_data='msess:list'),),))
+    rows = ((InlineKeyboardButton(text=tr(locale, 'sessions.open'), callback_data='msess:list'),),) \
+        if current.get('has_password') or current.get('passkeys') else ()
+    # Moving this Telegram to an account of the web cabinet.
+    rows += ((InlineKeyboardButton(text=tr(locale, 'sessions.telegram_link'), callback_data='msess:tglink'),),)
+    return Section(tr(locale, 'sessions.title'), lines, rows=rows)
 
 
 def card_lines(locale, account):
@@ -72,11 +73,30 @@ async def show_sessions(chat_id, user_id, message_id, bot, backend, state, notic
                  rows, state, message_id)
 
 
+async def show_link_code(chat_id, user_id, message_id, bot, backend, state):
+    """A code to enter in the web cabinet, which takes this Telegram over."""
+    locale = normalize_locale((await state.get_data()).get('locale'))
+    try:
+        code = await backend.request('POST', '/api/v1/me/telegram/link-code', telegram_user_id=user_id)
+        lines = (tr(locale, 'sessions.telegram_code', code=code['code']), tr(locale, 'sessions.telegram_code_hint'))
+    except BackendError as exc:
+        if exc.code == 'telegram_account_has_access':
+            lines = (tr(locale, 'sessions.telegram_has_access'),)
+        else:
+            from .admin_settings import _friendly_error
+            lines = (_friendly_error(locale, exc),)
+    from .user import button
+    await render(bot, chat_id, Screen(tr(locale, 'sessions.telegram_link'), lines, embedded_buttons=True,
+                 navigation=True), [[button(user_id, tr(locale, 'back'), 'member_settings')]], state, message_id)
+
+
 @router.callback_query(F.data.startswith('msess:'))
 async def sessions_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     await query.answer()
     chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
     action = query.data.removeprefix('msess:')
+    if action == 'tglink':
+        return await show_link_code(chat_id, user_id, message_id, bot, backend, state)
     notice = None
     try:
         if action == 'all':

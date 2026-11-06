@@ -61,3 +61,19 @@ class SignInPostgresTests(unittest.TestCase):
         self.assertNotIn(account['id'], [item['id'] for item in AccountService(self.db).list(admin, limit=100,
                                                                                              access='with')['items']])
         self.assertTrue(registrations.RegistrationCleanup(self.db).run_one(now=NOW + timedelta(days=8)))
+
+    def test_telegram_signs_in_and_moves_from_an_empty_account(self):
+        from backend import logins, telegram_sign_in as telegram
+        from tests.test_backend_telegram_sign_in import NOW as SIGNED, TOKEN, init_data, widget
+        CredentialService(self.db).initialize_schema()
+        identities = SQLIdentityRepository(self.db)
+        identities.resolve_telegram(505)
+        anna = identities.create_account().id
+        with self.db.transaction() as conn:
+            logins.claim(conn, anna, 'anna', 'first', SIGNED)
+        with patch.object(telegram, 'bot_token', return_value=TOKEN):
+            preview = telegram.link_preview(self.db, anna, kind='webapp', data=init_data(505), source='s', now=SIGNED)
+            self.assertEqual(preview['state'], 'other_empty')
+            telegram.link_confirm(self.db, anna, preview['link_id'], now=SIGNED)
+            telegram.sign_in(self.db, 'login', widget(505), device='x', source='s', now=SIGNED)
+        self.assertEqual(identities.find_telegram_account(505).id, anna)

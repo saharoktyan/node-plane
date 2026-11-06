@@ -6354,6 +6354,185 @@
         "title": "TelegramBotUsernameInput",
         "type": "object"
       },
+      "TelegramLinkCode": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "expires_at"
+        ],
+        "title": "TelegramLinkCode",
+        "type": "object"
+      },
+      "TelegramLinkInput": {
+        "additionalProperties": false,
+        "properties": {
+          "link_id": {
+            "maxLength": 64,
+            "title": "Link Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link_id"
+        ],
+        "title": "TelegramLinkInput",
+        "type": "object"
+      },
+      "TelegramLinkPreview": {
+        "properties": {
+          "link_id": {
+            "title": "Link Id",
+            "type": "string"
+          },
+          "other_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Other Login"
+          },
+          "state": {
+            "enum": [
+              "free",
+              "own",
+              "account_has_telegram",
+              "other_empty",
+              "other_with_access"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "telegram_user_id": {
+            "title": "Telegram User Id",
+            "type": "integer"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "link_id",
+          "telegram_user_id",
+          "username",
+          "state",
+          "other_login"
+        ],
+        "title": "TelegramLinkPreview",
+        "type": "object"
+      },
+      "TelegramLinkPreviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "login",
+                  "webapp"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          }
+        },
+        "title": "TelegramLinkPreviewInput",
+        "type": "object"
+      },
+      "TelegramSignInInput": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Data"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "kind": {
+            "enum": [
+              "login",
+              "webapp"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "data"
+        ],
+        "title": "TelegramSignInInput",
+        "type": "object"
+      },
       "TemporaryConfigInput": {
         "properties": {
           "duration_seconds": {
@@ -10224,6 +10403,154 @@
           }
         ],
         "summary": "End My Session"
+      }
+    },
+    "/api/v1/me/telegram/link": {
+      "post": {
+        "description": "Link the Telegram; from an empty account it moves, and that account is deleted.",
+        "operationId": "telegram_link_api_v1_me_telegram_link_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramLinkInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Telegram Link"
+      }
+    },
+    "/api/v1/me/telegram/link-code": {
+      "post": {
+        "description": "In the bot: a code to enter in the web cabinet, which takes this Telegram over.",
+        "operationId": "telegram_link_code_api_v1_me_telegram_link_code_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramLinkCode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Telegram Link Code"
+      }
+    },
+    "/api/v1/me/telegram/link/preview": {
+      "post": {
+        "description": "What linking a Telegram to this account would do, before it is confirmed.",
+        "operationId": "telegram_link_preview_api_v1_me_telegram_link_preview_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramLinkPreviewInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramLinkPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Telegram Link Preview"
       }
     },
     "/api/v1/node-bootstraps/{identity}": {
@@ -15123,6 +15450,45 @@
           }
         },
         "summary": "Refresh Session"
+      }
+    },
+    "/api/v1/sessions/telegram": {
+      "post": {
+        "description": "Sign in with Telegram (Login Widget or Mini App) as the account it belongs to.",
+        "operationId": "telegram_sign_in_api_v1_sessions_telegram_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramSignInInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokens"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Telegram Sign In"
       }
     },
     "/api/v1/speed-limits/nodes": {

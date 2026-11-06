@@ -84,6 +84,16 @@
   `all`). In the bot: System settings → Registration and Accounts → Without
   access; in Workstation: Registration on the Invites tab and Without access
   on the Profiles tab.
+- Telegram in the web cabinet (migration r0045): `POST /api/v1/sessions/
+  telegram` signs in with the Login Widget's fields or the Mini App's
+  `initData`, checked with the bot's token (fresh data only, each set once;
+  a session of method `telegram`). A Telegram moves to the account signed in
+  to the cabinet: proven there, or with a code from the bot (`POST
+  /api/v1/me/telegram/link-code`; Settings → Sign-in and sessions), then
+  `POST /api/v1/me/telegram/link/preview` shows what happens and `POST
+  /api/v1/me/telegram/link` confirms. A Telegram of an account without
+  access, requests or staff roles moves and that account is deleted; one of
+  an account with access stays, so it does not lose its way in.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after
