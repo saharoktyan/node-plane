@@ -137,6 +137,7 @@ pub(super) enum Control {
     ControllerAnnouncementCompose,
     ControllerAnnouncementSend,
     ControllerAnnouncementRefresh,
+    ControllerAnnouncementTitle,
     ControllerHistoryItem(usize),
     ControllerHistoryPage(bool),
     ControllerAlertInterval(u32),

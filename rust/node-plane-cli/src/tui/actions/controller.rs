@@ -133,13 +133,25 @@ impl App {
             }
             Control::ControllerAnnouncementCompose => {
                 self.controller.announcement_texts = None;
+                self.controller.announcement_titles = None;
                 self.controller.announcement_key = None;
                 self.controller.announcement_preview = None;
                 self.controller.announcement_job = None;
+                // A new announcement starts with its title, which may be left out.
                 self.open_text(
-                    crate::localized::Purpose::Announcement,
+                    crate::localized::Purpose::AnnouncementTitle,
                     &serde_json::Value::Null,
                 );
+                None
+            }
+            Control::ControllerAnnouncementTitle => {
+                let titles = self
+                    .controller
+                    .announcement_titles
+                    .clone()
+                    .unwrap_or_default();
+                self.controller.announcement_preview = None;
+                self.open_text(crate::localized::Purpose::AnnouncementTitle, &titles);
                 None
             }
             Control::ControllerAnnouncementSend => {
@@ -152,8 +164,14 @@ impl App {
                         .announcement_key
                         .get_or_insert_with(uuid::Uuid::new_v4);
                     let recipients = preview["recipients"].as_u64().unwrap_or(0);
+                    let titles = self
+                        .controller
+                        .announcement_titles
+                        .clone()
+                        .unwrap_or_default();
                     self.controller_command(crate::controller::Command::AnnouncementCreate(
                         texts.clone(),
+                        titles,
                         key,
                         recipients,
                     ));

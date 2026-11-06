@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Announcements can have a title (migration r0048): one line in each
+  language, asked before the text in the bot and Workstation and skipped
+  with **No title**. It heads the message in Telegram and names it in the
+  Inbox; the API takes `titles` and returns `title` with Inbox items and
+  deliveries.
 - The web cabinet's new look, light and dark: serif headings and figures,
   hairline rules, one accent; actions are words and fields are lines. The
   side panel groups sections; tiles wrap into an even grid. The VPN page

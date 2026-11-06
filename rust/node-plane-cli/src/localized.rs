@@ -24,6 +24,7 @@ pub fn language_name(code: &str) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
     Announcement,
+    AnnouncementTitle,
     GateMessage,
     WelcomeMessage,
     TariffNew,
@@ -35,6 +36,7 @@ impl Purpose {
     pub fn title(self) -> &'static str {
         match self {
             Self::Announcement => "Announcement",
+            Self::AnnouncementTitle => "Announcement title",
             Self::GateMessage => "Stub message for users when access requests are disabled",
             Self::WelcomeMessage => "Welcome message for users requesting access",
             Self::TariffNew => "New tariff · name",
@@ -46,6 +48,7 @@ impl Purpose {
     pub fn max_length(self) -> usize {
         match self {
             Self::Announcement => 3000,
+            Self::AnnouncementTitle => 120,
             Self::GateMessage | Self::WelcomeMessage => 500,
             Self::TariffNew | Self::TariffTitles => 64,
             Self::TariffDescriptions => 1000,
@@ -53,12 +56,24 @@ impl Purpose {
     }
 
     pub fn multiline(self) -> bool {
-        !matches!(self, Self::TariffNew | Self::TariffTitles)
+        !matches!(
+            self,
+            Self::TariffNew | Self::TariffTitles | Self::AnnouncementTitle
+        )
     }
 
     /// A text that may be removed altogether.
     pub fn optional(self) -> bool {
-        self == Self::TariffDescriptions
+        matches!(self, Self::TariffDescriptions | Self::AnnouncementTitle)
+    }
+
+    /// What leaving the text out is called.
+    pub fn clear_label(self) -> &'static str {
+        if self == Self::AnnouncementTitle {
+            "No title"
+        } else {
+            "Remove the text"
+        }
     }
 }
 

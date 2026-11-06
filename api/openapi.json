@@ -1401,6 +1401,16 @@
         "properties": {
           "texts": {
             "$ref": "#/components/schemas/LocalizedTextInput"
+          },
+          "titles": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

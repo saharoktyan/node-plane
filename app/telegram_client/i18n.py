@@ -4277,6 +4277,8 @@ CATALOG['en'].update({
     'ltext.invalid': 'The text is empty or too long.',
     'tariff.describe': 'Description',
     'announce.language': '{name} · {count}',
+    'announce.heading': 'Title', 'announce.no_title': 'No title',
+    'announce.title_line': 'Title: {title}',
 })
 CATALOG['ru'].update({
     'ltext.language.en': 'Английский', 'ltext.language.ru': 'Русский',
@@ -4291,6 +4293,8 @@ CATALOG['ru'].update({
     'ltext.invalid': 'Текст пустой или слишком длинный.',
     'tariff.describe': 'Описание',
     'announce.language': '{name} · {count}',
+    'announce.heading': 'Заголовок', 'announce.no_title': 'Без заголовка',
+    'announce.title_line': 'Заголовок: {title}',
 })
 
 # What the tariff includes, on a member's profile card.

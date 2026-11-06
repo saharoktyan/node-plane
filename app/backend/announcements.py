@@ -46,6 +46,8 @@ class AnnouncementService:
             system_notifications(conn)
             from app.db.migration_revisions.r0047_localized_texts import announcement_columns
             announcement_columns(conn)
+            from app.db.migration_revisions.r0048_announcement_titles import announcement_titles
+            announcement_titles(conn)
             if getattr(self.db, 'backend_name', '') == 'postgres':
                 from app.db.migration_revisions.r0016_service_notifications import upgrade as service_notifications
                 service_notifications(conn)
@@ -89,10 +91,26 @@ class AnnouncementService:
         return {'notification_kind':'announcement',
                 'sender_username':AnnouncementService.sender_username(conn, announcement_id)}
 
+    TITLE_LENGTH = 120
+
     @staticmethod
     def validate_texts(texts):
         from .localized import checked
         return checked(texts, max_length=3000)
+
+    @staticmethod
+    def validate_titles(titles):
+        """An optional title: one line in each language it is written in."""
+        from .localized import checked
+        return None if titles is None else checked(titles, max_length=AnnouncementService.TITLE_LENGTH,
+                                                    multiline=False)
+
+    @staticmethod
+    def title_for(row, language):
+        """An announcement's title in a language, or None without one."""
+        from . import localized
+        value = localized.loads(row["titles_json"]) if "titles_json" in row.keys() else None
+        return localized.resolve(value, language) if value else None
 
     @staticmethod
     def text_for(conn, row, language):
@@ -102,11 +120,12 @@ class AnnouncementService:
         value = localized.loads(row["texts_json"])
         return localized.resolve(value, language) if value else row["text"]
 
-    def preview(self, actor, texts):
+    def preview(self, actor, texts, titles=None):
         """Who gets it, and how many in each language with whose text."""
         require_permission(actor, "settings.manage")
         from . import localized
         value = self.validate_texts(texts)
+        title = self.validate_titles(titles)
         from .account_channels import telegram_chat
         with self.db.connect() as conn:
             recipients = self._recipients(conn, actor.account.id)
@@ -114,7 +133,8 @@ class AnnouncementService:
             languages = {name: 0 for name in localized.LANGUAGES}
             for row in recipients:
                 languages[localized.account_language(conn, row["id"])] += 1
-        return {"texts": localized.public(value), "recipients": len(recipients), "telegram": telegram,
+        return {"texts": localized.public(value), "titles": localized.public(title) if title else None,
+                "recipients": len(recipients), "telegram": telegram,
                 "languages": languages}
 
     @staticmethod
@@ -127,11 +147,13 @@ class AnnouncementService:
             (sender,),
         ).fetchall()
 
-    def queue(self, actor, texts, key):
+    def queue(self, actor, texts, key, titles=None):
         require_permission(actor, "settings.manage")
         from . import localized
         value = self.validate_texts(texts)
+        title = self.validate_titles(titles)
         text, encoded = value["texts"][value["source"]], localized.dumps(value)
+        encoded_titles = localized.dumps(title) if title else None
         try:
             key = str(UUID(key))
         except (ValueError, TypeError, AttributeError):
@@ -153,18 +175,18 @@ class AnnouncementService:
             ):
                 raise AccessDenied("permission_denied")
             previous = conn.execute(
-                "SELECT id,texts_json FROM backend_announcements WHERE actor_id=? AND command_key=?",
+                "SELECT id,texts_json,titles_json FROM backend_announcements WHERE actor_id=? AND command_key=?",
                 (actor.account.id, key),
             ).fetchone()
             if previous:
-                if previous["texts_json"] != encoded:
+                if (previous["texts_json"], previous["titles_json"]) != (encoded, encoded_titles):
                     raise AccessDenied("idempotency_conflict", 409)
                 announcement_id = previous["id"]
             else:
                 announcement_id = str(uuid4())
                 conn.execute(
-                    "INSERT INTO backend_announcements (id,actor_id,command_key,text,created_at,texts_json)"
-                    " VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO backend_announcements (id,actor_id,command_key,text,created_at,texts_json,titles_json)"
+                    " VALUES (?,?,?,?,?,?,?)",
                     (
                         announcement_id,
                         actor.account.id,
@@ -172,6 +194,7 @@ class AnnouncementService:
                         text,
                         datetime.now(timezone.utc).isoformat(),
                         encoded,
+                        encoded_titles,
                     ),
                 )
                 from .account_channels import telegram_chat
@@ -261,7 +284,7 @@ class AnnouncementService:
             offset = offset // limit * limit
             from .localized import actor_language
             language = actor_language(conn, actor)
-            rows = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.texts_json,a.created_at,s.viewed_at
+            rows = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.texts_json,a.titles_json,a.created_at,s.viewed_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
                 LEFT JOIN backend_announcement_user_state s ON s.delivery_id=d.id AND s.account_id=d.account_id
@@ -270,7 +293,7 @@ class AnnouncementService:
                 ORDER BY a.created_at DESC,a.id DESC LIMIT ? OFFSET ?""",
                 (actor.account.id, limit, offset)).fetchall()
             items = [{**{key: row[key] for key in ("id", "announcement_id", "created_at", "viewed_at")},
-                      "text": self.text_for(conn, row, language),
+                      "text": self.text_for(conn, row, language), "title": self.title_for(row, language),
                       **self.notification_metadata(conn, row["announcement_id"])} for row in rows]
         return {"items": items, "total": total,
             "offset": offset, "page_size": limit}
@@ -279,7 +302,7 @@ class AnnouncementService:
         require_permission(actor, "account.self.read")
         viewed_at = datetime.now(timezone.utc).isoformat()
         with self.db.transaction() as conn:
-            row = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.texts_json,a.created_at
+            row = conn.execute(f"""SELECT d.id,a.id AS announcement_id,a.text,a.texts_json,a.titles_json,a.created_at
                 FROM backend_announcement_deliveries d
                 JOIN backend_announcements a ON a.id=d.announcement_id
                 WHERE d.id=? AND d.account_id=? AND d.status IN {INBOX_STATUSES}
@@ -295,6 +318,7 @@ class AnnouncementService:
             from .localized import actor_language
             result = {key: row[key] for key in ("id", "announcement_id", "created_at")}
             result["text"] = self.text_for(conn, row, actor_language(conn, actor))
+            result["title"] = self.title_for(row, actor_language(conn, actor))
             result["viewed_at"] = viewed_at
             result.update(self.notification_metadata(conn,row["announcement_id"]))
         return result
@@ -420,7 +444,7 @@ class AnnouncementService:
     @staticmethod
     def _delivery(conn, row):
         announcement = conn.execute(
-            "SELECT text,texts_json FROM backend_announcements WHERE id=?",
+            "SELECT text,texts_json,titles_json FROM backend_announcements WHERE id=?",
             (row["announcement_id"],),
         ).fetchone()
         silent = conn.execute(
@@ -442,6 +466,7 @@ class AnnouncementService:
             "telegram_user_id": int(row["telegram_subject"]),
             # The recipient's language decides the text, as in the Inbox.
             "text": AnnouncementService.text_for(conn, announcement, locale),
+            "title": AnnouncementService.title_for(announcement, locale),
             "locale": locale,
             "silent": (service == 'silent') if service else
                 (bool(json.loads(silent["value"])) if silent else False),

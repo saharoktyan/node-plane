@@ -530,6 +530,8 @@ class AnnouncementInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     # Up to 3000 characters in each language.
     texts: LocalizedTextInput
+    # An optional title: one line of up to 120 characters in each language.
+    titles: LocalizedTextInput | None = None
 
 
 class AnnouncementDeliveryInput(BaseModel):
@@ -2147,7 +2149,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/announcements/preview')
     def announcement_preview(body: AnnouncementInput, current=Depends(actor)):
-        return announcements.preview(current, body.texts.model_dump())
+        return announcements.preview(current, body.texts.model_dump(),
+                                     body.titles.model_dump() if body.titles else None)
 
     @app.get('/api/v1/announcements')
     def latest_announcement(current=Depends(actor)):
@@ -2384,7 +2387,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/announcements', status_code=202)
     def announcement_create(body: AnnouncementInput, request: Request, current=Depends(actor)):
-        return announcements.queue(current, body.texts.model_dump(), header(request,'Idempotency-Key'))
+        return announcements.queue(current, body.texts.model_dump(), header(request,'Idempotency-Key'),
+                                   body.titles.model_dump() if body.titles else None)
 
     @app.get('/api/v1/announcements/{announcement_id}')
     def announcement_status(announcement_id: UUID, current=Depends(actor)):

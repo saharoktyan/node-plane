@@ -1950,6 +1950,21 @@ fn an_announcement_is_previewed_by_language_and_keeps_its_key_until_changed() {
     app.controller.announcement_overview = Some(serde_json::json!({"last_job":null}));
     app.activate(Control::ControllerAnnouncementCompose);
     assert!(matches!(scoped_request(&mut app), Command::Languages));
+    // The title comes first and may be left out.
+    assert_eq!(
+        app.controller.ltext.as_ref().unwrap().purpose,
+        crate::localized::Purpose::AnnouncementTitle
+    );
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerTextClear)
+    );
+    app.activate(Control::ControllerTextClear);
+    assert_eq!(
+        app.controller.announcement_titles,
+        Some(serde_json::Value::Null)
+    );
+    assert!(matches!(scoped_request(&mut app), Command::Languages));
     app.controller.apply(
         Command::Languages,
         serde_json::json!({"languages":["en","ru"]}),
@@ -1959,15 +1974,18 @@ fn an_announcement_is_previewed_by_language_and_keeps_its_key_until_changed() {
     editor.editing.as_mut().unwrap().1 = "Maintenance\ntonight".into();
     app.activate(Control::ControllerTextDone);
     app.activate(Control::ControllerTextSave);
-    let Command::AnnouncementPreview(texts) = scoped_request(&mut app) else {
+    let Command::AnnouncementPreview(texts, titles) = scoped_request(&mut app) else {
         panic!("expected a preview")
     };
+    assert!(titles.is_null());
     assert_eq!(texts["texts"]["en"], "Maintenance\ntonight");
     let key = app.controller.announcement_key.unwrap();
     let preview = serde_json::json!({"recipients":3,"languages":{"en":2,"ru":1},
         "texts":{"source":"en","texts":{"en":"Maintenance\ntonight"},"fallback":{},"shown":{"en":"en","ru":"en"}}});
-    app.controller
-        .apply(Command::AnnouncementPreview(texts.clone()), preview.clone());
+    app.controller.apply(
+        Command::AnnouncementPreview(texts.clone(), titles.clone()),
+        preview.clone(),
+    );
     assert!(app.controller.ltext.is_none());
     assert_eq!(
         super::screens::preview_languages(&preview),
@@ -1984,10 +2002,10 @@ fn an_announcement_is_previewed_by_language_and_keeps_its_key_until_changed() {
     scoped_request(&mut app);
     assert_eq!(app.controller.announcement_key, Some(key));
     app.controller
-        .apply(Command::AnnouncementPreview(texts), preview);
+        .apply(Command::AnnouncementPreview(texts, titles), preview.clone());
     app.activate(Control::ControllerAnnouncementSend);
     assert!(matches!(scoped_request(&mut app),
-        Command::AnnouncementCreate(sent, sent_key, 3) if sent["texts"]["en"] == "Maintenance\ntonight" && sent_key == key));
+        Command::AnnouncementCreate(sent, sent_titles, sent_key, 3) if sent["texts"]["en"] == "Maintenance\ntonight" && sent_titles.is_null() && sent_key == key));
     app.activate(Control::ControllerBack);
     app.nodes_requested = None;
     app.controller.ltext.as_mut().unwrap().write(1);
@@ -2002,6 +2020,31 @@ fn an_announcement_is_previewed_by_language_and_keeps_its_key_until_changed() {
     app.activate(Control::ControllerTextDone);
     app.activate(Control::ControllerTextSave);
     assert_ne!(app.controller.announcement_key, Some(key));
+    // A title added from the preview is sent with the text, as a new announcement.
+    scoped_request(&mut app);
+    app.controller.announcement_job = None;
+    app.controller.apply(
+        Command::AnnouncementPreview(serde_json::Value::Null, serde_json::Value::Null),
+        preview,
+    );
+    app.activate(Control::ControllerAnnouncementTitle);
+    app.nodes_requested = None;
+    let editor = app.controller.ltext.as_mut().unwrap();
+    assert_eq!(editor.editing.as_ref().unwrap().0, "en");
+    editor.editing.as_mut().unwrap().1 = "Works".into();
+    app.activate(Control::ControllerTextDone);
+    app.activate(Control::ControllerTextSave);
+    let Command::AnnouncementPreview(_, titles) = scoped_request(&mut app) else {
+        panic!("expected a preview with the title")
+    };
+    assert_eq!(titles["texts"]["en"], "Works");
+    assert_ne!(app.controller.announcement_key, Some(key));
+    let with_title = serde_json::json!({"recipients":1,"languages":{"en":1},
+        "texts":{"texts":{"en":"Body"},"shown":{"en":"en"}},"titles":{"texts":{"en":"Works"},"shown":{"en":"en"}}});
+    assert_eq!(
+        super::screens::preview_languages(&with_title),
+        "\n\nEnglish · 1\nTitle: Works\nBody"
+    );
 }
 
 fn node_settings_editor() -> crate::node_editor::Editor {

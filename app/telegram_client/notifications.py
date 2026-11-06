@@ -17,6 +17,9 @@ def notification_label(item, locale):
         sender = tr(locale, 'notification.administrator')
     date = datetime.fromisoformat(item['created_at']).strftime('%d/%m/%y')
     prefix = '' if item.get('viewed_at') else tr(locale, 'announce.new') + ' · '
+    # An announcement with a title is named by it.
+    if not is_service(item) and item.get('title'):
+        return prefix + item['title'] + ' · ' + date
     return prefix + tr(locale, 'notification.from', sender=sender) + ' · ' + date
 
 
@@ -38,6 +41,6 @@ def notification_content(item, locale):
             tr(locale, f'notification.{kind}.{body}', **values),
         ))
     sender = item.get('sender_username')
-    return (tr(locale, 'announce.notification'),
+    return (item.get('title') or tr(locale, 'announce.notification'),
             ((tr(locale, 'notification.from', sender='@' + sender.lstrip('@')),)
              if sender else ()) + (item['text'],))

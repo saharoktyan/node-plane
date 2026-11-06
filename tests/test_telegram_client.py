@@ -784,6 +784,31 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
         self.assertIn('Hello', screen.plain())
         self.assertEqual([[b.callback_data for b in row] for row in rows],[['lt:ok'],['announce_menu']])
 
+    async def test_a_new_announcement_starts_with_a_title_that_may_be_skipped(self):
+        from telegram_client.routers import admin_announcements
+        from telegram_client.routers import localized_editor
+        self.query.data = 'announce_compose'
+        backend = SimpleNamespace(me=AsyncMock(return_value={'permissions': ['settings.manage']}),
+            request=AsyncMock(return_value={'languages': ['en', 'ru']}),
+            announcement_preview=AsyncMock(return_value={'recipients': 1, 'languages': {'en': 1, 'ru': 0},
+                'texts': {'source': 'en', 'texts': {'en': 'Hello'}, 'fallback': {}, 'shown': {'en': 'en', 'ru': 'en'}},
+                'titles': {'source': 'en', 'texts': {'en': 'Works'}, 'fallback': {}, 'shown': {'en': 'en', 'ru': 'en'}}}))
+        with patch.object(localized_editor, 'render', new_callable=AsyncMock) as draw:
+            await admin_announcements.announcement_cb(self.query, self.bot, backend, self.state)
+        rows = draw.call_args.args[3]
+        self.assertEqual(self.state_data['ltext_context'], 'announcement_title')
+        self.assertEqual([[b.callback_data for b in row] for row in rows], [['lt:clear'], ['announce_menu']])
+        # A title, then the text; the preview shows both and sends both.
+        title = {'source': 'en', 'texts': {'en': 'Works'}, 'fallback': {}}
+        with patch.object(localized_editor, 'render', new_callable=AsyncMock):
+            await admin_announcements._save_title(1, 2, 3, self.bot, backend, self.state, title)
+        self.assertEqual(self.state_data['ltext_context'], 'announcement')
+        with patch.object(admin_announcements, 'render', new_callable=AsyncMock) as draw:
+            await admin_announcements._save(1, 2, 3, self.bot, backend, self.state,
+                                            {'source': 'en', 'texts': {'en': 'Hello'}, 'fallback': {}})
+        self.assertEqual(backend.announcement_preview.call_args.args[2], title)
+        self.assertEqual(draw.call_args.args[2].sections[1].lines, ('Title: Works', 'Hello'))
+
     async def test_announcement_rich_menu_preview_and_results_in_both_languages(self):
         from telegram_client.routers import admin_announcements as announcements
         counts = dict(queued=2, claimed=1, sent=3, failed=1, unknown=1, skipped=0)
@@ -812,8 +837,9 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             # Russian readers get the English text: the section says so and stays folded.
             self.assertTrue(screen.sections[2].collapsed)
             self.assertIn('3', screen.sections[2].title)
-            self.assertEqual([b.callback_data for b in rows[0]], ['announce_edit', 'announce_send:test'])
-            self.assertEqual(rows[0][1].style, 'primary')
+            self.assertEqual([[b.callback_data for b in row] for row in rows],
+                             [['announce_title'], ['announce_edit', 'announce_send:test']])
+            self.assertEqual(rows[1][1].style, 'primary')
             for status in ('running', 'completed'):
                 job['status'] = status
                 with patch.object(announcements, 'render', new_callable=AsyncMock) as draw:

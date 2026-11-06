@@ -156,9 +156,10 @@ export function nodes(scenario: Scenario): Schemas['AdminNodeOutput'][] {
 }
 
 export const inbox = [
-  { id: 'n1', announcement_id: 'a1', text: 'Плановые работы на ноде Frankfurt в субботу с 03:00 до 04:00 UTC.',
+  { id: 'n1', announcement_id: 'a1', title: 'Плановые работы в субботу',
+    text: 'Frankfurt будет недоступен с 03:00 до 04:00 UTC.',
     created_at: '2026-11-05T18:00:00+00:00', viewed_at: null },
-  { id: 'n2', announcement_id: 'a2', text: 'Доступ к VPN продлён до 6 декабря.',
+  { id: 'n2', announcement_id: 'a2', title: null, text: 'Доступ к VPN продлён до 6 декабря.',
     created_at: '2026-11-01T10:00:00+00:00', viewed_at: '2026-11-01T11:00:00+00:00' }
 ];
 

@@ -30,14 +30,19 @@ impl App {
                 language_name(language),
                 editor.purpose.max_length()
             );
-            return (
-                text,
-                vec![
-                    ("Text".into(), Control::ControllerTextInput),
-                    ("Done".into(), Control::ControllerTextDone),
-                    ("Back".into(), Control::ControllerBack),
-                ],
-            );
+            let mut controls = vec![
+                ("Text".into(), Control::ControllerTextInput),
+                ("Done".into(), Control::ControllerTextDone),
+            ];
+            // A title may be left out before any is written.
+            if editor.purpose == Purpose::AnnouncementTitle && editor.draft.texts.is_empty() {
+                controls.push((
+                    editor.purpose.clear_label().into(),
+                    Control::ControllerTextClear,
+                ));
+            }
+            controls.push(("Back".into(), Control::ControllerBack));
+            return (text, controls);
         }
         let mut controls = Vec::new();
         for (index, language) in editor.languages.iter().enumerate() {
@@ -71,16 +76,22 @@ impl App {
             }
         }
         controls.push((
-            if editor.purpose == Purpose::Announcement {
-                "Preview"
-            } else {
-                "Save"
+            match editor.purpose {
+                Purpose::Announcement => "Preview",
+                Purpose::AnnouncementTitle if self.controller.announcement_texts.is_none() => {
+                    "Next"
+                }
+                Purpose::AnnouncementTitle => "Preview",
+                _ => "Save",
             }
             .into(),
             Control::ControllerTextSave,
         ));
         if editor.purpose.optional() {
-            controls.push(("Remove the text".into(), Control::ControllerTextClear));
+            controls.push((
+                editor.purpose.clear_label().into(),
+                Control::ControllerTextClear,
+            ));
         }
         controls.push(("Back".into(), Control::ControllerBack));
         (editor.summary(), controls)
@@ -136,7 +147,25 @@ impl App {
                     self.controller.announcement_key = Some(uuid::Uuid::new_v4());
                 }
                 self.controller.announcement_texts = Some(value.clone());
-                self.controller_command(Command::AnnouncementPreview(value));
+                let titles = self
+                    .controller
+                    .announcement_titles
+                    .clone()
+                    .unwrap_or_default();
+                self.controller_command(Command::AnnouncementPreview(value, titles));
+            }
+            Purpose::AnnouncementTitle => {
+                if self.controller.announcement_titles.as_ref() != Some(&value) {
+                    self.controller.announcement_key = Some(uuid::Uuid::new_v4());
+                }
+                self.controller.announcement_titles = Some(value.clone());
+                // On to the text, or straight to the preview when it is written.
+                match self.controller.announcement_texts.clone() {
+                    Some(texts) => {
+                        self.controller_command(Command::AnnouncementPreview(texts, value))
+                    }
+                    None => self.open_text(Purpose::Announcement, &serde_json::Value::Null),
+                }
             }
             Purpose::GateMessage | Purpose::WelcomeMessage => {
                 let field = if purpose == Purpose::GateMessage {

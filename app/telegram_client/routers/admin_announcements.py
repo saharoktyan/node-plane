@@ -1,8 +1,9 @@
 """Compose/preview/result screens; backend owns immutable delivery work.
 
-The text is written in the languages the administrator wants
-(`localized_editor`); each recipient gets their language's text, or the one
-chosen for it. The preview shows how many read each language and what.
+An announcement is an optional title, then its text, each written in the
+languages the administrator wants (`localized_editor`); each recipient gets
+their language's, or the one chosen for it. The preview shows how many read
+each language and what.
 """
 
 from uuid import uuid4
@@ -28,8 +29,8 @@ async def preview(chat_id, message_id, user_id, bot, backend, state):
     data = await state.get_data()
     locale = normalize_locale(data.get("locale"))
     draft = data["announcement_draft"]
-    value = await backend.announcement_preview(user_id, draft["texts"])
-    texts = value["texts"]
+    value = await backend.announcement_preview(user_id, draft["texts"], draft.get("titles"))
+    texts, titles = value["texts"], value.get("titles")
     sections = [Section(tr(locale, 'announce.rich.audience'),
                         (tr(locale, 'announce.recipients', count=value['recipients']),))]
     for language, count in value["languages"].items():
@@ -38,6 +39,8 @@ async def preview(chat_id, message_id, user_id, bot, backend, state):
         head = tr(locale, 'announce.language', name=name, count=count)
         lines = (texts["texts"][source],) if source == language else (
             tr(locale, 'ltext.shows', name=localized_editor.language_name(locale, source)),)
+        if titles:
+            lines = (tr(locale, 'announce.title_line', title=titles["texts"][titles["shown"][language]]),) + lines
         sections.append(Section(head, lines, collapsed=source != language))
     await render(
         bot,
@@ -48,6 +51,7 @@ async def preview(chat_id, message_id, user_id, bot, backend, state):
             embedded_buttons=True, navigation=True,
         ),
         [
+            [button(locale, "announce.heading", "announce_title")],
             [
                 button(locale, "back", "announce_edit"),
                 button(locale, "announce.send", f"announce_send:{draft['nonce']}").model_copy(update={'style': 'primary'}),
@@ -91,6 +95,7 @@ async def result(query, bot, backend, state, job_id):
 @router.callback_query(F.data == "announce_menu")
 @router.callback_query(F.data == "announce_compose")
 @router.callback_query(F.data == "announce_edit")
+@router.callback_query(F.data == "announce_title")
 @router.callback_query(F.data == "announce_preview")
 @router.callback_query(F.data.startswith("announce_send:"))
 @router.callback_query(F.data.startswith("announce_job:"))
@@ -124,15 +129,19 @@ async def announcement_cb(
                 state,
                 query.message.message_id,
             )
-        elif query.data in {"announce_compose", "announce_edit"}:
+        elif query.data in {"announce_compose", "announce_edit", "announce_title"}:
             me = await backend.me(query.from_user.id)
             if "settings.manage" not in me["permissions"]:
                 raise BackendError("permission_denied", 403)
-            draft = (await state.get_data()).get("announcement_draft") if query.data == "announce_edit" else None
+            # A new announcement starts with its title; editing goes back to the text.
+            draft = (await state.get_data()).get("announcement_draft") if query.data != "announce_compose" else None
             if not draft:
+                draft = {}
                 await state.update_data(announcement_draft=None)
+            name, value = (('announcement', draft.get("texts")) if query.data == "announce_edit"
+                           else ('announcement_title', draft.get("titles")))
             await localized_editor.open_editor(query.message.chat.id, query.from_user.id, query.message.message_id,
-                                               bot, backend, state, 'announcement', draft and draft["texts"])
+                                               bot, backend, state, name, value)
         elif query.data == "announce_preview":
             await state.set_state(None)
             await preview(
@@ -149,7 +158,7 @@ async def announcement_cb(
             if not draft or draft["nonce"] != query.data.split(":")[1]:
                 return
             value = await backend.announcement_create(
-                query.from_user.id, draft["texts"], draft["key"]
+                query.from_user.id, draft["texts"], draft["key"], draft.get("titles")
             )
             await result(query, bot, backend, state, value["id"])
         else:
@@ -165,14 +174,30 @@ async def announcement_cb(
         )
 
 
-async def _save(chat_id, user_id, message_id, bot, backend, state, value):
-    """The written text becomes the draft to preview; a changed text is a new
-    announcement, so it gets a new key."""
-    draft = (await state.get_data()).get("announcement_draft")
-    if not draft or draft["texts"] != value:
-        draft = {"texts": value, "key": str(uuid4()), "nonce": uuid4().hex[:8]}
+async def _keep(state, **changes):
+    """The draft with a part rewritten; a changed announcement is a new one,
+    so it gets a new key."""
+    draft = (await state.get_data()).get("announcement_draft") or {}
+    if not draft.get("key") or any(draft.get(name) != value for name, value in changes.items()):
+        draft = {**draft, **changes, "key": str(uuid4()), "nonce": uuid4().hex[:8]}
     await state.update_data(announcement_draft=draft)
+    return draft
+
+
+async def _save(chat_id, user_id, message_id, bot, backend, state, value):
+    """The written text makes the draft whole: on to the preview."""
+    await _keep(state, texts=value)
     await preview(chat_id, message_id, user_id, bot, backend, state)
 
 
+async def _save_title(chat_id, user_id, message_id, bot, backend, state, value):
+    """The title, or none; then the text, or the preview when it is written."""
+    draft = await _keep(state, titles=value)
+    if draft.get("texts"):
+        return await preview(chat_id, message_id, user_id, bot, backend, state)
+    await localized_editor.open_editor(chat_id, user_id, message_id, bot, backend, state, 'announcement')
+
+
 localized_editor.register('announcement', localized_editor.Context('announce.title', 'announce_menu', 3000, _save))
+localized_editor.register('announcement_title', localized_editor.Context(
+    'announce.heading', 'announce_menu', 120, _save_title, multiline=False, optional=True, skip='announce.no_title'))

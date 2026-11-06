@@ -1258,7 +1258,7 @@ async fn execute_inner(
                         && value.get("branch").is_some() {
                         ensure!(events::confirm(tx, "Change update branch?", "Switching branches can install incompatible versions and break this installation. Continue?".into())?, "Branch change cancelled");
                     }
-                    if let crate::controller::Command::AnnouncementCreate(_, _, recipients) = &command {
+                    if let crate::controller::Command::AnnouncementCreate(_, _, _, recipients) = &command {
                         ensure!(events::confirm(tx, "Send announcement?",
                             format!("This will send the message to {recipients} eligible users."))?,
                             "Announcement cancelled");

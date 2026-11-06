@@ -5,7 +5,7 @@
   import Async from '$lib/ui/Async.svelte';
   import { dateTime } from '$lib/ui/format';
 
-  type Item = { id: string; text: string; created_at: string; viewed_at: string | null };
+  type Item = { id: string; title?: string | null; text: string; created_at: string; viewed_at: string | null };
   type Page = { items: Item[]; total: number };
 
   const fetchPage = async () => (await call(api.GET('/api/v1/me/notifications'))) as unknown as Page;
@@ -24,7 +24,10 @@
       {#each inbox.items as item (item.id)}
         <div class:unread={!item.viewed_at}>
           <span class="when muted">{dateTime(item.created_at)}</span>
-          <p class="grow text">{item.text}</p>
+          <div class="grow">
+            {#if item.title}<strong class="title">{item.title}</strong>{/if}
+            <p class="text">{item.text}</p>
+          </div>
           <button onclick={() => dismiss(item.id)}>{t('inbox.dismiss')}</button>
         </div>
       {:else}
@@ -42,6 +45,10 @@
   .when {
     min-width: 11rem;
     font-size: 0.9rem;
+  }
+  .title {
+    display: block;
+    margin-bottom: 0.2rem;
   }
   .text {
     white-space: pre-wrap;

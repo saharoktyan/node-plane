@@ -217,6 +217,32 @@ class AnnouncementTests(unittest.TestCase):
         delivery = self.service.claim(self.transport, str(uuid4()))
         self.assertEqual(delivery['sender_username'], 'sender')
 
+    def test_a_title_reaches_the_inbox_and_telegram_in_the_readers_language(self):
+        preview = self.service.preview(self.actor, plain('Body'), {'source': 'en', 'texts': {'en': 'Works', 'ru': 'Работы'}})
+        self.assertEqual(preview['titles']['texts'], {'en': 'Works', 'ru': 'Работы'})
+        self.assertIsNone(self.service.preview(self.actor, plain('Body'))['titles'])
+        key = str(uuid4())
+        titles = {'source': 'en', 'texts': {'en': 'Works', 'ru': 'Работы'}}
+        self.service.queue(self.actor, plain('Body'), key, titles)
+        # The same key with another title is another announcement.
+        with self.assertRaises(AccessDenied) as error:
+            self.service.queue(self.actor, plain('Body'), key)
+        self.assertEqual(error.exception.code, 'idempotency_conflict')
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET locale='ru' WHERE id=?", (self.member['id'],))
+        claim = str(uuid4())
+        delivery = self.service.claim(self.transport, claim)
+        self.assertEqual(delivery['title'], 'Работы')
+        self.service.acknowledge(self.transport, delivery['id'], claim, 'sent')
+        from backend.authorization import resolve_actor
+        member = resolve_actor(self.transport, self.identities, telegram_user_id=102)
+        item = self.service.inbox(member)['items'][0]
+        self.assertEqual((item['title'], item['text']), ('Работы', 'Body'))
+        self.assertEqual(self.service.inbox_item(member, item['id'])['title'], 'Работы')
+        # A title is one line.
+        with self.assertRaises(AccessDenied):
+            self.service.preview(self.actor, plain('Body'), plain('Two\nlines'))
+
     def test_double_tap_and_changed_payload_reuse(self):
         key = str(uuid4())
         first = self.service.queue(self.actor, plain("Hello"), key)

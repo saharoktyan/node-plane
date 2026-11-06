@@ -38,6 +38,9 @@ class Context:
     multiline: bool = True
     # A text that may be removed altogether (a tariff's description).
     optional: bool = False
+    # A text that may be left out from the start (an announcement's title):
+    # the first prompt offers this button, which saves no text.
+    skip: str | None = None
 
 
 CONTEXTS: dict[str, Context] = {}
@@ -129,9 +132,11 @@ async def _prompt(chat_id, message_id, bot, state, language, notice=None):
     current = draft['texts'].get(language)
     sections = (Section(tr(locale, 'ltext.current'), (current,)),) if current else ()
     back = 'lt:v' if draft['texts'] else context.back
+    rows = [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back)]]
+    if context.skip and not draft['texts']:
+        rows.insert(0, [InlineKeyboardButton(text=tr(locale, context.skip), callback_data='lt:clear')])
     await render(bot, chat_id, Screen(tr(locale, context.title), lines, sections=sections, embedded_buttons=True,
-                 navigation=True), [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=back)]],
-                 state, message_id)
+                 navigation=True), rows, state, message_id)
 
 
 @router.callback_query(F.data.startswith('lt:'))

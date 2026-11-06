@@ -371,6 +371,7 @@ impl App {
             | Control::ControllerAnnouncementCompose
             | Control::ControllerAnnouncementSend
             | Control::ControllerAnnouncementRefresh
+            | Control::ControllerAnnouncementTitle
             | Control::ControllerHistoryItem(..)
             | Control::ControllerHistoryPage(..)
             | Control::ControllerAlerts

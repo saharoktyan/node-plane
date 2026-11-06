@@ -3690,6 +3690,7 @@ export interface components {
         /** AnnouncementInput */
         AnnouncementInput: {
             texts: components["schemas"]["LocalizedTextInput"];
+            titles?: components["schemas"]["LocalizedTextInput"] | null;
         };
         /** AvailableNode */
         AvailableNode: {

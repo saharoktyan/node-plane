@@ -43,8 +43,9 @@ pub enum Command {
     RecoveryAction(String, String, String, usize, Option<String>),
     AnnouncementOverview,
     /// The texts by language (`localized`) and how many each would reach.
-    AnnouncementPreview(Value),
-    AnnouncementCreate(Value, Uuid, u64),
+    /// The texts and the title (null for none).
+    AnnouncementPreview(Value, Value),
+    AnnouncementCreate(Value, Value, Uuid, u64),
     /// The languages the controller writes texts in.
     Languages,
     AnnouncementStatus(Uuid),
@@ -336,16 +337,16 @@ impl Command {
             ),
             Self::AnnouncementOverview => (Method::GET, "/api/v1/announcements".into(), None, None),
             Self::Languages => (Method::GET, "/api/v1/system/languages".into(), None, None),
-            Self::AnnouncementPreview(texts) => (
+            Self::AnnouncementPreview(texts, titles) => (
                 Method::POST,
                 "/api/v1/announcements/preview".into(),
-                Some(json!({"texts":texts})),
+                Some(announcement_body(texts, titles)),
                 None,
             ),
-            Self::AnnouncementCreate(texts, key, _) => (
+            Self::AnnouncementCreate(texts, titles, key, _) => (
                 Method::POST,
                 "/api/v1/announcements".into(),
-                Some(json!({"texts":texts})),
+                Some(announcement_body(texts, titles)),
                 Some(*key),
             ),
             Self::AnnouncementStatus(id) => (
@@ -540,6 +541,8 @@ pub struct Browser {
     pub announcement_overview: Option<Value>,
     /// The announcement's texts as last previewed.
     pub announcement_texts: Option<Value>,
+    /// Its title, or null without one; None until the title step is done.
+    pub announcement_titles: Option<Value>,
     pub announcement_preview: Option<Value>,
     pub announcement_job: Option<Value>,
     pub announcement_key: Option<Uuid>,
@@ -745,13 +748,13 @@ impl Browser {
                     }
                 }
             }
-            Command::AnnouncementPreview(_) => {
+            Command::AnnouncementPreview(..) => {
                 self.ltext = None;
                 self.announcement_preview = Some(value);
                 self.announcement_job = None;
                 self.selected = 0;
             }
-            Command::AnnouncementCreate(_, _, _) | Command::AnnouncementStatus(_) => {
+            Command::AnnouncementCreate(..) | Command::AnnouncementStatus(_) => {
                 self.announcement_job = Some(value.clone());
                 if let Some(overview) = &mut self.announcement_overview {
                     overview["last_job"] = value;
@@ -1118,6 +1121,15 @@ except (OSError, ValueError):
     pass
 print(json.dumps({'installed': manifest or ready, 'backend_ready':ready}))
 "#;
+
+/// An announcement as the API takes it: the title only when there is one.
+fn announcement_body(texts: &Value, titles: &Value) -> Value {
+    if titles.is_null() {
+        json!({"texts": texts})
+    } else {
+        json!({"texts": texts, "titles": titles})
+    }
+}
 
 #[cfg(test)]
 mod tests {

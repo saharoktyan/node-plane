@@ -181,8 +181,9 @@ class BackendClient:
         return await self.request('PATCH','/api/v1/me/preferences',telegram_user_id=telegram_user_id,
                                   body={'service_notifications':mode})
 
-    async def announcement_preview(self, user_id, texts):
-        return await self.request('POST','/api/v1/announcements/preview',telegram_user_id=user_id,body={'texts':texts})
+    async def announcement_preview(self, user_id, texts, titles=None):
+        body = {'texts': texts, **({'titles': titles} if titles else {})}
+        return await self.request('POST','/api/v1/announcements/preview',telegram_user_id=user_id,body=body)
 
     async def announcement_latest(self, user_id):
         return await self.request('GET','/api/v1/announcements',telegram_user_id=user_id)
@@ -220,8 +221,9 @@ class BackendClient:
         body = {'status':status, **({'retry_after':retry_after} if retry_after is not None else {})}
         return await self.request('POST',f'/api/v1/integrations/telegram/alerts/{delivery_id}/ack',body=body,command=True,command_key=key)
 
-    async def announcement_create(self, user_id, texts, key):
-        return await self.request('POST','/api/v1/announcements',telegram_user_id=user_id,body={'texts':texts},command=True,command_key=key)
+    async def announcement_create(self, user_id, texts, key, titles=None):
+        body = {'texts': texts, **({'titles': titles} if titles else {})}
+        return await self.request('POST','/api/v1/announcements',telegram_user_id=user_id,body=body,command=True,command_key=key)
 
     async def announcement_status(self, user_id, announcement_id):
         return await self.request('GET',f'/api/v1/announcements/{announcement_id}',telegram_user_id=user_id)

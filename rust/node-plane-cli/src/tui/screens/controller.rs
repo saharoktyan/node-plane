@@ -723,6 +723,7 @@ pub(in crate::tui) fn draw_controller(
         );
         controls.extend([
             ("Back".into(), Control::ControllerBack),
+            ("Title".into(), Control::ControllerAnnouncementTitle),
             (
                 "Send announcement".into(),
                 Control::ControllerAnnouncementSend,
@@ -1530,9 +1531,10 @@ pub(in crate::tui) fn draw_controller(
     if state.announcement_preview.is_some() && state.announcement_job.is_none() {
         let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).split(parts[0]);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), rows[0]);
-        let cells = button_areas(rows[1], 2, 1);
+        let cells = button_areas(rows[1], 3, 1);
         for (index, (label, control)) in [
             ("Back", Control::ControllerBack),
+            ("Title", Control::ControllerAnnouncementTitle),
             ("Send announcement", Control::ControllerAnnouncementSend),
         ]
         .into_iter()
@@ -2065,11 +2067,18 @@ pub(in crate::tui) fn preview_languages(preview: &serde_json::Value) -> String {
     for (language, count) in languages {
         let name = crate::localized::language_name(language);
         let shown = texts["shown"][language].as_str().unwrap_or(language);
-        let body = if shown == language {
+        let mut body = if shown == language {
             texts["texts"][language].as_str().unwrap_or("").to_owned()
         } else {
             format!("Shows the {} text.", crate::localized::language_name(shown))
         };
+        let titles = &preview["titles"];
+        if let Some(title) = titles["shown"][language]
+            .as_str()
+            .and_then(|shown| titles["texts"][shown].as_str())
+        {
+            body = format!("Title: {title}\n{body}");
+        }
         text.push_str(&format!("\n\n{name} · {count}\n{body}"));
     }
     text

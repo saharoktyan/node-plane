@@ -36,6 +36,6 @@ The relay is the web cabinet's public address. It runs as a service on a node wi
 
 ## Announcements
 
-Choose recipients, write the message in one or more languages and preview it before sending. Each recipient gets the text in their language, or the one chosen for it; the preview shows how many read each language and what. It also shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
+Choose recipients, give the message a title if you want one (one line, up to 120 characters; **No title** skips it), write the message in one or more languages and preview it before sending. The title is written per language like the text; it heads the message in Telegram and names it in the Inbox. The API takes it as `titles`. Each recipient gets the text in their language, or the one chosen for it; the preview shows how many read each language and what. It also shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
 
 For backups, alerts, audits and cleanup, see [Maintenance](maintenance.md).

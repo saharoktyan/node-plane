@@ -55,7 +55,7 @@ ADDITIVE_COLUMNS = {
     "backend_accounts": ("display_name", "locale", "locale_selected"),
     # Texts in several languages (r0047); without them the source text is used.
     "backend_tariffs": ("titles_json", "description_json"),
-    "backend_announcements": ("texts_json",),
+    "backend_announcements": ("texts_json", "titles_json"),
 }
 CLEAR = (
     # Everyone signs in again after a restore.
