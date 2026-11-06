@@ -98,5 +98,11 @@
   "active": "active",
   "add_short": "+ Add",
   "renewal": "Renewal",
-  "renewal_days": "+{days} days"
+  "renewal_days": "+{days} days",
+  "traffic_history": "Traffic",
+  "quota_period": "Use this period",
+  "quota_used": "Used",
+  "quota_limit": "limit {limit}",
+  "traffic_days": "Per day, 30 days",
+  "traffic_servers": "By server, 30 days"
 }

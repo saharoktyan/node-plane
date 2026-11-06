@@ -89,7 +89,8 @@ export function summary(id: string, lang: 'ru' | 'en'): Schemas['MemberProfileSu
       { key: 'speed.down_kbit', value: 50000, own: true }, { key: 'connections.mode', value: 'enforce', own: false },
       { key: 'connections.max_sources', value: 2, own: false }
     ],
-    renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720, period_end: '2026-12-01T00:00:00+00:00',
+    renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720,
+      period_start: '2026-11-01T00:00:00+00:00', period_end: '2026-12-01T00:00:00+00:00',
       on_exhausted: 'block', throttled_kbit: null },
     expires_at: '2026-12-06T00:00:00+00:00', created_at: '2026-10-01T00:00:00+00:00',
     nodes: SERVERS.map(({ key, title, flag, region }, index) =>
@@ -216,4 +217,71 @@ export function artifact(id: string): Schemas['ConfigArtifactOutput'] {
     `&type=${transport}#${encodeURIComponent(name)}`;
   return { filename: `Frankfurt · VLESS · ${transport.toUpperCase()} · Phone.txt`, display_name: name,
     media_type: 'text/plain', content: uri, files: [] };
+}
+
+// Charts: smooth, repeatable series, the same on every load.
+const wave = (index: number, seed: number) => 0.5 + 0.5 * Math.sin(index / 9 + seed) * Math.cos(index / 31 + seed * 2);
+const GIB = 1024 ** 3;
+const dayKey = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+
+export function nodeMetrics(scenario: Scenario, range: string): Schemas['NodeMetricsOutput'] {
+  const hourly = range !== '24h';
+  const step = hourly ? 3_600_000 : 300_000;
+  const count = range === '30d' ? 720 : range === '7d' ? 168 : 288;
+  const now = Math.floor(Date.now() / step) * step;
+  const servers = scenario === 'empty' ? [] : SERVERS.slice(0, scenario === 'many' ? 9 : 3);
+  return { range: range as '24h' | '7d' | '30d', resolution: hourly ? '1h' : '5m', nodes: servers.map((server, seed) => {
+    const points = Array.from({ length: count }, (_, index) => {
+      const level = wave(index, seed);
+      // A pause in the readings: the line breaks there.
+      if (seed === 1 && index > count * 0.6 && index < count * 0.66) return null;
+      return { at: new Date(now - (count - 1 - index) * step).toISOString(), cpu_percent: 8 + 60 * level,
+        load1: 0.2 + 2.4 * level, cpus: 2, ram_percent: 45 + 20 * level, disk_free_percent: 62 - seed * 9 - index / count,
+        net_rx_bps: 4e6 + 9e7 * level, net_tx_bps: 2e6 + 3e7 * wave(index + 5, seed) };
+    }).filter((point) => point != null);
+    return { ...server, latest: seed === 2 && scenario !== 'many' ? null : points[points.length - 1],
+      points: seed === 2 && scenario !== 'many' ? [] : points };
+  }) };
+}
+
+export function vpnActivity(scenario: Scenario): Schemas['VpnActivityOutput'] {
+  const empty = scenario === 'empty';
+  const servers = SERVERS.slice(0, scenario === 'many' ? 12 : 3);
+  const scale = scenario === 'many' ? 20 : 1;
+  return {
+    online: { accounts: empty ? 0 : 4 * scale, devices: empty ? 0 : 6 * scale,
+      protocols: { xray: empty ? 0 : 4 * scale, awg: empty ? 0 : 2 * scale },
+      nodes: empty ? [] : servers.slice(0, 5).map((server, index) => ({ key: server.key, title: server.title,
+        flag: server.flag, devices: Math.max(1, (5 - index) * scale) })) },
+    days: Array.from({ length: 30 }, (_, index) => {
+      const nodes = Object.fromEntries(empty ? [] : servers.map((server, seed) =>
+        [server.key, Math.round((0.3 + wave(index * 3, seed)) * 2 * GIB * scale / (seed + 1))]));
+      return { day: dayKey(29 - index), bytes: Object.values(nodes).reduce((sum, value) => sum + value, 0), nodes };
+    }),
+    node_titles: Object.fromEntries(servers.map((server) => [server.key, `${server.flag} ${server.title}`])),
+    protocols: { xray: empty ? 0 : 38 * GIB * scale, awg: empty ? 0 : 14 * GIB * scale },
+    weeks: Array.from({ length: 12 }, (_, index) => {
+      const monday = new Date(Date.now() - (11 - index) * 7 * 86_400_000);
+      monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+      return { week: monday.toISOString().slice(0, 10),
+        profiles_created: empty ? 0 : Math.round(scale * 3 * wave(index * 4, 2)),
+        requests_created: empty ? 0 : Math.round(scale * 4 * wave(index * 4, 1)),
+        requests_decided: empty ? 0 : Math.round(scale * 3.5 * wave(index * 4 + 2, 1)) };
+    }),
+    expiring: { weeks: empty ? [0, 0, 0, 0] : [2 * scale, 1 * scale, 0, 3 * scale], renewals_pending: empty ? 0 : 1 },
+    top: empty ? [] : ['saharoktyan', 'Мама', 'Ноутбук офиса', 'Алексей', 'Ирина'].map((name, index) => ({
+      profile_id: `00000000-0000-4000-8000-00000000000${index}`, display_name: name,
+      bytes: Math.round(GIB * scale * 30 / (index + 1)), devices: 3 - (index % 3) }))
+  };
+}
+
+export function trafficHistory(scenario: Scenario): Schemas['MemberTrafficHistory'] {
+  const empty = scenario === 'empty';
+  const days = Array.from({ length: 30 }, (_, index) => ({ day: dayKey(29 - index),
+    uplink_bytes: empty ? 0 : Math.round(0.08 * GIB * (0.2 + wave(index * 2, 1))),
+    downlink_bytes: empty ? 0 : Math.round(1.1 * GIB * (0.2 + wave(index * 2, 0))) }));
+  return { days, servers: empty ? [] : [
+    { node_key: 'de1', title: 'Frankfurt', flag: '🇩🇪', protocol: 'xray', bytes: 21 * GIB },
+    { node_key: 'nl1', title: 'Amsterdam', flag: '🇳🇱', protocol: 'awg', bytes: 8 * GIB },
+    { node_key: 'de1', title: 'Frankfurt', flag: '🇩🇪', protocol: 'awg', bytes: 3 * GIB }] };
 }

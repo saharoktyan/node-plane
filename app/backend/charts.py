@@ -11,7 +11,13 @@ from .authorization import AccessDenied, account_permissions, require_permission
 RANGES = {'24h': ('5m', timedelta(hours=24)), '7d': ('1h', timedelta(days=7)), '30d': ('1h', timedelta(days=30))}
 # A device that moved traffic this recently is online; traffic is read every two minutes.
 ONLINE = timedelta(minutes=5)
+# Weeks of profiles and access requests, the current one last.
+WEEKS = 12
 POINT = ('cpu_percent', 'load1', 'cpus', 'ram_percent', 'disk_free_percent', 'net_rx_bps', 'net_tx_bps')
+
+
+def _monday(now):
+    return (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def _staff(actor):
@@ -70,6 +76,11 @@ def vpn_activity(db, actor, days=30, now=None):
             WHERE p.expires_at IS NOT NULL AND p.expires_at>=? AND p.expires_at<?
             AND NOT EXISTS (SELECT 1 FROM backend_profile_deletions d WHERE d.profile_id=p.id)''',
             (now.isoformat(), (now + timedelta(days=28)).isoformat())).fetchall()
+        since = _monday(now) - timedelta(weeks=WEEKS - 1)
+        created = conn.execute('SELECT created_at FROM backend_profiles WHERE created_at>=?',
+                               (since.isoformat(),)).fetchall()
+        requests = conn.execute('''SELECT created_at, decided_at FROM backend_access_requests
+            WHERE created_at>=? OR decided_at>=?''', (since.isoformat(), since.isoformat())).fetchall()
         renewals = conn.execute("SELECT COUNT(*) AS n FROM backend_renewal_requests WHERE status='pending'"
                                 ).fetchone()['n']
     by_day = {}
@@ -87,6 +98,18 @@ def vpn_activity(db, actor, days=30, now=None):
     online_nodes = {}
     for row in online:
         online_nodes.setdefault(row['node_key'], set()).add(row['device_id'])
+    growth = [{'week': (since + timedelta(weeks=index)).date().isoformat(), 'profiles_created': 0,
+               'requests_created': 0, 'requests_decided': 0} for index in range(WEEKS)]
+    def count(value, field):
+        if value:
+            index = (datetime.fromisoformat(value) - since).days // 7
+            if 0 <= index < WEEKS:
+                growth[index][field] += 1
+    for row in created:
+        count(row['created_at'], 'profiles_created')
+    for row in requests:
+        count(row['created_at'], 'requests_created')
+        count(row['decided_at'], 'requests_decided')
     weeks = [0, 0, 0, 0]
     for row in expiring:
         weeks[min(3, (datetime.fromisoformat(row['expires_at']) - now).days // 7)] += 1
@@ -99,7 +122,9 @@ def vpn_activity(db, actor, days=30, now=None):
                                      'flag': nodes[key]['flag'] if key in nodes else '', 'devices': len(devices)}
                                     for key, devices in online_nodes.items()), key=lambda item: -item['devices'])},
         'days': days_out,
+        'node_titles': {key: f"{row['flag']} {row['title']}".strip() for key, row in nodes.items()},
         'protocols': {name: protocols.get(name, 0) for name in ('xray', 'awg')},
+        'weeks': growth,
         'expiring': {'weeks': weeks, 'renewals_pending': renewals},
         'top': [{'profile_id': row['profile_id'], 'display_name': row['display_name'],
                  'bytes': row['bytes'], 'devices': row['devices']} for row in top],

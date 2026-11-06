@@ -100,6 +100,10 @@ export const handlers = [
   http.delete('/api/v1/me/passkeys/:id', guarded(() => new HttpResponse(null, { status: 204 }))),
 
   http.get('/api/v1/admin/overview', guarded(() => fixtures.overview(choice().scenario))),
+  http.get('/api/v1/admin/metrics/nodes', guarded((request) =>
+    fixtures.nodeMetrics(choice().scenario, new URL(request.url).searchParams.get('range') ?? '24h'))),
+  http.get('/api/v1/admin/metrics/vpn', guarded(() => fixtures.vpnActivity(choice().scenario))),
+  http.get('/api/v1/me/profiles/:id/history', guarded(() => fixtures.trafficHistory(choice().scenario))),
   http.get('/api/v1/system/attention', guarded(() => ({ unacknowledged_alerts: 0,
     update_available: choice().scenario !== 'empty' }))),
   http.get('/api/v1/accounts', guarded(({ url }) => ({

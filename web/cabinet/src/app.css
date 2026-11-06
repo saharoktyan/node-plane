@@ -1,7 +1,7 @@
 /* The cabinet's look: editorial type (Literata for headings and figures,
-   Golos Text for the interface), hairline rules instead of boxes, one red
-   accent. Actions are words, fields are lines; a few tiles where numbers
-   matter. Light and dark share every rule; only the tokens change. The
+   Golos Text for the interface), hairline rules instead of boxes, one
+   orange accent. Actions are words, fields are lines; a few tiles where
+   numbers matter. Light and dark share every rule; only the tokens change. The
    fonts are served with the cabinet, so no page asks another site. */
 @import '@fontsource/literata/400.css';
 @import '@fontsource/literata/500.css';
@@ -19,11 +19,16 @@
   --muted: #6b6b6b;
   --faint: #8a8a8a;
   --line: #e4e4e1;
-  --accent: #d9381e;
+  --accent: #d9530b;
   --accent-text: #ffffff;
   --ok: #1f7a45;
   --warn: #9a5b00;
-  --danger: var(--accent);
+  /* Red stays for what removes or fails, apart from the orange. */
+  --danger: #c8321e;
+  /* Chart series: two shades of the orange, checked for colour-blind
+     separation on these surfaces; on dark the second is the lighter one. */
+  --series-1: #e8590c;
+  --series-2: #9a3a07;
   /* Older names some parts still use. */
   --surface: var(--panel);
   --radius: 0;
@@ -45,10 +50,13 @@
     --muted: #9c9b96;
     --faint: #7c7b77;
     --line: #2a2b2f;
-    --accent: #ff6a4d;
+    --accent: #ff7f36;
+    --danger: #ff6a4d;
     --accent-text: #111214;
     --ok: #4cc38a;
     --warn: #f2a541;
+    --series-1: #d95a0b;
+    --series-2: #ffa35a;
     color-scheme: dark;
   }
 }
@@ -60,10 +68,13 @@
   --muted: #9c9b96;
   --faint: #7c7b77;
   --line: #2a2b2f;
-  --accent: #ff6a4d;
+  --accent: #ff7f36;
+  --danger: #ff6a4d;
   --accent-text: #111214;
   --ok: #4cc38a;
   --warn: #f2a541;
+  --series-1: #d95a0b;
+  --series-2: #ffa35a;
   color-scheme: dark;
 }
 body {
@@ -129,7 +140,7 @@ button.primary,
   text-decoration-thickness: 2px;
 }
 button.danger {
-  color: var(--accent);
+  color: var(--danger);
 }
 button:disabled {
   color: var(--faint);
@@ -242,10 +253,10 @@ th {
   color: var(--warn);
 }
 .badge.danger {
-  color: var(--accent);
+  color: var(--danger);
 }
 .error {
-  color: var(--accent);
+  color: var(--danger);
 }
 .caps {
   font-size: 11px;
@@ -468,4 +479,117 @@ dl.facts dd {
   .stats .value {
     font-size: 1.35rem;
   }
+}
+
+/* Charts: hairline grid, quiet axes, the data in the series colours; text
+   stays in ink. A tooltip follows the picked time or bar. */
+.chart {
+  position: relative;
+  margin-top: 0.75rem;
+}
+.chart svg {
+  display: block;
+  overflow: visible;
+  outline: none;
+  touch-action: pan-y;
+}
+.chart svg:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
+}
+.chart .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.chart .base {
+  stroke: var(--faint);
+  stroke-width: 1;
+}
+.chart .cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.chart .tick {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart .dot {
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+.chart .tip {
+  position: absolute;
+  top: 0;
+  /* Its own width, not what is left up to the chart's right edge. */
+  width: max-content;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  padding: 0.45rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 2;
+}
+.chart .tip .when {
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+.chart .tip .row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.chart .tip .row span:last-child:not(.key) {
+  color: var(--muted);
+}
+.chart .tip .key {
+  width: 10px;
+  height: 2px;
+}
+.chart .sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+/* A legend: a short mark of each series' colour, its name in ink. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 12px;
+  color: var(--soft);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.legend i {
+  width: 12px;
+  height: 2px;
+}
+.legend i.box {
+  height: 10px;
+  border-radius: 2px;
+}
+/* A choice of a few words: the chosen one underlined in the accent. The
+   weight stays the same so the neighbours keep their place. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9rem;
+}
+.choices > button {
+  color: var(--muted);
+  text-decoration-color: transparent;
+  text-decoration-thickness: 2px;
+}
+.choices > button[aria-pressed='true'] {
+  color: var(--text);
+  text-decoration-color: var(--accent);
 }

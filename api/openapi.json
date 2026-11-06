@@ -7680,6 +7680,13 @@
           "expiring": {
             "$ref": "#/components/schemas/VpnExpiring"
           },
+          "node_titles": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Node Titles",
+            "type": "object"
+          },
           "online": {
             "$ref": "#/components/schemas/VpnOnline"
           },
@@ -7696,12 +7703,21 @@
             },
             "title": "Top",
             "type": "array"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/VpnWeek"
+            },
+            "title": "Weeks",
+            "type": "array"
           }
         },
         "required": [
           "online",
           "days",
+          "node_titles",
           "protocols",
+          "weeks",
           "expiring",
           "top"
         ],
@@ -7883,6 +7899,34 @@
           "nodes"
         ],
         "title": "VpnTrafficDay",
+        "type": "object"
+      },
+      "VpnWeek": {
+        "properties": {
+          "profiles_created": {
+            "title": "Profiles Created",
+            "type": "integer"
+          },
+          "requests_created": {
+            "title": "Requests Created",
+            "type": "integer"
+          },
+          "requests_decided": {
+            "title": "Requests Decided",
+            "type": "integer"
+          },
+          "week": {
+            "title": "Week",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week",
+          "profiles_created",
+          "requests_created",
+          "requests_decided"
+        ],
+        "title": "VpnWeek",
         "type": "object"
       },
       "WebAuthnOptions": {

@@ -278,7 +278,8 @@ class ProfileRepository:
             'quota_suspended': suspended, 'tariff': tariff, 'renewal': renewal, 'limits': limits,
             'quota': None if quota['limit_bytes'] is None or quota['period'] is None else {
                 'limit_bytes': quota['limit_bytes'], 'used_bytes': quota['period']['used_bytes'],
-                'period_end': quota['period']['end'], 'on_exhausted': quota['on_exhausted'],
+                'period_start': quota['period']['start'], 'period_end': quota['period']['end'],
+                'on_exhausted': quota['on_exhausted'],
                 'throttled_kbit': quota['throttled']},
             'created_at': profile['created_at'], 'nodes': list(nodes.values()),
             'node_count': len(nodes), 'protocol_count': len(rows),

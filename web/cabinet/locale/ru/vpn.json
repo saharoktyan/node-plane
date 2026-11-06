@@ -98,5 +98,11 @@
   "active": "активно",
   "add_short": "+ Добавить",
   "renewal": "Продление",
-  "renewal_days": "+{days} дн."
+  "renewal_days": "+{days} дн.",
+  "traffic_history": "Трафик",
+  "quota_period": "Расход за период",
+  "quota_used": "Использовано",
+  "quota_limit": "лимит {limit}",
+  "traffic_days": "По дням, 30 дней",
+  "traffic_servers": "По серверам, 30 дней"
 }

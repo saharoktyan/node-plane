@@ -12,6 +12,7 @@
   import { tiles } from '$lib/ui/tiles';
   import Connect from './Connect.svelte';
   import Devices from './Devices.svelte';
+  import Traffic from './Traffic.svelte';
   import { lines } from './limits';
 
   let { profile }: { profile: ServiceProfile } = $props();
@@ -138,6 +139,8 @@
       </aside>
     </div>
 
+    <Traffic profileId={profile.id} quota={summary.quota} />
+
     {#if summary.tariff}
       <Dialog bind:open={tariffOpen} title={String(summary.tariff.title)}>
         {#if summary.tariff.description}
@@ -156,7 +159,7 @@
     max-width: 14rem;
   }
   .meter span.full {
-    background: var(--accent);
+    background: var(--danger);
   }
   button.note {
     padding: 0.15rem 0 0;

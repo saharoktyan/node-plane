@@ -13,6 +13,17 @@
   protocols, expiring profiles, the month's heaviest users) and
   `GET /api/v1/me/profiles/{id}/history?days=` for a member's own traffic
   per day and per server. None of it is restored from a backup.
+- The cabinet draws the history. The overview's nodes tab has a small chart
+  per node of CPU, memory, load, free disk or network over 24 hours, 7 or
+  30 days; the VPN tab tells who is online and charts traffic per day,
+  online by server, the month's protocols, profiles ending in the next four
+  weeks, new profiles and access requests per week (`weeks` in
+  `GET /api/v1/admin/metrics/vpn`), with the month's heaviest users in a
+  table. A member's VPN page shows the quota filling up to its limit over
+  the period (`period_start` in the profile summary), traffic per day
+  received and sent, and by server. Charts answer the pointer and the arrow
+  keys and carry a table for screen readers. The cabinet's accent is orange
+  now; red stays for what removes or fails.
 
 - Announcements can have a title (migration r0048): one line in each
   language, asked before the text in the bot and Workstation and skipped

@@ -796,11 +796,23 @@ class VpnTopProfile(BaseModel):
     devices: int
 
 
+class VpnWeek(BaseModel):
+    # The Monday the week starts, UTC.
+    week: str
+    profiles_created: int
+    requests_created: int
+    requests_decided: int
+
+
 class VpnActivityOutput(BaseModel):
     online: VpnOnline
     days: list[VpnTrafficDay]
+    # Each node's flag and title by key, for the days' nodes.
+    node_titles: dict[str, str]
     # This month's bytes per protocol.
     protocols: dict[str, int]
+    # New profiles and access requests per week, twelve weeks.
+    weeks: list[VpnWeek]
     expiring: VpnExpiring
     top: list[VpnTopProfile]
 

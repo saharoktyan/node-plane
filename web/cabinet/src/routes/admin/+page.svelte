@@ -1,10 +1,12 @@
 <!-- The administration's overview in three tabs: the nodes, VPN and the
      controller itself. The numbers refresh every few seconds while the page
-     is open; charts come with the metrics history. -->
+     is open, the charts every minute. -->
 <script lang="ts">
   import { page } from '$app/state';
   import { api, call, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
+  import NodeLoad from '$lib/admin/NodeLoad.svelte';
+  import VpnActivity from '$lib/admin/VpnActivity.svelte';
   import Async from '$lib/ui/Async.svelte';
   import { date, dateTime } from '$lib/ui/format';
   import { tiles } from '$lib/ui/tiles';
@@ -21,6 +23,19 @@
   let fresh = $state<Overview | null>(null);
   $effect(() => {
     const timer = setInterval(() => fetchOverview().then((value) => (fresh = value)).catch(() => {}), REFRESH);
+    return () => clearInterval(timer);
+  });
+
+  // VPN's activity, while its tab is open; a failed refresh keeps the last.
+  let activity = $state<Schemas['VpnActivityOutput'] | null>(null);
+  let activityFailed = $state(false);
+  $effect(() => {
+    if (tab !== 'vpn') return;
+    const fetchActivity = () => call(api.GET('/api/v1/admin/metrics/vpn'))
+      .then((value) => ((activity = value), (activityFailed = false)))
+      .catch(() => (activityFailed = !activity));
+    fetchActivity();
+    const timer = setInterval(fetchActivity, 60_000);
     return () => clearInterval(timer);
   });
 
@@ -91,10 +106,7 @@
       </div>
       <div class="columns">
         <div class="main">
-          <section class="block">
-            <div class="block-head"><h2>{t('admin.node_load')}</h2></div>
-            <p class="later">{t('admin.charts_later_nodes')}</p>
-          </section>
+          <NodeLoad />
         </div>
         {@render aside(items)}
       </div>
@@ -105,6 +117,13 @@
           <div class="value">{overview.profiles_total}</div>
           <div class="note">{t('admin.profiles_note', { active: overview.profiles_active, frozen: overview.profiles_frozen })}</div>
         </div>
+        {#if activity}
+          <div>
+            <div class="label">{t('admin.online')}</div>
+            <div class="value">{activity.online.accounts}</div>
+            <div class="note">{t('charts.devices_count', { count: activity.online.devices })}</div>
+          </div>
+        {/if}
         <div>
           <div class="label">{t('admin.requests')}</div>
           <div class="value">{overview.pending_requests}</div>
@@ -113,10 +132,13 @@
       </div>
       <div class="columns">
         <div class="main">
-          <section class="block">
-            <div class="block-head"><h2>{t('admin.vpn_activity')}</h2></div>
-            <p class="later">{t('admin.charts_later_vpn')}</p>
-          </section>
+          {#if activity}
+            <VpnActivity {activity} />
+          {:else if activityFailed}
+            <p class="error">{t('common.error')}</p>
+          {:else}
+            <p class="muted">{t('common.loading')}</p>
+          {/if}
         </div>
         {@render aside(items.filter((item) => item.href === '/admin/users'))}
       </div>

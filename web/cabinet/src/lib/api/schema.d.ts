@@ -5792,6 +5792,10 @@ export interface components {
             /** Days */
             days: components["schemas"]["VpnTrafficDay"][];
             expiring: components["schemas"]["VpnExpiring"];
+            /** Node Titles */
+            node_titles: {
+                [key: string]: string;
+            };
             online: components["schemas"]["VpnOnline"];
             /** Protocols */
             protocols: {
@@ -5799,6 +5803,8 @@ export interface components {
             };
             /** Top */
             top: components["schemas"]["VpnTopProfile"][];
+            /** Weeks */
+            weeks: components["schemas"]["VpnWeek"][];
         };
         /** VpnExpiring */
         VpnExpiring: {
@@ -5862,6 +5868,17 @@ export interface components {
             nodes: {
                 [key: string]: number;
             };
+        };
+        /** VpnWeek */
+        VpnWeek: {
+            /** Profiles Created */
+            profiles_created: number;
+            /** Requests Created */
+            requests_created: number;
+            /** Requests Decided */
+            requests_decided: number;
+            /** Week */
+            week: string;
         };
         /** WebAuthnOptions */
         WebAuthnOptions: {

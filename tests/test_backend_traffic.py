@@ -253,6 +253,8 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual((activity['online']['accounts'], activity['online']['devices']), (1, 1))
         self.assertEqual(activity['days'][-1]['bytes'], 350)
         self.assertEqual(len(activity['days']), 7)
+        # The fixture's profile was created now: this week has it.
+        self.assertEqual((len(activity['weeks']), activity['weeks'][-1]['profiles_created']), (12, 1))
         self.assertEqual(activity['top'][0]['bytes'], 350)
         self.assertEqual(sum(activity['protocols'].values()), 350)
         history = charts.member_history(self.db, owner, self.profile_id, days=30)
