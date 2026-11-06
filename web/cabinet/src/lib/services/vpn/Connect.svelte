@@ -86,6 +86,8 @@
   // The choice being issued; another press or leaving drops its answer.
   let pending = $state<string | null>(null);
   let notice = $state<{ node: string; text: string } | null>(null);
+  // The last configuration of each server, shown while its panel folds.
+  let kept = $state<Record<string, { issuance: Schemas['ConfigIssuanceOutput']; artifact: Schemas['ConfigArtifactOutput'] }>>({});
   let opened = $state<{ choice: string; issuance: Schemas['ConfigIssuanceOutput']; artifact: Schemas['ConfigArtifactOutput'] } | null>(null);
 
   async function issue(choice: Choice) {
@@ -118,7 +120,10 @@
       }
       const artifact = await call(api.GET('/api/v1/config-issuances/{issuance_id}/artifact', {
         params: { path: { issuance_id: issuance.id } } }));
-      if (pending === mine) opened = { choice: mine, issuance, artifact };
+      if (pending === mine) {
+        opened = { choice: mine, issuance, artifact };
+        kept[choice.node] = opened;
+      }
     } catch (error) {
       if (pending === mine) notice = { node: choice.node, text: error instanceof ApiError ? errorText(error) : t('common.error') };
     } finally {
@@ -185,9 +190,10 @@
             <tbody>
               {#each shown as node (node.key)}
                 {@const offered = choices(node.key)}
+                {@const unfolded = opened?.issuance.node_key === node.key || notice?.node === node.key}
                 <tr class:off={down(node.key)}>
                   <td class="server">{node.flag} {node.title}
-                    {#if pending?.startsWith(node.key + '/')}<span class="preparing" role="status">{t('vpn.preparing')}</span>{/if}</td>
+                    {#if pending?.startsWith(node.key + '/')}<span class="hidden" role="status">{t('vpn.preparing')}</span>{/if}</td>
                   <td class="muted region">{node.region || '—'}</td>
                   {#if down(node.key)}
                     <td colspan={SLOTS.length} class="unavailable">{t('vpn.unavailable_now')}</td>
@@ -210,13 +216,15 @@
                 <!-- The configuration slides open under its server; the row stays so it can fold back. -->
                 <tr class="under">
                   <td colspan={SLOTS.length + 2}>
-                    <div class="fold" class:open={opened?.issuance.node_key === node.key || notice?.node === node.key}>
+                    <div class="fold" class:open={unfolded} inert={!unfolded}>
                       <div>
                         {#if notice?.node === node.key}
                           <p class="error">{notice.text}</p>
-                        {:else if opened?.issuance.node_key === node.key}
+                        {:else if kept[node.key]}
+                          <!-- Kept after closing, so the panel folds with its content. -->
                           <div class:stale={pending?.startsWith(node.key + '/')}>
-                            <Config issuance={opened.issuance} artifact={opened.artifact} onclose={() => (opened = null)} />
+                            <Config issuance={kept[node.key].issuance} artifact={kept[node.key].artifact}
+                              onclose={() => (opened = null)} />
                           </div>
                         {/if}
                       </div>
@@ -345,11 +353,13 @@
     border-left: 2px solid var(--accent);
   }
   /* The configuration being replaced stays in place, dimmed. */
-  .preparing {
-    margin-left: 0.5rem;
-    font-weight: 400;
-    font-size: 12px;
-    color: var(--muted);
+  /* Said to screen readers; the breathing underline shows it on screen. */
+  .hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
   .stale {
     opacity: 0.45;
