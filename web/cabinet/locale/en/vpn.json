@@ -25,7 +25,7 @@
   "limit_traffic": "Traffic",
   "limit_exhausted": "When the traffic runs out",
   "limit_speed": "Speed per device",
-  "limit_networks": "VLESS networks per device at once",
+  "limit_networks": "Simultaneous VLESS connections per device",
   "no_limit": "no limit",
   "reset_calendar_month": "per calendar month",
   "reset_monthly_anchor": "per month from the start day",
@@ -54,7 +54,7 @@
   "delete": "Remove",
   "delete_warning": "This device’s AmneziaWG and VLESS configurations will stop working.",
   "deleting": "being removed…",
-  "networks": "VLESS networks now: {active} of {limit}",
+  "networks": "VLESS connections now: {active} of {limit}",
   "limit_reached": "The device limit is reached.",
   "connect": "Connect",
   "connect_hint": "Choose the device, then a server and protocol.",
@@ -74,5 +74,7 @@
   "files": "Files",
   "import_xray": "Import the VLESS file or link into your client, or scan the QR code.",
   "import_awg": "Import the .vpn file in AmneziaVPN or scan the QR code; the .conf file goes to a compatible AmneziaWG client.",
-  "close": "Close"
+  "close": "Close",
+  "about_tariff": "Details",
+  "no_description": "The tariff has no description."
 }

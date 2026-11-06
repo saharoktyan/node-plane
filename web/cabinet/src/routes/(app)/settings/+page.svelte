@@ -116,7 +116,7 @@
         </div>
       {/snippet}
     </Async>
-    {#if webauthn.available()}<p><button onclick={addPasskey}>{t('settings.add_passkey')}</button></p>{/if}
+    {#if webauthn.available()}<p class="after"><button onclick={addPasskey}>{t('settings.add_passkey')}</button></p>{/if}
   </div>
 </div>
 
@@ -140,3 +140,10 @@
     {/snippet}
   </Async>
 </div>
+
+<style>
+  /* An action under a list of rows keeps clear of the last rule. */
+  .after {
+    margin-top: 1rem;
+  }
+</style>

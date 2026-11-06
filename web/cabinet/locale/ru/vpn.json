@@ -25,7 +25,7 @@
   "limit_traffic": "Трафик",
   "limit_exhausted": "Когда трафик закончится",
   "limit_speed": "Скорость на устройство",
-  "limit_networks": "Сетей VLESS на устройство одновременно",
+  "limit_networks": "Подключений VLESS на устройство одновременно",
   "no_limit": "без ограничения",
   "reset_calendar_month": "за календарный месяц",
   "reset_monthly_anchor": "за месяц от дня начала",
@@ -54,7 +54,7 @@
   "delete": "Удалить",
   "delete_warning": "Конфиги AmneziaWG и VLESS этого устройства перестанут работать.",
   "deleting": "удаляется…",
-  "networks": "Сетей VLESS сейчас: {active} из {limit}",
+  "networks": "Подключений VLESS сейчас: {active} из {limit}",
   "limit_reached": "Достигнут лимит устройств.",
   "connect": "Подключение",
   "connect_hint": "Выберите устройство, затем сервер и протокол.",
@@ -74,5 +74,7 @@
   "files": "Файлы",
   "import_xray": "Импортируйте файл или ссылку VLESS в клиент или отсканируйте QR-код.",
   "import_awg": "Импортируйте файл .vpn в AmneziaVPN или отсканируйте QR-код; файл .conf — для совместимого клиента AmneziaWG.",
-  "close": "Закрыть"
+  "close": "Закрыть",
+  "about_tariff": "Подробнее",
+  "no_description": "У тарифа нет описания."
 }

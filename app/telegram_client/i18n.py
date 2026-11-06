@@ -3558,8 +3558,8 @@ CATALOG['ru'].update({
     'notification.connection_evicted.body': 'Устройство {device} подключилось к {node} из другой сети, поэтому его прежнее подключение отключено. Если это были не вы, перевыпустите ключ устройства в боте.',
 })
 
-CATALOG['en']['devices.networks'] = 'VLESS networks now: {active} of {limit}. Connecting from another network disconnects the oldest one.'
-CATALOG['ru']['devices.networks'] = 'Сетей VLESS сейчас: {active} из {limit}. Подключение из новой сети отключает самую старую.'
+CATALOG['en']['devices.networks'] = 'VLESS connections now: {active} of {limit}. Connecting from another network disconnects the oldest one.'
+CATALOG['ru']['devices.networks'] = 'Подключений VLESS сейчас: {active} из {limit}. Подключение из новой сети отключает самое старое.'
 
 CATALOG['en'].update({
     'devices.rotate_awg': 'New AWG key',
@@ -4298,7 +4298,7 @@ CATALOG['en'].update({
     'included.title': 'What the tariff includes', 'included.none': 'No tariff: the limits are set for you directly.',
     'included.days': 'Each renewal adds {days} days.', 'included.own': 'set for you',
     'included.devices': 'Devices', 'included.traffic': 'Traffic', 'included.exhausted': 'When the traffic runs out',
-    'included.speed': 'Speed per device', 'included.networks': 'VLESS networks per device at once',
+    'included.speed': 'Speed per device', 'included.networks': 'Simultaneous VLESS connections per device',
     'included.no_limit': 'no limit', 'included.speed_value': '↓ {down} · ↑ {up}',
     'included.reset.calendar_month': 'per calendar month', 'included.reset.monthly_anchor': 'per month from the start day',
     'included.reset.interval': 'every {days} days', 'included.reset.none': 'for the whole term',
@@ -4309,7 +4309,7 @@ CATALOG['ru'].update({
     'included.title': 'Что входит в тариф', 'included.none': 'Без тарифа: лимиты заданы лично для вас.',
     'included.days': 'Каждое продление добавляет {days} дн.', 'included.own': 'задано для вас',
     'included.devices': 'Устройства', 'included.traffic': 'Трафик', 'included.exhausted': 'Когда трафик закончится',
-    'included.speed': 'Скорость на устройство', 'included.networks': 'Сетей VLESS на устройство одновременно',
+    'included.speed': 'Скорость на устройство', 'included.networks': 'Подключений VLESS на устройство одновременно',
     'included.no_limit': 'без ограничения', 'included.speed_value': '↓ {down} · ↑ {up}',
     'included.reset.calendar_month': 'за календарный месяц', 'included.reset.monthly_anchor': 'за месяц от дня начала',
     'included.reset.interval': 'каждые {days} дн.', 'included.reset.none': 'на весь срок',

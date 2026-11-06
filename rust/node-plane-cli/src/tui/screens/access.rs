@@ -422,7 +422,7 @@ pub(in crate::tui) fn draw_access_devices(
         ];
         if let Some(networks) = card["networks"].as_object() {
             lines.push(Line::from(format!(
-                "VLESS networks now: {} of {}",
+                "VLESS connections now: {} of {}",
                 networks
                     .get("active")
                     .and_then(serde_json::Value::as_u64)

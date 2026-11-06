@@ -6,6 +6,7 @@
   import type { ServiceProfile } from '$lib/services/registry';
   import { t } from '$lib/i18n/index.svelte';
   import Async from '$lib/ui/Async.svelte';
+  import Dialog from '$lib/ui/Dialog.svelte';
   import { errorText } from '$lib/ui/errors';
   import { bytes, date, key } from '$lib/ui/format';
   import Connect from './Connect.svelte';
@@ -17,6 +18,7 @@
   const fetchSummary = () => call(api.GET('/api/v1/me/profiles/{profile_id}/summary', { params: { path: path() } }));
   let load = $state(fetchSummary());
   let notice = $state('');
+  let tariffOpen = $state(false);
 
   let devices = $state<Schemas['DeviceList'] | null>(null);
   let devicesError = $state('');
@@ -52,10 +54,19 @@
         <div class="value">{summary.expires_at ? date(summary.expires_at) : t('vpn.unlimited')}</div>
         {#if summary.renewal?.status === 'pending'}<div class="note">{t('vpn.renewal_pending')}</div>{/if}
       </div>
-      <div>
-        <div class="label">{t('vpn.tariff')}</div>
-        <div class="value">{summary.tariff?.title ?? '—'}</div>
-      </div>
+      {#if summary.tariff}
+        <!-- The tariff opens its description over the page. -->
+        <button class="cell" onclick={() => (tariffOpen = true)}>
+          <div class="label">{t('vpn.tariff')}</div>
+          <div class="value">{summary.tariff.title}</div>
+          <div class="note link">{t('vpn.about_tariff')}</div>
+        </button>
+      {:else}
+        <div>
+          <div class="label">{t('vpn.tariff')}</div>
+          <div class="value">—</div>
+        </div>
+      {/if}
       <div>
         <div class="label">{t('vpn.quota')}</div>
         {#if summary.quota}
@@ -81,13 +92,7 @@
 
     <section class="block">
       <h2>{t('vpn.included')}</h2>
-      {#if summary.tariff}
-        <p><strong>{summary.tariff.title}</strong></p>
-        {#if summary.tariff.description}<p class="description">{summary.tariff.description}</p>{/if}
-        {#if summary.tariff.duration_days}<p class="muted">{t('vpn.tariff_days', { days: summary.tariff.duration_days })}</p>{/if}
-      {:else}
-        <p class="muted">{t('vpn.no_tariff')}</p>
-      {/if}
+      {#if !summary.tariff}<p class="muted">{t('vpn.no_tariff')}</p>{/if}
       <table class="limits">
         <tbody>
           {#each lines(summary.limits ?? []) as line (line.label)}
@@ -103,6 +108,17 @@
         </tbody>
       </table>
     </section>
+
+    {#if summary.tariff}
+      <Dialog bind:open={tariffOpen} title={String(summary.tariff.title)}>
+        {#if summary.tariff.description}
+          <p class="description">{summary.tariff.description}</p>
+        {:else}
+          <p class="muted">{t('vpn.no_description')}</p>
+        {/if}
+        {#if summary.tariff.duration_days}<p class="muted">{t('vpn.tariff_days', { days: summary.tariff.duration_days })}</p>{/if}
+      </Dialog>
+    {/if}
 
     {#if devices}
       <Devices profileId={profile.id} list={devices} onchange={reloadDevices} />
@@ -130,6 +146,31 @@
   }
   .actions {
     margin: -0.75rem 0 1.5rem;
+  }
+  /* A cell of the line that opens something: the whole cell is the button. */
+  .stats > .cell {
+    flex: 1 1 10rem;
+    padding: 0.9rem 1.25rem;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    background: none;
+    border: none;
+    border-left: 1px solid var(--line);
+    border-radius: 0;
+    cursor: pointer;
+  }
+  .stats > .cell:hover {
+    background: var(--surface);
+  }
+  @media (max-width: 760px) {
+    .stats > .cell {
+      padding-left: 0;
+      border-left: none;
+    }
+  }
+  .note.link {
+    color: var(--accent);
   }
   .description {
     white-space: pre-line;

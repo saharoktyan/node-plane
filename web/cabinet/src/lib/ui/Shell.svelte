@@ -71,10 +71,11 @@
           <Icon name={switchTo.icon} /><span>{switchTo.label}</span>
         </a>
       {/if}
-      <div class="who" title={account.me?.login ?? ''}>
+      <!-- The account's name opens its settings. -->
+      <a href="/settings" class="who" title={account.me?.login ?? ''}>
         <span class="avatar">{(account.me?.display_name ?? account.me?.login ?? '?').slice(0, 1).toUpperCase()}</span>
         <span>{account.me?.display_name ?? account.me?.login ?? ''}</span>
-      </div>
+      </a>
       <button class="link" onclick={() => account.signOut()} title={t('common.sign_out')}>
         <Icon name="out" /><span>{t('common.sign_out')}</span>
       </button>
@@ -153,6 +154,7 @@
   }
   nav a:hover,
   .switch:hover,
+  .who:hover,
   .link:hover {
     background: var(--bg);
     color: var(--text);
@@ -165,7 +167,6 @@
     color: var(--text);
   }
   .who {
-    cursor: default;
     color: var(--text);
   }
   .avatar {
