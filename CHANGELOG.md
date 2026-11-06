@@ -105,6 +105,14 @@
   revocation when there is one. In the bot: Settings → Sign-in and
   sessions → Merge accounts, Accounts → Merges; in Workstation: the Merges
   tab.
+- Services in one shape for every client: `GET /api/v1/services` lists the
+  services people hold profiles of (VPN, built-in) with the account's
+  access to each, and for staff the system services (the web cabinet's
+  relay, the Telegram bot) with their state and the instances each type
+  runs; `GET /api/v1/me/services` lists the account's service profiles with
+  status, a summary and what can be done. They replace
+  `/api/v1/me/service-access`. In the bot: Admin → Services; in Workstation:
+  Settings → Services, with the relay and Telegram pages one step away.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

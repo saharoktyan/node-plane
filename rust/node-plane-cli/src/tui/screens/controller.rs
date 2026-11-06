@@ -1379,7 +1379,9 @@ pub(in crate::tui) fn draw_controller(
         text = "Loading updates…".into();
         controls.push(("Refresh".into(), Control::ControllerUpdates));
     } else {
-        if let Some(scope) = &state.scope {
+        if app.controller_section == Some(ControllerSection::Services) {
+            text.push_str(&crate::services::text(state.services.as_ref()));
+        } else if let Some(scope) = &state.scope {
             text.push_str(&scope.heading());
             text.push_str("\nEach press moves to the next value; after the last one the value is inherited again.");
         } else if let Some(overview) = &state.overview {

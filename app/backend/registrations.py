@@ -140,24 +140,6 @@ def register(db, challenge_id, nonce, *, login, password=None, device=None, sour
                 'session': sessions.open_session(conn, account_id, 'registration', device, now)}
 
 
-def service_access(db, actor):
-    """The installation's services and where the account stands with each."""
-    require_permission(actor, 'account.self.read')
-    from .access_requests import AccessRequestService
-    from .profiles import ProfileRepository
-    with db.connect() as conn:
-        if actor.account.role == 'admin' or ProfileRepository.has_vpn_profile(conn, actor.account.id):
-            state = 'active'
-        elif conn.execute("SELECT 1 FROM backend_access_requests WHERE account_id=? AND status='pending'",
-                          (actor.account.id,)).fetchone():
-            state = 'pending'
-        elif AccessRequestService._policy(conn)['enabled']:
-            state = 'requestable'
-        else:
-            state = 'unavailable'
-    return {'items': [{'service': 'vpn', 'state': state}]}
-
-
 class RegistrationCleanup:
     """Removes registered accounts left without access after the set days
     without a sign-in. Off unless the days are set."""

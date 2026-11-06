@@ -16,6 +16,7 @@ mod policy_scope;
 mod progress;
 mod relay;
 mod self_manage;
+mod services;
 mod ssh;
 mod state_layout;
 mod tariffs;

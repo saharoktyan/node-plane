@@ -68,6 +68,7 @@ pub(super) enum ControllerSection {
     Policies,
     Monitoring,
     Removal,
+    Services,
 }
 impl ControllerSection {
     pub(super) fn label(self) -> &'static str {
@@ -76,6 +77,7 @@ impl ControllerSection {
             Self::Policies => "Policies",
             Self::Monitoring => "Monitoring",
             Self::Removal => "Reset & removal",
+            Self::Services => "Services",
         }
     }
 }

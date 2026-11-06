@@ -1097,6 +1097,9 @@ impl App {
                 self.requests_settings = false;
                 if section == ControllerSection::Policies {
                     self.controller_command(crate::controller::Command::Policies);
+                } else if section == ControllerSection::Services {
+                    self.controller.services = None;
+                    self.controller_command(crate::controller::Command::Services);
                 } else if self.controller.overview.is_none() {
                     self.controller_command(crate::controller::Command::Overview);
                 }
@@ -1910,6 +1913,7 @@ impl App {
         let mut controls: Vec<(String, Control)> = match self.controller_section {
             None => vec![
                 section(Installation),
+                section(Services),
                 section(Policies),
                 ("Backups".into(), Control::ControllerBackups),
                 section(Monitoring),
@@ -2085,6 +2089,17 @@ impl App {
                     ));
                 }
                 items.push(("Requests settings".into(), Control::ControllerPolicies));
+                items
+            }
+            Some(Services) => {
+                let catalog = self.controller.services.as_ref();
+                let mut items = Vec::new();
+                if crate::services::has(catalog, "relay") {
+                    items.push(("Relay".into(), Control::ControllerRelay));
+                }
+                if crate::services::has(catalog, "telegram_bot") {
+                    items.push(("Telegram".into(), Control::ControllerTelegram));
+                }
                 items
             }
             Some(Monitoring) => vec![

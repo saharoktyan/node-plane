@@ -73,6 +73,7 @@ def parent_path(callback, locale, data):
              'admin_nodes': servers, 'admin_profiles': profiles,
              'accounts': (*admin, Breadcrumb(tr(locale, 'accounts.title'), 'accounts')),
              'requests': (*admin, Breadcrumb(tr(locale, 'requests.title'), 'requests')),
+             'services': (*admin, Breadcrumb(tr(locale, 'services.title'), 'services')),
              'announce_menu': (*admin, Breadcrumb(tr(locale, 'announce.title'), 'announce_menu')),
              'admin_status': (*admin, Breadcrumb(tr(locale, 'admin.status.title'), 'admin_status'))}
     if callback in roots:

@@ -25,10 +25,14 @@ impl App {
         self.controller.relay_draft = None;
         self.controller.relay_nodes = None;
         self.controller.relay_confirm_remove = false;
+        let origin_is_node = origin.is_some();
         self.controller.relay_origin = origin;
         self.controller.selected = 0;
         self.controller_viewport.set(0);
-        self.controller_section = Some(ControllerSection::Installation);
+        // From Settings › Services the page returns there; otherwise to Basic.
+        if origin_is_node || self.controller_section != Some(ControllerSection::Services) {
+            self.controller_section = Some(ControllerSection::Installation);
+        }
         self.requests_settings = false;
         self.screen = Screen::Controller;
         self.quick_focus = false;
@@ -45,6 +49,9 @@ impl App {
     fn relay_path(&self) -> String {
         match &self.controller.relay_origin {
             Some((_, title)) => format!("Nodes › {title} › Relay settings"),
+            None if self.controller_section == Some(ControllerSection::Services) => {
+                "Settings › Services › Relay".into()
+            }
             None => "Settings › Basic › Relay".into(),
         }
     }

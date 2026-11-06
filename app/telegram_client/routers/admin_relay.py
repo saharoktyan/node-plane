@@ -33,7 +33,7 @@ def callback(action, where):
 
 
 def parse(data):
-    """The action and the way in: 's', 'c:{node}' (card) or 'n:{node}' (node settings)."""
+    """The action and the way in: 's', 'v' (services), 'c:{node}' (card) or 'n:{node}' (node settings)."""
     _, action, where = (data.split(':', 2) + ['', ''])[:3]
     return action, where
 
@@ -50,7 +50,7 @@ def back_callback(where):
         return 'admin_node:' + key
     if kind == 'n' and key:
         return 'node_settings:' + key
-    return 'admin_settings'
+    return 'services' if kind == 'v' else 'admin_settings'
 
 
 def has_relay(node):

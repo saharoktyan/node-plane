@@ -118,12 +118,11 @@ class RegistrationTests(unittest.TestCase):
             'challenge_id': puzzle['challenge_id'], 'nonce': solve(puzzle), 'login': 'mia', 'password': PASSWORD})
         self.assertEqual(response.status_code, 201, response.text)
         own = {'Authorization': 'Bearer ' + response.json()['session']['access_token']}
-        access = self.client.get('/api/v1/me/service-access', headers=own).json()['items']
-        self.assertEqual(access, [{'service': 'vpn', 'state': 'requestable'}])
+        access = self.client.get('/api/v1/services', headers=own).json()['items']
+        self.assertEqual([(item['service'], item['access']) for item in access], [('vpn', 'requestable')])
         response = self.client.post('/api/v1/me/access-requests', headers={**own, 'Idempotency-Key': str(uuid4())})
         self.assertEqual(response.status_code, 201, response.text)
-        self.assertEqual(self.client.get('/api/v1/me/service-access', headers=own).json()['items'][0]['state'],
-                         'pending')
+        self.assertEqual(self.client.get('/api/v1/services', headers=own).json()['items'][0]['access'], 'pending')
         # With a request, the account is in the main list again.
         logins = [item.get('login') for item in self.client.get('/api/v1/accounts?limit=100', headers=admin)
                   .json()['items']]

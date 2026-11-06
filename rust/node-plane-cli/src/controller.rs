@@ -81,6 +81,8 @@ pub enum Command {
     /// Extends by days at the profile revision seen in the request.
     RenewalApprove(Uuid, u64, u64, Uuid),
     RenewalReject(Uuid),
+    /// The installation's services: kinds, states and instances.
+    Services,
     /// The web cabinet's relay, with its link as the driver sees it.
     Relay,
     /// The nodes a new relay can run on.
@@ -171,6 +173,7 @@ impl Command {
                 None,
             ),
             Self::Backups => (Method::GET, "/api/v1/system/backups".into(), None, None),
+            Self::Services => (Method::GET, "/api/v1/services".into(), None, None),
             Self::Relay => (Method::GET, "/api/v1/relay".into(), None, None),
             Self::RelayNodes => (
                 Method::GET,
@@ -543,6 +546,8 @@ pub struct Browser {
     pub ssh_key: Option<Value>,
     /// The relay page: `{"relay": …}` as the controller reports it.
     pub relay: Option<Value>,
+    /// Settings › Services: `{"items": […]}` from the catalog.
+    pub services: Option<Value>,
     /// Nodes a new relay can run on, while one is being set up.
     pub relay_nodes: Option<Value>,
     pub relay_draft: Option<crate::relay::Draft>,
@@ -658,6 +663,7 @@ impl Browser {
                 self.relay = Some(value);
                 self.defaults_input = None;
             }
+            Command::Services => self.services = Some(value),
             Command::RelayNodes => {
                 if self.relay_draft.is_some() {
                     self.relay_nodes = Some(value);

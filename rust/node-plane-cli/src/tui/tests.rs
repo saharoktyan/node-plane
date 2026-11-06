@@ -10001,3 +10001,51 @@ fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there()
     editor.tab = crate::node_editor::Tab::General;
     assert!(!crate::tui::node_editor_controls(&editor).contains(&Control::NodesRelay));
 }
+
+#[test]
+fn settings_services_lists_the_catalog_and_its_pages_return_there() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.open_controller();
+    assert!(
+        app.controller_root_controls(false)
+            .iter()
+            .any(|(label, _)| label == "Services")
+    );
+    app.activate(Control::ControllerSection(ControllerSection::Services));
+    assert!(matches!(scoped_request(&mut app), Command::Services));
+    app.controller.apply(
+        Command::Services,
+        serde_json::json!({"items":[
+            {"service":"vpn","kind":"builtin","state":null,"instances":2},
+            {"service":"relay","kind":"system","state":"active","instances":1},
+            {"service":"telegram_bot","kind":"system","state":"off","instances":null}]}),
+    );
+    let controls = app.controller_root_controls(false);
+    assert_eq!(
+        controls
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect::<Vec<_>>(),
+        ["Relay", "Telegram", "Back"]
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let screen = format!("{:?}", terminal.backend().buffer());
+    assert!(screen.contains("Settings › Services") && screen.contains("VPN · instances: 2"));
+    // The relay opened from here says so and goes back here.
+    app.activate(Control::ControllerRelay);
+    assert!(matches!(scoped_request(&mut app), Command::Relay));
+    app.controller
+        .apply(Command::Relay, serde_json::json!({"relay": null}));
+    assert!(
+        app.relay_view()
+            .0
+            .starts_with("Settings › Services › Relay\n")
+    );
+    app.activate(Control::ControllerBack);
+    assert!(app.controller_section == Some(ControllerSection::Services));
+    assert!(app.controller.relay.is_none());
+}

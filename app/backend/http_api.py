@@ -419,14 +419,41 @@ class MergeDecisionInput(BaseModel):
     keep_profile: Literal['main', 'other'] | None = None
 
 
-class ServiceAccessOutput(BaseModel):
+class ServiceOutput(BaseModel):
     service: str
-    # `active`, `pending` (a request waits), `requestable`, or `unavailable` (requests are off).
-    state: Literal['active', 'pending', 'requestable', 'unavailable']
+    # `system` (staff only), `builtin` (VPN) or `user` (from a manifest).
+    kind: Literal['system', 'builtin', 'user']
+    # Whether accounts hold profiles of it.
+    profiles: bool
+    # The types of instance on nodes that serve it.
+    instance_types: list[str]
+    # The account's access, for services people hold profiles of: `active`,
+    # `pending` (a request waits), `requestable`, or `unavailable` (requests are off).
+    access: Literal['active', 'pending', 'requestable', 'unavailable'] | None = None
+    # A system service's state: `off`, `active`, `changes_pending`, `failed`, `removing`.
+    state: str | None = None
+    # How many instances run, for those who manage the type.
+    instances: int | None = None
 
 
-class ServiceAccessPage(BaseModel):
-    items: list[ServiceAccessOutput]
+class ServicePage(BaseModel):
+    items: list[ServiceOutput]
+
+
+class ServiceProfileOutput(BaseModel):
+    id: UUID
+    service: str
+    kind: Literal['builtin', 'user']
+    # VPN: `active`, `frozen`, `expired` or `suspended` (the traffic quota is used up).
+    status: str
+    # What the type shows at a glance; VPN: title, devices, tariff, expires_at, renewal.
+    summary: dict[str, str | int | None]
+    # What the holder can do from here; VPN: `devices`, `configs`, `renewal`.
+    actions: list[str]
+
+
+class ServiceProfilePage(BaseModel):
+    items: list[ServiceProfileOutput]
 
 
 class AccountPreferencesInput(BaseModel):
@@ -1941,11 +1968,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         from . import account_merges
         return account_merges.decide(db, current, request_id, body.decision, keep_profile=body.keep_profile)
 
-    @app.get('/api/v1/me/service-access', response_model=ServiceAccessPage)
-    def my_service_access(current=Depends(actor)):
-        """The installation's services and where the account stands with each."""
-        from . import registrations
-        return registrations.service_access(db, current)
+    @app.get('/api/v1/services', response_model=ServicePage)
+    def service_catalog(current=Depends(actor)):
+        """The installation's services in one shape: those people hold profiles
+        of, with the account's access to each; for staff, the system ones."""
+        from . import service_catalog
+        return {'items': service_catalog.catalog(db, current)}
+
+    @app.get('/api/v1/me/services', response_model=ServiceProfilePage)
+    def my_services(current=Depends(actor)):
+        """The account's service profiles: status, a summary and what can be done."""
+        from . import service_catalog
+        return {'items': service_catalog.own(db, current)}
 
     @app.post('/api/v1/invites', response_model=CreatedInvite, status_code=201)
     def create_invite(body: InviteInput, current=Depends(actor)):

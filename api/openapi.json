@@ -6201,35 +6201,86 @@
         "title": "ResolveInput",
         "type": "object"
       },
-      "ServiceAccessOutput": {
+      "ServiceOutput": {
         "properties": {
+          "access": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "pending",
+                  "requestable",
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access"
+          },
+          "instance_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instance Types",
+            "type": "array"
+          },
+          "instances": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instances"
+          },
+          "kind": {
+            "enum": [
+              "system",
+              "builtin",
+              "user"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "profiles": {
+            "title": "Profiles",
+            "type": "boolean"
+          },
           "service": {
             "title": "Service",
             "type": "string"
           },
           "state": {
-            "enum": [
-              "active",
-              "pending",
-              "requestable",
-              "unavailable"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "State",
-            "type": "string"
+            "title": "State"
           }
         },
         "required": [
           "service",
-          "state"
+          "kind",
+          "profiles",
+          "instance_types"
         ],
-        "title": "ServiceAccessOutput",
+        "title": "ServiceOutput",
         "type": "object"
       },
-      "ServiceAccessPage": {
+      "ServicePage": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ServiceAccessOutput"
+              "$ref": "#/components/schemas/ServiceOutput"
             },
             "title": "Items",
             "type": "array"
@@ -6238,7 +6289,82 @@
         "required": [
           "items"
         ],
-        "title": "ServiceAccessPage",
+        "title": "ServicePage",
+        "type": "object"
+      },
+      "ServiceProfileOutput": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "builtin",
+              "user"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "service",
+          "kind",
+          "status",
+          "summary",
+          "actions"
+        ],
+        "title": "ServiceProfileOutput",
+        "type": "object"
+      },
+      "ServiceProfilePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceProfileOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ServiceProfilePage",
         "type": "object"
       },
       "SessionOutput": {
@@ -10582,10 +10708,10 @@
         "summary": "Own Profile Summary"
       }
     },
-    "/api/v1/me/service-access": {
+    "/api/v1/me/services": {
       "get": {
-        "description": "The installation's services and where the account stands with each.",
-        "operationId": "my_service_access_api_v1_me_service_access_get",
+        "description": "The account's service profiles: status, a summary and what can be done.",
+        "operationId": "my_services_api_v1_me_services_get",
         "parameters": [
           {
             "in": "header",
@@ -10609,7 +10735,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ServiceAccessPage"
+                  "$ref": "#/components/schemas/ServiceProfilePage"
                 }
               }
             },
@@ -10631,7 +10757,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "My Service Access"
+        "summary": "My Services"
       }
     },
     "/api/v1/me/sessions": {
@@ -15876,6 +16002,58 @@
           }
         ],
         "summary": "Reject Renewal"
+      }
+    },
+    "/api/v1/services": {
+      "get": {
+        "description": "The installation's services in one shape: those people hold profiles\nof, with the account's access to each; for staff, the system ones.",
+        "operationId": "service_catalog_api_v1_services_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Service Catalog"
       }
     },
     "/api/v1/sessions": {

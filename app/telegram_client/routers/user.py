@@ -1282,6 +1282,9 @@ async def show_admin_menu(chat_id: int, user_id: int, message_id: int,
         for key, callback, permission in (('admin.profiles', AdminProfilesCallback, 'profiles.manage'),
                                           ('admin.nodes', AdminNodesCallback, 'nodes.inspect'))
         if may(permission))
+    from .admin_services import entry_visible
+    if entry_visible(permissions):
+        management += (InlineKeyboardButton(text=tr(locale, 'services.title'), callback_data='services'),)
     if management:
         sections.append(Section(tr(locale, 'admin.rich.management'), rows=(management,)))
     if requests and may('access_requests.manage'):
