@@ -59,13 +59,6 @@ struct DriverContext {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct RuntimeAssetManifestEntry {
-    target_path: String,
-    asset_path: String,
-    mode: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct XrayPublicMetadata {
     xray_sni: String,
     xray_pbk: String,
@@ -99,27 +92,6 @@ impl XrayPublicMetadata {
 }
 
 impl DriverContext {
-    fn runtime_assets_dir(&self) -> PathBuf {
-        let app_root = env::var_os("NODE_PLANE_APP_DIR").map(PathBuf::from);
-        runtime_assets_dir_from(app_root, Path::new(env!("CARGO_MANIFEST_DIR")))
-    }
-
-    fn runtime_manifest_path(&self) -> PathBuf {
-        self.runtime_assets_dir().join("manifest.json")
-    }
-
-    fn load_runtime_manifest(&self) -> Result<Vec<RuntimeAssetManifestEntry>, Status> {
-        let path = self.runtime_manifest_path();
-        let raw = fs::read_to_string(&path).map_err(|err| {
-            Status::internal(format!(
-                "failed to read runtime manifest at {}: {err}",
-                path.display()
-            ))
-        })?;
-        serde_json::from_str::<Vec<RuntimeAssetManifestEntry>>(&raw)
-            .map_err(|err| Status::internal(format!("failed to parse runtime manifest: {err}")))
-    }
-
     fn from_env() -> std::io::Result<Self> {
         Self::load_runtime_env_file();
         let (app_semver, app_commit) =
@@ -311,41 +283,25 @@ impl DriverContext {
         format!("{}\n", lines.join("\n"))
     }
 
+    /// What the agent writes on a node: the release identity and node.env.
     fn runtime_file_bundle(&self, node_key: &str) -> Result<Vec<RuntimeFileSpec>, Status> {
-        let manifest = self.load_runtime_manifest()?;
-        let assets_dir = self.runtime_assets_dir();
-        let mut files = Vec::new();
-        for entry in manifest {
-            let content =
-                fs::read_to_string(assets_dir.join(&entry.asset_path)).map_err(|err| {
-                    Status::internal(format!(
-                        "failed to read runtime asset {}: {err}",
-                        entry.asset_path
-                    ))
-                })?;
-            files.push(RuntimeFileSpec {
-                path: entry.target_path,
-                content,
-                mode: entry.mode,
-            });
-        }
-        files.push(RuntimeFileSpec {
-            path: "/opt/node-plane-runtime/VERSION".to_string(),
-            content: format!("{}\n", self.app_semver),
-            mode: "0644".to_string(),
-        });
-        files.push(RuntimeFileSpec {
-            path: "/opt/node-plane-runtime/BUILD_COMMIT".to_string(),
-            content: format!("{}\n", self.app_commit),
-            mode: "0644".to_string(),
-        });
-        let node_env = self.render_default_node_env(node_key);
-        files.push(RuntimeFileSpec {
-            path: "/etc/node-plane/node.env".to_string(),
-            content: node_env,
-            mode: "0600".to_string(),
-        });
-        Ok(files)
+        Ok(vec![
+            RuntimeFileSpec {
+                path: "/opt/node-plane-runtime/VERSION".to_string(),
+                content: format!("{}\n", self.app_semver),
+                mode: "0644".to_string(),
+            },
+            RuntimeFileSpec {
+                path: "/opt/node-plane-runtime/BUILD_COMMIT".to_string(),
+                content: format!("{}\n", self.app_commit),
+                mode: "0644".to_string(),
+            },
+            RuntimeFileSpec {
+                path: "/etc/node-plane/node.env".to_string(),
+                content: self.render_default_node_env(node_key),
+                mode: "0600".to_string(),
+            },
+        ])
     }
 
     fn runtime_settings_bundle(&self, node_key: &str) -> Result<Vec<RuntimeFileSpec>, Status> {
@@ -369,12 +325,6 @@ fn runtime_release_identity(version: Option<String>, commit: Option<String>) -> 
         resolve(version, env!("NODE_PLANE_BINARY_VERSION")),
         resolve(commit, env!("NODE_PLANE_BINARY_COMMIT")),
     )
-}
-
-fn runtime_assets_dir_from(app_root: Option<PathBuf>, manifest_dir: &Path) -> PathBuf {
-    app_root
-        .map(|root| root.join("runtime_assets"))
-        .unwrap_or_else(|| manifest_dir.join("../..").join("runtime_assets"))
 }
 
 fn local_agent_target_from_config(path: &Path) -> Option<(String, String)> {

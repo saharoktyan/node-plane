@@ -11,8 +11,8 @@ import tempfile
 import unittest
 import zlib
 
-ASSETS = pathlib.Path(__file__).resolve().parents[1] / 'runtime_assets'
-AGENT_BINARY = ASSETS.parent / 'rust/node-agent/target/debug/node-plane-agent'
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+AGENT_BINARY = ROOT / 'rust/node-agent/target/debug/node-plane-agent'
 
 
 def fixture(root):

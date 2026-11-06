@@ -1,7 +1,0 @@
-[
-  {
-    "target_path": "/etc/node-plane/node.env.example",
-    "asset_path": "node.env.example",
-    "mode": "0644"
-  }
-]

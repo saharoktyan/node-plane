@@ -1,6 +1,5 @@
 import hashlib
 import importlib.util
-import json
 import os
 from pathlib import Path
 import shutil
@@ -26,8 +25,6 @@ class CargoDistReleaseTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('fixture\n')
             (root / 'VERSION').write_text('0.4.3-alpha.59\n')
-            (root / 'runtime_assets/manifest.json').write_text(json.dumps([{'asset_path': 'entry.sh'}]))
-            (root / 'runtime_assets/entry.sh').write_text('#!/bin/sh\nexit 0\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
             shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')
@@ -151,8 +148,6 @@ class CargoDistReleaseTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('fixture\n')
             (root / 'VERSION').write_text('0.4.3-alpha.59\n')
-            (root / 'runtime_assets/manifest.json').write_text(json.dumps([{'asset_path': 'entry.sh'}]))
-            (root / 'runtime_assets/entry.sh').write_text('#!/bin/sh\nexit 0\n')
             shutil.copyfile(ROOT / 'scripts/controller_release.py', root / 'scripts/controller_release.py')
             shutil.copyfile(ROOT / 'scripts/build_release_stack.sh', root / 'scripts/build_release_stack.sh')
             shutil.copyfile(ROOT / 'scripts/validate_release.py', root / 'scripts/validate_release.py')

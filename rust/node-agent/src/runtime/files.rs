@@ -79,9 +79,6 @@ impl AgentState {
         if path == "/etc/node-plane/node.env" {
             return self.config.node_env_path.clone();
         }
-        if path == "/etc/node-plane/node.env.example" {
-            return format!("{}.example", self.config.node_env_path);
-        }
         if let Some(suffix) = path.strip_prefix("/opt/node-plane-runtime/") {
             return format!(
                 "{}/{}",

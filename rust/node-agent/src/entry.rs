@@ -1,8 +1,7 @@
 //! Runtime entry points: the names journals, RPCs and earlier releases run.
 //!
-//! Each starts a subcommand of this binary from a script built into it, as
-//! the delivered `runtime_assets/*.sh` wrappers did: node.env is sourced
-//! first and the probe settings keep an agent without the subcommand from
+//! Each starts a subcommand of this binary from a script built into it:
+//! node.env is sourced first and the probe settings keep an agent without the subcommand from
 //! starting its server. Nothing executable is delivered to the node; the
 //! wrapper files earlier releases left in the runtime are removed.
 //! `node-plane-agent entry NAME [ARG...]` runs one by hand.

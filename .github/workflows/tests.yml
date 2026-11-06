@@ -41,9 +41,8 @@ jobs:
           uv run --locked python - <<'PY'
           from pathlib import Path
           import subprocess
-          for directory in ('scripts', 'runtime_assets'):
-              for path in sorted(Path(directory).rglob('*.sh')):
-                  subprocess.run(['bash', '-n', str(path)], check=True)
+          for path in sorted(Path('scripts').rglob('*.sh')):
+              subprocess.run(['bash', '-n', str(path)], check=True)
           PY
       - name: Full Python unit and contract suite
         run: uv run --locked python scripts/run_ci_tests.py unit

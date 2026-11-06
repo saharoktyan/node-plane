@@ -105,7 +105,7 @@ The agent's own removal is not verified: the controller cannot look at the serve
 | `/etc/systemd/system/node-plane-agent.service.d/hardening.conf` | Service hardening |
 | `/etc/node-plane/agent.toml` | Node key, listen address, TLS paths |
 | `/etc/node-plane/tls/` | Agent key and certificate, controller CA; the token until enrollment |
-| `/etc/node-plane/node.env` | Node settings |
+| `/etc/node-plane/node.env` | Node settings; every key with a comment is in [node.env.example](node.env.example) |
 | `/var/lib/node-plane-agent/` | Command journals, the controller installation ID, self-update state in `update/` |
 | `/opt/node-plane-runtime/` | Protocol runtime files and client configurations |
 | `/etc/systemd/system/node-plane-relay.service`, `/etc/node-plane/relay.env` | Relay service and settings, when the node runs the relay |

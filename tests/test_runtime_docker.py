@@ -23,7 +23,7 @@ from uuid import uuid4
 from backend.removal_verifier import RemovalVerifier
 from backend.installation_maintenance import InstallationMaintenance, UNITS
 
-ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
+ROOT = Path(__file__).resolve().parents[1]
 XRAY_IMAGE = 'ghcr.io/saharoktyan/xray-core:v26.10.31-np.2@sha256:43c919899d9a7daf94f988552d65e98fb8abfcc7b804fb39f94a3812755c08c0'
 AGENT_BINARY = Path(__file__).resolve().parents[1] / 'rust/node-agent/target/debug/node-plane-agent'
 AWG_IMAGE = 'amneziavpn/amneziawg-go:3.1.20260828@sha256:cbafc02b8373a83f428272db6d8001b37bc02e6211cbd8c0cb4e2e3759b12b72'
@@ -651,7 +651,7 @@ chmod +x /usr/local/bin/systemctl
         for path in ('/root/.ssh/authorized_keys', '/home/test/.ssh/authorized_keys'):
             docker('exec', '-i', container, 'sh', '-c', 'cat > "$1"', 'fixture', path,
                 input=self.bot_key + '\n' + self.other_key + '\n')
-        source = (ASSETS.parent / 'rust/node-agent/src/lifecycle/uninstall.rs').read_text()
+        source = (ROOT / 'rust/node-agent/src/lifecycle/uninstall.rs').read_text()
         function = source[source.index('    pub(crate) fn schedule_uninstall('):]
         uninstall = re.search(r'let script = r#"(.*?)"#;', function, re.S).group(1)
         args = ['/usr/local/bin/node-plane-agent', '/etc/node-plane/agent.toml',

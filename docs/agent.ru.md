@@ -105,7 +105,7 @@ sudo node-plane-agent self-update https://github.com/saharoktyan/node-plane/rele
 | `/etc/systemd/system/node-plane-agent.service.d/hardening.conf` | Укрепление сервиса |
 | `/etc/node-plane/agent.toml` | Ключ ноды, адрес прослушивания, пути TLS |
 | `/etc/node-plane/tls/` | Ключ и сертификат агента, CA контроллера; токен до регистрации |
-| `/etc/node-plane/node.env` | Настройки ноды |
+| `/etc/node-plane/node.env` | Настройки ноды; все ключи с комментариями — в [node.env.example](node.env.example) |
 | `/var/lib/node-plane-agent/` | Журналы команд, идентификатор установки контроллера, состояние самообновления в `update/` |
 | `/opt/node-plane-runtime/` | Файлы протоколов и клиентские конфиги |
 | `/etc/systemd/system/node-plane-relay.service`, `/etc/node-plane/relay.env` | Сервис и настройки relay, если нода его запускает |

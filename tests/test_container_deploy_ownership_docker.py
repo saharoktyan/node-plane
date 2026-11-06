@@ -13,7 +13,6 @@ import unittest
 import uuid
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-ASSETS = REPO_ROOT / "runtime_assets"
 AGENT_BINARY = REPO_ROOT / "rust/node-agent/target/debug/node-plane-agent"
 HEX64_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 

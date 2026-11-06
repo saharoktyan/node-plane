@@ -113,6 +113,10 @@
   status, a summary and what can be done. They replace
   `/api/v1/me/service-access`. In the bot: Admin → Services; in Workstation:
   Settings → Services, with the relay and Telegram pages one step away.
+- The `runtime_assets` directory is gone: nodes get only the release
+  version and `node.env` from the driver, and the annotated
+  `node.env.example` that used to be copied next to it is now
+  `docs/node.env.example`.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

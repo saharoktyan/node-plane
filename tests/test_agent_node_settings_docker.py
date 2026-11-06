@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from tests.test_runtime_docker import AGENT_BINARY
 
-ASSETS = Path(__file__).resolve().parents[1] / 'runtime_assets'
 
 
 @unittest.skipUnless(os.environ.get('NODE_PLANE_TEST_DOCKER') == '1', 'requires the Docker suite')
