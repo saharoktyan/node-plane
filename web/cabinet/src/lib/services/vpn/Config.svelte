@@ -115,11 +115,6 @@
     font: 0.85rem ui-monospace, monospace;
     width: 100%;
     box-sizing: border-box;
-    padding: 0.5rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
-    color: var(--text);
     resize: vertical;
     word-break: break-all;
     margin-bottom: 0.5rem;
