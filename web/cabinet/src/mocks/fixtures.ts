@@ -46,7 +46,8 @@ export function myServices(scenario: Scenario, lang: 'ru' | 'en'): Schemas['Serv
   if (scenario === 'empty') return [];
   const vpn: Schemas['ServiceProfileOutput'] = {
     id: VPN_ID, service: 'vpn', kind: 'builtin', status: 'active', actions: ['devices', 'configs', 'renewal'],
-    summary: { title: 'saharoktyan', devices: 2, tariff: MONTH[lang], expires_at: '2026-12-06T00:00:00+00:00', renewal: null }
+    summary: { title: 'saharoktyan', devices: 2, tariff: MONTH[lang], expires_at: '2026-12-06T00:00:00+00:00', renewal: null,
+      quota_used_bytes: 32212254720, quota_limit_bytes: 107374182400, quota_reset_at: '2026-12-01T00:00:00+00:00' }
   };
   // A service from a manifest, drawn by the generic module.
   const own: Schemas['ServiceProfileOutput'] = {

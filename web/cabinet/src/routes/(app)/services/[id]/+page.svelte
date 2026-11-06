@@ -16,7 +16,7 @@
   const load = $derived(open(page.params.id ?? ''));
 </script>
 
-<nav class="crumbs"><a href="/">{t('services.title')}</a> /</nav>
+<nav class="crumbs"><a href="/">{t('home.title')}</a> /</nav>
 <Async {load}>
   {#snippet children({ profile, panel: Panel })}
     <div class="page-head">

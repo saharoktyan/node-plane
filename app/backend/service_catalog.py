@@ -76,7 +76,7 @@ def catalog(db, actor):
 
 
 def _vpn(conn, row, now, language):
-    from .quotas import blocked
+    from .quotas import blocked, overview
     renewal = conn.execute('''SELECT status FROM backend_renewal_requests WHERE profile_id=?
         ORDER BY created_at DESC LIMIT 1''', (row['id'],)).fetchone()
     expired = bool(row['expires_at'] and datetime.fromisoformat(row['expires_at']) <= now)
@@ -85,11 +85,17 @@ def _vpn(conn, row, now, language):
     actions = ['devices'] + (['configs'] if status == 'active' else [])
     if row['expires_at'] and not (renewal and renewal['status'] == 'pending'):
         actions.append('renewal')
+    # The traffic of the open period, when a limit holds.
+    quota = overview(conn, row['id'])
+    period = quota['period'] if quota['limit_bytes'] is not None else None
     return {'status': status, 'actions': actions,
             'summary': {'title': row['display_name'], 'devices': row['devices'],
                         'tariff': localized.resolve(localized.loads(row['tariff']), language) if row['tariff'] else None,
                         'expires_at': row['expires_at'],
-                        'renewal': renewal['status'] if renewal else None}}
+                        'renewal': renewal['status'] if renewal else None,
+                        'quota_used_bytes': period['used_bytes'] if period else None,
+                        'quota_limit_bytes': quota['limit_bytes'] if period else None,
+                        'quota_reset_at': period['end'] if period else None}}
 
 
 def own(db, actor, now=None):

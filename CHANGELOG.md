@@ -13,6 +13,12 @@
   seconds and lists what needs attention; charts come with the metrics
   history. Backups and Updates get their sections, with a dot when an
   update is available.
+- The cabinet's first page is Home: one sentence on VPN's term and traffic,
+  the services with their numbers, the latest of the Inbox beside them and
+  services one can ask for. `GET /api/v1/me/services` tells VPN's open quota
+  period (`quota_used_bytes`, `quota_limit_bytes`, `quota_reset_at`). A
+  configuration slides open under its server and stays in place while
+  another protocol of that server is prepared.
 - The web cabinet's VPN page: what the tariff includes (name, description,
   limits in force), the devices (add, rename, a new VLESS or AWG key,
   remove) and configurations for a device on a server, with the link, a QR

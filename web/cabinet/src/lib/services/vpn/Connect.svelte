@@ -96,7 +96,9 @@
     }
     pending = mine;
     notice = null;
-    opened = null;
+    // Another protocol of the same server keeps the open panel until the new
+    // configuration replaces it, so the panel does not fold and unfold.
+    if (opened && opened.issuance.node_key !== choice.node) opened = null;
     try {
       let issuance = await call(api.POST('/api/v1/profiles/{profile_id}/config-issuances', {
         params: { path: { profile_id: profileId }, query: { wait: true }, header: { 'Idempotency-Key': key() } },
@@ -184,7 +186,8 @@
               {#each shown as node (node.key)}
                 {@const offered = choices(node.key)}
                 <tr class:off={down(node.key)}>
-                  <td class="server">{node.flag} {node.title}</td>
+                  <td class="server">{node.flag} {node.title}
+                    {#if pending?.startsWith(node.key + '/')}<span class="preparing" role="status">{t('vpn.preparing')}</span>{/if}</td>
                   <td class="muted region">{node.region || '—'}</td>
                   {#if down(node.key)}
                     <td colspan={SLOTS.length} class="unavailable">{t('vpn.unavailable_now')}</td>
@@ -196,6 +199,7 @@
                         {#if !option}<span class="none">—</span>
                         {:else if issuing && devices.length}
                           <button class:chosen={opened?.choice === id(option) || pending === id(option)}
+                            class:busy={pending === id(option)}
                             disabled={pending !== null} aria-pressed={opened?.choice === id(option)}
                             onclick={() => issue(option)}>{label(option)}</button>
                         {:else}{label(option)}{/if}
@@ -203,17 +207,22 @@
                     {/each}
                   {/if}
                 </tr>
-                {#if pending?.startsWith(node.key + '/')}
-                  <tr class="under"><td colspan={SLOTS.length + 2} class="muted">{t('vpn.preparing')}</td></tr>
-                {:else if notice?.node === node.key}
-                  <tr class="under"><td colspan={SLOTS.length + 2} class="error">{notice.text}</td></tr>
-                {:else if opened?.issuance.node_key === node.key}
-                  <tr class="under">
-                    <td colspan={SLOTS.length + 2}>
-                      <Config issuance={opened.issuance} artifact={opened.artifact} onclose={() => (opened = null)} />
-                    </td>
-                  </tr>
-                {/if}
+                <!-- The configuration slides open under its server; the row stays so it can fold back. -->
+                <tr class="under">
+                  <td colspan={SLOTS.length + 2}>
+                    <div class="fold" class:open={opened?.issuance.node_key === node.key || notice?.node === node.key}>
+                      <div>
+                        {#if notice?.node === node.key}
+                          <p class="error">{notice.text}</p>
+                        {:else if opened?.issuance.node_key === node.key}
+                          <div class:stale={pending?.startsWith(node.key + '/')}>
+                            <Config issuance={opened.issuance} artifact={opened.artifact} onclose={() => (opened = null)} />
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
               {/each}
             </tbody>
           </table>
@@ -325,11 +334,38 @@
   }
   tr.under > td {
     padding: 0;
+    border-bottom: none;
   }
-  tr.under > td.muted,
-  tr.under > td.error {
+  tr.under .fold.open {
+    border-bottom: 1px solid var(--line);
+  }
+  .fold .error {
+    margin: 0;
     padding: 0.6rem 0 0.6rem 1rem;
     border-left: 2px solid var(--accent);
+  }
+  /* The configuration being replaced stays in place, dimmed. */
+  .preparing {
+    margin-left: 0.5rem;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stale {
+    opacity: 0.45;
+    transition: opacity 0.2s;
+  }
+  /* A protocol being prepared: its underline breathes until the panel opens. */
+  td.slot button.busy {
+    animation: breathe 1s ease-in-out infinite alternate;
+  }
+  @keyframes breathe {
+    from {
+      text-decoration-color: var(--accent);
+    }
+    to {
+      text-decoration-color: transparent;
+    }
   }
   .pager {
     display: flex;

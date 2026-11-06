@@ -42,11 +42,26 @@ class ServiceCatalogTests(unittest.TestCase):
                          (profile, 'vpn', 'builtin', 'active'))
         self.assertEqual(items[0]['actions'], ['devices', 'configs'])
         self.assertEqual(items[0]['summary']['devices'], 0)
+        self.assertIsNone(items[0]['summary']['quota_limit_bytes'])
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_profiles SET frozen=1, expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
                          (profile,))
         item = self.client.get('/api/v1/me/services', headers=self.bot(202)).json()['items'][0]
         self.assertEqual((item['status'], item['actions']), ('frozen', ['devices', 'renewal']))
+
+    def test_a_vpn_profile_tells_its_open_quota_period(self):
+        from backend.vpn_policies import VpnPolicies
+        self.register(203)
+        profile = self.provision(203).json()['profile']['id']
+        VpnPolicies(self.db).initialize_schema()
+        with self.db.transaction() as conn:
+            conn.execute('''INSERT INTO backend_vpn_policies(id, subject_kind, profile_id, key, value_json, updated_at)
+                VALUES ('q1', 'profile', ?, 'quota.bytes', ?, '2026-11-06T00:00:00+00:00')''', (profile, str(10 ** 11)))
+        from backend.quotas import QuotaService
+        QuotaService(self.db).scheduled()
+        summary = self.client.get('/api/v1/me/services', headers=self.bot(203)).json()['items'][0]['summary']
+        self.assertEqual((summary['quota_limit_bytes'], summary['quota_used_bytes']), (10 ** 11, 0))
+        self.assertTrue(summary['quota_reset_at'])
 
     def test_staff_see_system_services_and_instances(self):
         items = {item['service']: item for item in

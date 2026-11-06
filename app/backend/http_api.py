@@ -447,7 +447,8 @@ class ServiceProfileOutput(BaseModel):
     kind: Literal['builtin', 'user']
     # VPN: `active`, `frozen`, `expired` or `suspended` (the traffic quota is used up).
     status: str
-    # What the type shows at a glance; VPN: title, devices, tariff, expires_at, renewal.
+    # What the type shows at a glance; VPN: title, devices, tariff, expires_at, renewal,
+    # and the open quota period: quota_used_bytes, quota_limit_bytes, quota_reset_at.
     summary: dict[str, str | int | None]
     # What the holder can do from here; VPN: `devices`, `configs`, `renewal`.
     actions: list[str]
