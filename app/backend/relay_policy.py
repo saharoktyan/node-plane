@@ -3,9 +3,10 @@
 The relay is a public server; the controller's link forwards its requests
 to this API and marks every one with `X-Node-Plane-Via: relay` itself (a
 copy sent by the relay is dropped first). The mark only takes power away:
-through the relay the API accepts no adapter credentials, no acting for a
-Telegram identity, no integration routes and no system operations. Those
-stay with clients on the controller host (the bot, Workstation over SSH).
+through the relay the API accepts no adapter token, no acting for a
+Telegram identity except by the bot's signed requests, no integration
+routes and no system operations. Those stay with clients on the controller
+host (the bot there, Workstation over SSH).
 """
 import re
 
@@ -27,9 +28,13 @@ def through_relay(headers):
 
 
 def refusal(path, headers, principal_kind):
-    """The error code when a relayed request may not proceed, else None."""
+    """The error code when a relayed request may not proceed, else None.
+    `principal_kind` is a token's kind (`account`, `adapter`) or a signed
+    client key's (`workstation`, `bot`)."""
     if CLOSED.match(path):
         return 'not_available_through_relay'
-    if headers.get(DELEGATION_HEADER) is not None or principal_kind == 'adapter':
+    if principal_kind == 'adapter':
+        return 'not_available_through_relay'
+    if headers.get(DELEGATION_HEADER) is not None and principal_kind != 'bot':
         return 'not_available_through_relay'
     return None

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
-from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox, r0007_account_menu_refresh, r0008_access_decision_delivery, r0009_backup_labels, r0010_audit_descriptions, r0011_account_deletions, r0012_system_notifications, r0013_agent_rollout_cancellation, r0014_preapproval_visitors, r0015_vpn_policies, r0016_service_notifications, r0017_device_credentials, r0018_connection_limits, r0019_retired_peers, r0020_traffic_quotas, r0021_speed_limits, r0022_tariffs, r0023_renewal_requests, r0024_revocation_modes, r0025_agent_enrollments, r0026_agent_ssh_installs, r0027_node_agent_checks, r0028_account_details, r0029_account_channels, r0030_inbox_without_telegram, r0031_request_services, r0032_agent_installations, r0033_service_instances, r0034_task_services, r0035_roles, r0036_service_profiles, r0037_traffic_inbounds, r0038_relays, r0039_remote_nodes, r0040_logins, r0041_sessions, r0042_passkeys, r0043_invites, r0044_registrations, r0045_telegram_sign_in, r0046_account_merges, r0047_localized_texts, r0048_announcement_titles, r0049_metrics_history, r0050_web_cabinet
+from .migration_revisions import r0001_baseline, r0002_node_traffic, r0003_temporary_configs, r0004_node_bootstrap, r0005_recovery_audit, r0006_announcement_inbox, r0007_account_menu_refresh, r0008_access_decision_delivery, r0009_backup_labels, r0010_audit_descriptions, r0011_account_deletions, r0012_system_notifications, r0013_agent_rollout_cancellation, r0014_preapproval_visitors, r0015_vpn_policies, r0016_service_notifications, r0017_device_credentials, r0018_connection_limits, r0019_retired_peers, r0020_traffic_quotas, r0021_speed_limits, r0022_tariffs, r0023_renewal_requests, r0024_revocation_modes, r0025_agent_enrollments, r0026_agent_ssh_installs, r0027_node_agent_checks, r0028_account_details, r0029_account_channels, r0030_inbox_without_telegram, r0031_request_services, r0032_agent_installations, r0033_service_instances, r0034_task_services, r0035_roles, r0036_service_profiles, r0037_traffic_inbounds, r0038_relays, r0039_remote_nodes, r0040_logins, r0041_sessions, r0042_passkeys, r0043_invites, r0044_registrations, r0045_telegram_sign_in, r0046_account_merges, r0047_localized_texts, r0048_announcement_titles, r0049_metrics_history, r0050_web_cabinet, r0051_client_keys
 
 LOCK_KEY = 0x4E504C414E454442  # NPLANEDB; shared by every controller/schema.
 LEDGER_DDL = '''CREATE TABLE IF NOT EXISTS backend_schema_revisions (
@@ -83,6 +83,7 @@ REVISIONS = (
     Revision(48, 'announcement_titles', r0048_announcement_titles, 39),
     Revision(49, 'metrics_history', r0049_metrics_history, 39),
     Revision(50, 'web_cabinet', r0050_web_cabinet, 39),
+    Revision(51, 'client_keys', r0051_client_keys, 39),
 )
 
 

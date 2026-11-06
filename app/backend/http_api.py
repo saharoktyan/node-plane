@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_serializer
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
@@ -20,7 +21,7 @@ from .authorization import (
     ADMIN_PERMISSIONS, require_permission, resolve_actor,
 )
 from .credentials import CredentialService
-from . import charts, relay_policy
+from . import charts, client_keys, relay_policy
 from .announcements import AnnouncementService
 from .alerts import AlertService
 from .identity import IdentityService
@@ -1588,6 +1589,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     app.state.delivery_wakeup = wakeup
     identities = SQLIdentityRepository(db)
     credentials = CredentialService(db)
+    signed_clients = client_keys.ClientKeys(db)
     service = IdentityService(identities)
     profiles = ProfileService(ProfileRepository(db))
     device_commands = DeviceCommands(db)
@@ -1654,10 +1656,15 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         handler_ms = 0.0
         request.state.request_id = str(uuid4())
         if relay_policy.through_relay(request.headers):
-            try:
-                kind = credentials.authenticate(request.headers.get('Authorization')).kind.value
-            except AccessDenied:
-                kind = None
+            authorization = request.headers.get('Authorization')
+            if client_keys.signed(authorization):
+                with db.connect() as conn:
+                    kind = client_keys.kind_of(conn, authorization)
+            else:
+                try:
+                    kind = credentials.authenticate(authorization).kind.value
+                except AccessDenied:
+                    kind = None
             refused = relay_policy.refusal(request.url.path, request.headers, kind)
             if refused:
                 response = error(request, refused, 403)
@@ -1791,13 +1798,28 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     bearer = HTTPBearer(auto_error=False)
 
-    def authenticate(request: Request, security: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)]) -> Principal:
-        principal = credentials.authenticate(header(request, 'Authorization'))
+    async def authenticate(request: Request,
+                           security: Annotated[HTTPAuthorizationCredentials | None, Security(bearer)]) -> Principal:
+        authorization = header(request, 'Authorization')
+        if client_keys.signed(authorization):
+            # Signed clients (Workstation through the relay, the remote bot): the
+            # signature covers the exact path and query as sent, and the body.
+            target = request.scope.get('raw_path', request.url.path.encode()).decode('latin-1')
+            if request.url.query:
+                target += '?' + request.url.query
+            body = await request.body()
+            principal = await run_in_threadpool(signed_clients.authenticate, authorization, request.method,
+                                                target, body, header(request, 'X-Node-Plane-Telegram-User-ID'))
+        else:
+            principal = await run_in_threadpool(credentials.authenticate, authorization)
         if principal.kind == PrincipalKind.ADAPTER and 'delegate.telegram' in principal.scopes:
             from .account_channels import enabled
-            with db.connect() as conn:
-                if 'telegram' not in enabled(conn):
-                    raise AccessDenied('channel_disabled', 409)
+
+            def channels():
+                with db.connect() as conn:
+                    return enabled(conn)
+            if 'telegram' not in await run_in_threadpool(channels):
+                raise AccessDenied('channel_disabled', 409)
         return principal
 
     def actor(request: Request, principal: Annotated[Principal, Depends(authenticate)],

@@ -24,6 +24,8 @@ def begin(conn, account_id):
     conn.execute('DELETE FROM backend_passwords WHERE account_id=?', (account_id,))
     from .passkeys import remove_all
     remove_all(conn, account_id)
+    from .client_keys import revoke_all as revoke_keys
+    revoke_keys(conn, account_id)
 
 
 def settle(conn):

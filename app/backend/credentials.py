@@ -37,6 +37,8 @@ class CredentialService:
             )''')
             from db.migration_revisions.r0041_sessions import credentials_schema
             credentials_schema(conn)
+            from db.migration_revisions.r0051_client_keys import create_schema as client_keys_schema
+            client_keys_schema(conn)
         from .workstation_audit import WorkstationAudit
         WorkstationAudit(self.db).initialize_schema()
 

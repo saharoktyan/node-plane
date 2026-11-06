@@ -40,6 +40,14 @@
 - Setting up or stopping the web cabinet answers with the whole page state,
   as reading it does. A first install starts the controller's cabinet server
   only once the driver's binary is there, instead of failing once first.
+- Signed requests (migration r0051): a client with its own Ed25519 key signs
+  each request (`Authorization: NP-Signature key=…, ts=…, nonce=…, sig=…`)
+  over the method, path and query, the body's hash, the Telegram user the
+  bot acts for, the time and a nonce. The controller refuses a time more
+  than a minute away and a nonce it has seen. A Workstation key acts as its
+  account while the account is staff; a bot key acts as the Telegram
+  adapter, and through the relay only its signed requests may act for a
+  Telegram user. Keys are revoked with the account and cleared by a restore.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last
