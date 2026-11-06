@@ -486,6 +486,9 @@ dl.facts dd {
 .chart {
   position: relative;
   margin-top: 0.75rem;
+  /* The drawing follows the width it is given and never holds a column
+     open: without this a narrowed window keeps the old width and cuts it. */
+  contain: inline-size;
 }
 .chart svg {
   display: block;
