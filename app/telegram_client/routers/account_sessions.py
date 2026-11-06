@@ -28,7 +28,8 @@ def settings_section(locale, user_id, current):
     rows = ((InlineKeyboardButton(text=tr(locale, 'sessions.open'), callback_data='msess:list'),),) \
         if current.get('has_password') or current.get('passkeys') else ()
     # Moving this Telegram to an account of the web cabinet.
-    rows += ((InlineKeyboardButton(text=tr(locale, 'sessions.telegram_link'), callback_data='msess:tglink'),),)
+    rows += ((InlineKeyboardButton(text=tr(locale, 'sessions.telegram_link'), callback_data='msess:tglink'),),
+             (InlineKeyboardButton(text=tr(locale, 'merge.title'), callback_data='merge:view'),))
     return Section(tr(locale, 'sessions.title'), lines, rows=rows)
 
 

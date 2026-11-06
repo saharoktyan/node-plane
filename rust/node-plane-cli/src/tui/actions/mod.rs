@@ -327,6 +327,8 @@ impl App {
             | Control::AccessInviteAccount
             | Control::AccessBotUsername
             | Control::AccessRegistration
+            | Control::AccessMerge(..)
+            | Control::AccessMergeReject
             | Control::AccessRegistrationOpen(..)
             | Control::AccessRegistrationCleanup(..)
             | Control::AccessWithoutAccess

@@ -509,6 +509,28 @@ impl App {
                 self.access_command(crate::access::Command::InviteTemplates);
                 None
             }
+            Control::AccessMerge(_) | Control::AccessMergeReject => {
+                if let Some(id) = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|card| card["id"].as_str())
+                {
+                    let mut body = serde_json::json!({
+                        "decision": if control == Control::AccessMergeReject { "reject" } else { "approve" }
+                    });
+                    if let Control::AccessMerge(Some(main)) = control {
+                        body["keep_profile"] = if main { "main" } else { "other" }.into();
+                    }
+                    let command = crate::access::Command::MergeDecision {
+                        id: id.to_owned(),
+                        body,
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
             Control::AccessRegistration => {
                 self.access.selected = 0;
                 self.access_command(crate::access::Command::Registration);
@@ -926,6 +948,8 @@ impl App {
                         | Control::AccessInviteAccount
                         | Control::AccessBotUsername
                         | Control::AccessRegistration
+                        | Control::AccessMerge(_)
+                        | Control::AccessMergeReject
                         | Control::AccessRegistrationOpen(_)
                         | Control::AccessRegistrationCleanup(_)
                         | Control::AccessWithoutAccess

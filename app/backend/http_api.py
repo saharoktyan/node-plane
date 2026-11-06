@@ -383,6 +383,42 @@ class TelegramLinkCode(BaseModel):
     expires_at: str
 
 
+class MergeCode(BaseModel):
+    # Entered by the main account; this account is merged into it.
+    code: str
+    expires_at: str
+
+
+class MergeRequestInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    code: StrictStr = Field(max_length=16)
+
+
+class MergeRequestOutput(BaseModel):
+    id: str
+    main_account_id: str
+    other_account_id: str
+    status: Literal['pending', 'approved', 'rejected', 'cancelled']
+    keep_profile: Literal['main', 'other'] | None
+    created_at: str
+    decided_at: str | None
+    # Both accounts and what the merge does: `result.vpn` is `moves`, `choose`
+    # (both have one) or null; Telegram, password and login `move`, are `dropped`
+    # (the main account has its own) or null; the other's passkeys are removed.
+    preview: dict[str, Any] | None = None
+
+
+class MergeRequestPage(BaseModel):
+    items: list[MergeRequestOutput]
+
+
+class MergeDecisionInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    decision: Literal['approve', 'reject']
+    # Which VPN profile stays when both accounts have one.
+    keep_profile: Literal['main', 'other'] | None = None
+
+
 class ServiceAccessOutput(BaseModel):
     service: str
     # `active`, `pending` (a request waits), `requestable`, or `unavailable` (requests are off).
@@ -1860,6 +1896,50 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                                    'AND account_id=?', (current.account.id,)).fetchone()
             subject = row['subject']
         return telegram.link_code(db, subject)
+
+    @app.post('/api/v1/me/merge-code', response_model=MergeCode, status_code=201)
+    def merge_code(current=Depends(actor)):
+        """A code for your main account: entered there, it asks to merge this account into it."""
+        require_permission(current, 'account.self.preferences.write')
+        from . import account_merges
+        return account_merges.code(db, current.account.id)
+
+    @app.post('/api/v1/me/merge-requests', response_model=MergeRequestOutput, status_code=201)
+    def create_merge_request(body: MergeRequestInput, request: Request, current=Depends(actor)):
+        """Ask an administrator to merge the code's account into this one."""
+        require_permission(current, 'account.self.preferences.write')
+        from . import account_merges
+        return account_merges.request(db, current.account.id, body.code, source=client_source(request))
+
+    @app.get('/api/v1/me/merge-requests', response_model=MergeRequestPage)
+    def my_merge_requests(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import account_merges
+        return {'items': account_merges.own(db, current.account.id)}
+
+    @app.delete('/api/v1/me/merge-requests/{request_id}', status_code=204)
+    def cancel_merge_request(request_id: str, current=Depends(actor)):
+        require_permission(current, 'account.self.preferences.write')
+        from . import account_merges
+        account_merges.cancel(db, current.account.id, request_id)
+        return Response(status_code=204)
+
+    @app.get('/api/v1/merge-requests', response_model=MergeRequestPage)
+    def merge_requests(current=Depends(actor)):
+        """Merge requests, pending first, each with both accounts and what it does."""
+        from . import account_merges
+        return {'items': account_merges.listed(db, current)}
+
+    @app.get('/api/v1/merge-requests/{request_id}', response_model=MergeRequestOutput)
+    def merge_request(request_id: str, current=Depends(actor)):
+        from . import account_merges
+        return account_merges.get(db, current, request_id)
+
+    @app.post('/api/v1/merge-requests/{request_id}/decision', response_model=MergeRequestOutput)
+    def decide_merge_request(request_id: str, body: MergeDecisionInput, current=Depends(actor)):
+        """Approve (the merge happens now) or reject."""
+        from . import account_merges
+        return account_merges.decide(db, current, request_id, body.decision, keep_profile=body.keep_profile)
 
     @app.get('/api/v1/me/service-access', response_model=ServiceAccessPage)
     def my_service_access(current=Depends(actor)):

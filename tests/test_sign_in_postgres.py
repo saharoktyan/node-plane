@@ -77,3 +77,22 @@ class SignInPostgresTests(unittest.TestCase):
             telegram.link_confirm(self.db, anna, preview['link_id'], now=SIGNED)
             telegram.sign_in(self.db, 'login', widget(505), device='x', source='s', now=SIGNED)
         self.assertEqual(identities.find_telegram_account(505).id, anna)
+
+    def test_accounts_merge_with_both_vpn_profiles(self):
+        from backend import account_merges as merges
+        from backend.profiles import ProfileRepository
+        CredentialService(self.db).initialize_schema()
+        identities = SQLIdentityRepository(self.db)
+        admin = resolve_actor(Principal('test', PrincipalKind.ACCOUNT, PERMISSIONS, account_id=self.admin.id),
+                              identities)
+        main, other = identities.create_account().id, identities.create_account().id
+        with self.db.transaction() as conn:
+            kept = ProfileRepository.ensure_account_profile_in_transaction(conn, other)
+            dropped = ProfileRepository.ensure_account_profile_in_transaction(conn, main)
+        code = merges.code(self.db, other, now=NOW)['code']
+        request = merges.request(self.db, main, code, source='s', now=NOW)
+        merges.decide(self.db, admin, request['id'], 'approve', keep_profile='other', now=NOW)
+        with self.db.connect() as conn:
+            owners = {row['id']: row['owner_account_id'] for row in conn.execute(
+                'SELECT id, owner_account_id FROM backend_profiles').fetchall()}
+        self.assertEqual((owners[kept], owners[dropped]), (main, other))

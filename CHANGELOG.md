@@ -94,6 +94,17 @@
   /api/v1/me/telegram/link` confirms. A Telegram of an account without
   access, requests or staff roles moves and that account is deleted; one of
   an account with access stays, so it does not lose its way in.
+- Merging accounts by request (migration r0046): the account to be merged in
+  gets a code (`POST /api/v1/me/merge-code`), the main account enters it
+  (`POST /api/v1/me/merge-requests`), and an administrator sees both and
+  what happens (`GET /api/v1/merge-requests`) and decides (`POST
+  /api/v1/merge-requests/{id}/decision`, with `keep_profile` when both have
+  a VPN profile). The main account gets the other's VPN profile, Telegram,
+  and password and login when it lacks them; the other's passkeys are
+  removed and the account is deleted, after the dropped profile's
+  revocation when there is one. In the bot: Settings → Sign-in and
+  sessions → Merge accounts, Accounts → Merges; in Workstation: the Merges
+  tab.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

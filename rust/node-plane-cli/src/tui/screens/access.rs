@@ -808,6 +808,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             if app.access.tab == Tab::Invites && card["status"] == "active" {
                 count += 1;
             }
+            if app.access.tab == Tab::Merges && card["status"] == "pending" {
+                count += 3;
+            }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 // Edit, Limits, Tariff, Renewal while requested, Traffic when collected,
                 // and Freeze and Delete for members.
@@ -1080,6 +1083,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
             }
         }
+        if app.access.tab == Tab::Merges {
+            lines.extend(crate::access::merge_lines(card).into_iter().map(Line::from));
+        }
         if app.access.tab == Tab::Invites {
             lines.push(Line::from(crate::access::invite_template(card)));
             if let Some(token) = card["token"].as_str() {
@@ -1295,6 +1301,19 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             }
             if app.access.tab == Tab::Invites && card["status"] == "active" {
                 buttons.push(("Revoke", Control::AccessInviteRevoke));
+            }
+            if app.access.tab == Tab::Merges && card["status"] == "pending" {
+                let result = &card["preview"]["result"];
+                if result["vpn"] == "choose" {
+                    buttons.push(("Merge, keep main's VPN", Control::AccessMerge(Some(true))));
+                    if result["keep_main_only"] != true {
+                        buttons
+                            .push(("Merge, keep other's VPN", Control::AccessMerge(Some(false))));
+                    }
+                } else {
+                    buttons.push(("Merge", Control::AccessMerge(None)));
+                }
+                buttons.push(("Reject", Control::AccessMergeReject));
             }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 buttons.extend([

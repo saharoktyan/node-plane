@@ -9866,6 +9866,49 @@ fn registration_settings_and_accounts_without_access() {
 }
 
 #[test]
+fn a_merge_is_shown_with_its_preview_and_decided() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    app.access.tab = crate::access::Tab::Merges;
+    let merge = serde_json::json!({"id":"m1","status":"pending","preview":{
+        "main":{"login":"nora","vpn":{"devices":2,"tariff":"Month"}},
+        "other":{"login":null,"username":"nora_tg","vpn":{"devices":1,"tariff":null}},
+        "result":{"vpn":"choose","telegram":"moves","password":null,"login":null,
+                  "passkeys_removed":0,"keep_main_only":false}}});
+    assert_eq!(
+        crate::access::label(crate::access::Tab::Merges, &merge),
+        "nora ← @nora_tg · pending"
+    );
+    app.access.card = Some(merge);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let screen = format!("{:?}", terminal.backend().buffer());
+    assert!(screen.contains("Both have a VPN profile"));
+    assert!(screen.contains("Telegram moves to the main account."));
+    let controls = app.access_controls();
+    assert!(controls.contains(&Control::AccessMerge(Some(false))));
+    assert!(!controls.contains(&Control::AccessMerge(None)));
+    app.activate(Control::AccessMerge(Some(false)));
+    let Some(crate::nodes::Command::Access(command @ crate::access::Command::MergeDecision { .. })) =
+        app.nodes_requested.take()
+    else {
+        panic!("the merge is decided");
+    };
+    let (_, path, body, _) = command.request();
+    assert_eq!(path, "/api/v1/merge-requests/m1/decision");
+    assert_eq!(
+        body,
+        Some(serde_json::json!({"decision":"approve","keep_profile":"other"}))
+    );
+    app.activate(Control::AccessMergeReject);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(crate::access::Command::MergeDecision { body, .. }))
+            if body == serde_json::json!({"decision":"reject"})
+    ));
+}
+
+#[test]
 fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
     use crate::controller::Command;
     let mut app = test_profile_app();

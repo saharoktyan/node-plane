@@ -35,11 +35,11 @@ class SessionTests(IsolatedAsyncioTestCase):
     def test_settings_and_card(self):
         section = sessions.settings_section('en', 123, {'has_password': False})
         self.assertIn('not entered in Telegram', section.lines[0])
-        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:tglink'])
+        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:tglink', 'merge:view'])
         # Passkeys alone also give sessions.
-        self.assertEqual(len(sessions.settings_section('en', 123, {'passkeys': 1}).rows), 2)
+        self.assertEqual(len(sessions.settings_section('en', 123, {'passkeys': 1}).rows), 3)
         section = sessions.settings_section('en', 123, {'has_password': True})
-        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:list', 'msess:tglink'])
+        self.assertEqual([b.callback_data for row in section.rows for b in row], ['msess:list', 'msess:tglink', 'merge:view'])
         account = {'id': ACCOUNT, 'has_password': True, 'sessions': 2, 'passkeys': 1}
         self.assertEqual(sessions.card_lines('en', account), ('Password: set', 'Sessions: 2', 'Passkeys: 1'))
         self.assertEqual([row[0].callback_data for row in sessions.card_rows('en', account)],

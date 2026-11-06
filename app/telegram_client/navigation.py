@@ -168,6 +168,8 @@ def parent_path(callback, locale, data):
             return (*parent_path('admin_node:' + key, locale, data),
                     Breadcrumb(tr(locale, 'node_tools.last_operation'), callback))
         return servers
+    if callback == 'amerge:list':
+        return (*parent_path('accounts', locale, data), Breadcrumb(tr(locale, 'merge.requests'), callback))
     if callback == 'reg:without':
         return (*parent_path('accounts', locale, data),
                 Breadcrumb(tr(locale, 'registration.without_access'), callback))

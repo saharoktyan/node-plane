@@ -161,6 +161,12 @@ A Telegram belongs to one account. To move it to the account you use in the cabi
 
 Accounts and their access are never merged by a move.
 
+## Merge accounts
+
+A person with two accounts can make them one, by request. In the account to be merged in, **Settings → Sign-in and sessions → Merge accounts** gives a code; the main account enters it, in the web cabinet or the bot, within 10 minutes. Holding both proves they are one person's. Staff accounts are not merged in, and either side can cancel while the request waits.
+
+An administrator decides under **Accounts → Merges** in the bot or the **Merges** tab in Workstation. Each account is shown on its own, with what the merge does: the main account keeps itself and gets the other's VPN profile, its Telegram, and its password and login when it has none; the other's passkeys are removed, since each names its account; the other account is deleted. When both have a VPN profile, the administrator picks which stays and the other is deleted and revoked on its nodes; an administrator's own VPN always stays. The request keeps what was shown and decided.
+
 ## Delete an account
 
 **Delete account** removes the account, its VPN profile and devices. After deletion, submitting a new request alone does not recreate an account; a subsequent approval or explicit administrator provisioning creates a fresh account and profile with new IDs. **Freeze** and **Block** preserve the existing account and profile. Review the affected access and confirm deletion. Progress refreshes while the operation runs. A blocked revocation requires recovery; closing the screen does not complete or cancel it.

@@ -282,6 +282,10 @@ pub(super) enum Control {
     AccessInviteTemplate(usize),
     AccessInviteRevoke,
     AccessInviteAccount,
+    /// Approve the open merge, keeping the main (`true`) or other VPN
+    /// profile when both have one; or reject it.
+    AccessMerge(Option<bool>),
+    AccessMergeReject,
     /// Registration settings: open the page, open or close it, cleanup
     /// days (0 never).
     AccessRegistration,

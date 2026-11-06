@@ -9,15 +9,17 @@ pub enum Tab {
     Profiles,
     Requests,
     Invites,
+    Merges,
 }
 impl Tab {
-    pub const ALL: [Self; 3] = [Self::Profiles, Self::Requests, Self::Invites];
+    pub const ALL: [Self; 4] = [Self::Profiles, Self::Requests, Self::Invites, Self::Merges];
     pub fn label(self) -> &'static str {
         match self {
             Self::Accounts => "Accounts",
             Self::Profiles => "Profiles",
             Self::Requests => "Requests",
             Self::Invites => "Invites",
+            Self::Merges => "Merges",
         }
     }
     pub fn root(self) -> &'static str {
@@ -26,6 +28,7 @@ impl Tab {
             Self::Profiles => "/api/v1/profiles",
             Self::Requests => "/api/v1/access-requests",
             Self::Invites => "/api/v1/invites",
+            Self::Merges => "/api/v1/merge-requests",
         }
     }
 }
@@ -71,6 +74,12 @@ pub enum Command {
     },
     InviteRevoke {
         id: String,
+        key: Uuid,
+    },
+    /// Approve (with the VPN profile to keep when both have one) or reject a merge.
+    MergeDecision {
+        id: String,
+        body: Value,
         key: Uuid,
     },
     /// Accounts without access to services and without requests.
@@ -172,6 +181,12 @@ impl Command {
                 format!("/api/v1/invites/{id}"),
                 None,
                 Some(*key),
+            ),
+            Self::MergeDecision { id, body, .. } => (
+                hyper::Method::POST,
+                format!("/api/v1/merge-requests/{id}/decision"),
+                Some(body.clone()),
+                None,
             ),
             Self::WithoutAccess => (
                 hyper::Method::GET,
@@ -1075,6 +1090,17 @@ impl Browser {
                     self.telegram_bot = value["_telegram_bot"].clone();
                 }
             }
+            Command::MergeDecision { .. } => {
+                self.result = Some(
+                    if value["status"] == "approved" {
+                        "Accounts merged."
+                    } else {
+                        "Merge rejected."
+                    }
+                    .into(),
+                );
+                self.card = Some(value);
+            }
             Command::WithoutAccess => {
                 self.tab = Tab::Profiles;
                 self.card = None;
@@ -1179,7 +1205,73 @@ pub fn invite_template(item: &Value) -> &'static str {
     }
 }
 
+fn merge_name(account: &Value) -> String {
+    account["login"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| account["username"].as_str().map(|name| format!("@{name}")))
+        .unwrap_or_else(|| text(&account["telegram_user_id"]))
+}
+
+/// Both accounts of a merge and what it does, as its card shows them.
+pub fn merge_lines(item: &Value) -> Vec<String> {
+    let preview = &item["preview"];
+    let mut lines = Vec::new();
+    for (key, title) in [("main", "Main"), ("other", "Joins")] {
+        let account = &preview[key];
+        lines.push(format!("{title}: {}", merge_name(account)));
+        lines.push(match account["vpn"].as_object() {
+            Some(vpn) => format!(
+                "  VPN: {} devices, tariff {}",
+                text(&vpn["devices"]),
+                text(&vpn["tariff"])
+            ),
+            None => "  No VPN".into(),
+        });
+    }
+    let result = &preview["result"];
+    match result["vpn"].as_str() {
+        Some("moves") => lines.push("The VPN profile moves to the main account.".into()),
+        Some("choose") => {
+            lines.push("Both have a VPN profile: one stays, the other is deleted.".into())
+        }
+        _ => {}
+    }
+    for (key, title) in [
+        ("telegram", "Telegram"),
+        ("password", "Password"),
+        ("login", "Login"),
+    ] {
+        match result[key].as_str() {
+            Some("moves") => lines.push(format!("{title} moves to the main account.")),
+            Some("dropped") => lines.push(format!(
+                "The main account keeps its {}.",
+                title.to_lowercase()
+            )),
+            _ => {}
+        }
+    }
+    if let Some(count) = result["passkeys_removed"]
+        .as_u64()
+        .filter(|count| *count > 0)
+    {
+        lines.push(format!(
+            "{count} passkeys of the other account are removed."
+        ));
+    }
+    lines.push("The other account is deleted.".into());
+    lines
+}
+
 pub fn label(tab: Tab, item: &Value) -> String {
+    if tab == Tab::Merges {
+        return format!(
+            "{} ← {} · {}",
+            merge_name(&item["preview"]["main"]),
+            merge_name(&item["preview"]["other"]),
+            text(&item["status"])
+        );
+    }
     if tab == Tab::Invites {
         let until = text(&item["expires_at"]);
         let mut parts = vec![
