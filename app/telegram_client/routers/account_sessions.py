@@ -2,7 +2,8 @@
 passkey is added here, since sign-in methods do not come through Telegram:
 the member sees what is set, lists their sessions and passkeys and ends or
 removes them; an administrator sees the same on an account's card, signs the
-account out everywhere and removes its passkeys."""
+account out everywhere, removes its passkeys and unlinks the Workstations
+it linked through the relay."""
 from datetime import datetime
 
 from aiogram import Bot, F, Router
@@ -36,7 +37,9 @@ def settings_section(locale, user_id, current):
 def card_lines(locale, account):
     return (tr(locale, 'sessions.card_password' if account.get('has_password') else 'sessions.card_no_password'),
             tr(locale, 'sessions.card_count', count=account.get('sessions', 0)),
-            tr(locale, 'sessions.card_passkeys', count=account.get('passkeys', 0)))
+            tr(locale, 'sessions.card_passkeys', count=account.get('passkeys', 0))) + (
+        (tr(locale, 'sessions.card_workstations', count=account['workstations']),)
+        if account.get('workstations') else ())
 
 
 def card_rows(locale, account):
@@ -47,6 +50,9 @@ def card_rows(locale, account):
     if account.get('passkeys'):
         rows.append([InlineKeyboardButton(text=tr(locale, 'sessions.remove_passkeys'),
                                           callback_data='akeys:' + account['id'])])
+    if account.get('workstations'):
+        rows.append([InlineKeyboardButton(text=tr(locale, 'sessions.unlink_workstations'),
+                                          callback_data='awks:' + account['id'])])
     return rows
 
 
@@ -117,21 +123,24 @@ async def sessions_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, st
     await show_sessions(chat_id, user_id, message_id, bot, backend, state, notice)
 
 
-@router.callback_query(F.data.startswith(('asess:', 'akeys:', 'akeysok:')))
+@router.callback_query(F.data.startswith(('asess:', 'akeys:', 'akeysok:', 'awks:', 'awksok:')))
 async def account_sessions_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
     await query.answer()
     kind, account_id = query.data.split(':', 1)
-    if kind == 'akeys':
-        # Removing passkeys may leave the account without a way into the cabinet: ask first.
+    if kind in {'akeys', 'awks'}:
+        # Removing passkeys may leave the account without a way into the cabinet,
+        # and unlinking stops its Workstations: ask first.
         locale = normalize_locale((await state.get_data()).get('locale'))
-        return await render(bot, query.message.chat.id, Screen(
-            tr(locale, 'sessions.remove_passkeys'), (tr(locale, 'sessions.remove_passkeys_confirm'),),
+        title, question = (('sessions.remove_passkeys', 'sessions.remove_passkeys_confirm') if kind == 'akeys'
+                           else ('sessions.unlink_workstations', 'sessions.unlink_workstations_confirm'))
+        return await render(bot, query.message.chat.id, Screen(tr(locale, title), (tr(locale, question),),
             embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'sessions.confirm_remove'), callback_data='akeysok:' + account_id,
+            [[InlineKeyboardButton(text=tr(locale, 'sessions.confirm_remove'), callback_data=kind + 'ok:' + account_id,
                                    style='danger')],
              [InlineKeyboardButton(text=tr(locale, 'back'), callback_data='account:' + account_id)]],
             state, query.message.message_id)
-    await backend.request('DELETE', f"/api/v1/accounts/{account_id}/{'sessions' if kind == 'asess' else 'passkeys'}",
+    what = {'asess': 'sessions', 'akeysok': 'passkeys', 'awksok': 'workstations'}[kind]
+    await backend.request('DELETE', f'/api/v1/accounts/{account_id}/{what}',
                           telegram_user_id=query.from_user.id, command=True)
     from .admin_profiles import show_account
     await show_account(query.message.chat.id, query.from_user.id, query.message.message_id, account_id,

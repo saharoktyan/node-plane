@@ -337,6 +337,8 @@ impl App {
             | Control::AccessBotUsernameInput
             | Control::AccessBotUsernameSave
             | Control::AccessRemovePasskeysConfirm
+            | Control::AccessUnlinkWorkstations
+            | Control::AccessUnlinkWorkstationsConfirm
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)
             | Control::AccessProfileConfirm

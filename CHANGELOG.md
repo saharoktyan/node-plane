@@ -48,6 +48,15 @@
   account while the account is staff; a bot key acts as the Telegram
   adapter, and through the relay only its signed requests may act for a
   Telegram user. Keys are revoked with the account and cleared by a restore.
+- Linking Workstation through the relay, like `gh auth login`: Workstation
+  asks with its public key (`POST /api/v1/workstation-pairings`) and shows a
+  code and a link; a staff member signs in to the web cabinet and confirms
+  it on the new **Link Workstation** page; the key then acts with their
+  roles. A request lives ten minutes, a source may make five in a quarter
+  of an hour, and a code is never confirmed through Telegram. The cabinet's
+  Settings list the Workstations linked to the account, each with
+  **Unlink**; the account card in the bot and Workstation shows how many
+  there are and unlinks them all after asking.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

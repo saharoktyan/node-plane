@@ -321,6 +321,9 @@ pub(super) enum Control {
     /// Remove the open account's passkeys: ask, then confirm.
     AccessRemovePasskeys,
     AccessRemovePasskeysConfirm,
+    /// Unlink the open account's Workstations: ask, then confirm.
+    AccessUnlinkWorkstations,
+    AccessUnlinkWorkstationsConfirm,
     AccessAccountConfirm,
     AccessDeviceItem(usize),
     AccessDeviceNew,

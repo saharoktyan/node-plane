@@ -96,6 +96,13 @@ export const handlers = [
   http.get('/api/v1/me/sessions', guarded(() => ({ items: fixtures.sessions }), { fails: false })),
   http.delete('/api/v1/me/sessions/:id', guarded(() => new HttpResponse(null, { status: 204 }), { fails: false })),
   http.get('/api/v1/me/passkeys', guarded(() => ({ items: fixtures.passkeys }))),
+  http.get('/api/v1/me/workstations', guarded(() => ({ items: fixtures.workstations }))),
+  http.delete('/api/v1/me/workstations/:id', guarded(() => new HttpResponse(null, { status: 204 }))),
+  http.get('/api/v1/workstation-pairings/code/:code', guarded(() => fixtures.pairing)),
+  http.post('/api/v1/workstation-pairings/code/:code/approve',
+    guarded(() => ({ status: 'approved', name: fixtures.pairing.name }))),
+  http.post('/api/v1/workstation-pairings/code/:code/reject',
+    guarded(() => ({ status: 'rejected', name: fixtures.pairing.name }))),
   http.post('/api/v1/me/passkeys/options', guarded(() => error(409, 'passkeys_unavailable'))),
   http.delete('/api/v1/me/passkeys/:id', guarded(() => new HttpResponse(null, { status: 204 }))),
 

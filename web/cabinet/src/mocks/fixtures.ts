@@ -112,6 +112,16 @@ export const passkeys: Schemas['PasskeyOutput'][] = [
     backed_up: true }
 ];
 
+export const workstations: Schemas['ClientKeyOutput'][] = [
+  { id: 'w1', kind: 'workstation', name: 'Laptop', created_at: '2026-11-01T09:00:00+00:00',
+    last_used_at: '2026-11-06T18:00:00+00:00', revoked_at: null }
+];
+
+export const pairing: Schemas['PairingPreview'] = {
+  code: 'K7QM-3PXA', name: 'Laptop', source: '198.51.100.7', created_at: '2026-11-07T10:00:00+00:00',
+  expires_at: '2026-11-07T10:10:00+00:00'
+};
+
 export function overview(scenario: Scenario): Schemas['AdminOverviewOutput'] {
   const many = scenario === 'many';
   return {
@@ -134,7 +144,7 @@ export function accounts(scenario: Scenario, access: string): Schemas['AdminAcco
     roles: index === 0 ? ['owner'] : [], status: 'approved', revision: 1,
     telegram_user_id: index % 2 ? 100 + index : null, username: index % 2 ? `user${index}` : null,
     login: index % 2 ? null : `user${index}`, display_name: `User ${index}`, account_created: true, deleted: false,
-    has_password: index % 2 === 0, locale_selected: false, passkeys: 0, sessions: 0
+    has_password: index % 2 === 0, locale_selected: false, passkeys: 0, sessions: 0, workstations: 0
   })).filter((_, index) => access === 'all' || (access === 'without') === (index % 3 === 2));
 }
 

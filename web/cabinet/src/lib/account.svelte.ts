@@ -28,7 +28,7 @@ class Account {
   /** The account, or the sign-in page when there is no session. */
   async require(): Promise<Me | null> {
     if (!session.present) {
-      await goto('/login?next=' + encodeURIComponent(location.pathname));
+      await goto('/login?next=' + encodeURIComponent(location.pathname + location.search));
       return null;
     }
     try {

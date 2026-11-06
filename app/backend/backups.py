@@ -64,6 +64,7 @@ CLEAR = (
     "backend_webauthn_challenges",
     # Workstation is linked again and the bot's key comes back with the bot.
     "backend_request_nonces",
+    "backend_workstation_pairings",
     "backend_client_keys",
     # Links are given out again after a restore.
     "backend_invites",

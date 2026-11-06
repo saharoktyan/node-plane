@@ -1409,7 +1409,7 @@ async fn execute_inner(
                         && let Some(account) = value["account_id"].as_str() {
                             value["_account"] = backend::request(session, &credential, Method::GET, &format!("/api/v1/accounts/{account}"), None, None).await?;
                     }
-                    if matches!(&command, crate::access::Command::AccountMutate { .. } | crate::access::Command::EndSessions { .. } | crate::access::Command::RemovePasskeys { .. })
+                    if matches!(&command, crate::access::Command::AccountMutate { .. } | crate::access::Command::EndSessions { .. } | crate::access::Command::RemovePasskeys { .. } | crate::access::Command::UnlinkWorkstations { .. })
                         && let Some(id) = value["profile_id"].as_str() {
                         let profile = backend::request(session, &credential, Method::GET,
                             &format!("/api/v1/profiles/{id}"), None, None).await?;

@@ -635,17 +635,28 @@ impl App {
                 self.access.selected = 0;
                 None
             }
-            Control::AccessEndSessions | Control::AccessRemovePasskeysConfirm => {
+            Control::AccessUnlinkWorkstations => {
+                self.access.workstations_confirm = true;
+                self.access.selected = 0;
+                None
+            }
+            Control::AccessEndSessions
+            | Control::AccessRemovePasskeysConfirm
+            | Control::AccessUnlinkWorkstationsConfirm => {
                 if let Some(id) = self.access.card.as_ref().and_then(|card| {
                     card.get("_account").unwrap_or(card)["id"]
                         .as_str()
                         .map(str::to_owned)
                 }) {
                     let key = uuid::Uuid::new_v4();
-                    let command = if control == Control::AccessEndSessions {
-                        crate::access::Command::EndSessions { id, key }
-                    } else {
-                        crate::access::Command::RemovePasskeys { id, key }
+                    let command = match control {
+                        Control::AccessEndSessions => {
+                            crate::access::Command::EndSessions { id, key }
+                        }
+                        Control::AccessRemovePasskeysConfirm => {
+                            crate::access::Command::RemovePasskeys { id, key }
+                        }
+                        _ => crate::access::Command::UnlinkWorkstations { id, key },
                     };
                     self.access_command(command);
                 }
@@ -813,6 +824,7 @@ impl App {
                     || self.access.login_input.take().is_some()
                     || self.access.password_input.take().is_some()
                     || std::mem::take(&mut self.access.passkeys_confirm)
+                    || std::mem::take(&mut self.access.workstations_confirm)
                     || self.access.invite_templates.take().is_some()
                     || self.access.bot_username_input.take().is_some()
                     || self.access.registration.take().is_some()
@@ -956,6 +968,8 @@ impl App {
                         | Control::AccessBotUsernameInput
                         | Control::AccessBotUsernameSave
                         | Control::AccessRemovePasskeysConfirm
+                        | Control::AccessUnlinkWorkstations
+                        | Control::AccessUnlinkWorkstationsConfirm
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew
                         | Control::AccessDeviceEdit

@@ -129,5 +129,87 @@ class ClientKeyTests(unittest.TestCase):
                 client_keys.register(conn, 'bot', Client().public, name='y', account_id=self.admin.id)
 
 
+class PairingTests(unittest.TestCase):
+    setUp = test_backend_http.BackendHTTPTests.setUp
+
+    def account_headers(self, account_id=None):
+        from backend.authorization import PrincipalKind
+        from backend.workstation_cli import SCOPES
+        _, token = self.credentials.issue(PrincipalKind.ACCOUNT, SCOPES, account_id=account_id or self.admin.id)
+        return {'Authorization': 'Bearer ' + token}
+
+    def ask(self, client, name='Laptop', via='relay'):
+        headers = {'X-Node-Plane-Via': via, 'X-Node-Plane-Client': '198.51.100.7'} if via else {}
+        return self.client.post('/api/v1/workstation-pairings', json={'public_key': client.public, 'name': name},
+                                headers=headers)
+
+    def test_workstation_links_with_a_code_a_staff_member_confirms(self):
+        workstation = Client()
+        answer = self.ask(workstation)
+        self.assertEqual(answer.status_code, 201, answer.text)
+        pairing = answer.json()
+        self.assertRegex(pairing['code'], r'^[A-Z2-9]{4}-[A-Z2-9]{4}$')
+        self.assertIsNone(pairing['url'])
+        state = self.client.get('/api/v1/workstation-pairings/' + pairing['id']).json()
+        self.assertEqual((state['status'], state['key_id']), ('pending', None))
+        headers = self.account_headers()
+        code = pairing['code'].lower().replace('-', ' ')
+        preview = self.client.get('/api/v1/workstation-pairings/code/' + code, headers=headers).json()
+        self.assertEqual((preview['name'], preview['source']), ('Laptop', '198.51.100.7'))
+        decision = self.client.post(f'/api/v1/workstation-pairings/code/{code}/approve', headers=headers)
+        self.assertEqual(decision.json(), {'status': 'approved', 'name': 'Laptop'})
+        state = self.client.get('/api/v1/workstation-pairings/' + pairing['id']).json()
+        self.assertEqual(state['status'], 'approved')
+        # The linked key now signs as the account, and the code is used up.
+        workstation.id = state['key_id']
+        headers_signed = {'Authorization': workstation.sign('GET', '/api/v1/me'), 'X-Node-Plane-Via': 'relay'}
+        self.assertEqual(self.client.get('/api/v1/me', headers=headers_signed).json()['id'], self.admin.id)
+        self.assertEqual(self.client.post(f'/api/v1/workstation-pairings/code/{code}/approve',
+                                          headers=headers).json()['error']['code'], 'pairing_not_found')
+        listed = self.client.get('/api/v1/me/workstations', headers=headers).json()['items']
+        self.assertEqual([item['name'] for item in listed], ['Laptop'])
+        self.assertEqual(self.client.get(f'/api/v1/accounts/{self.admin.id}', headers=headers).json()['workstations'], 1)
+        # Unlinking stops the key.
+        self.assertEqual(self.client.delete('/api/v1/me/workstations/' + workstation.id, headers=headers).status_code, 204)
+        headers_signed = {'Authorization': workstation.sign('GET', '/api/v1/me'), 'X-Node-Plane-Via': 'relay'}
+        self.assertEqual(self.client.get('/api/v1/me', headers=headers_signed).status_code, 401)
+
+    def test_only_a_signed_in_staff_member_confirms(self):
+        pairing = self.ask(Client()).json()
+        code = pairing['code']
+        # Not through Telegram.
+        response = self.client.post(f'/api/v1/workstation-pairings/code/{code}/approve',
+                                    headers={**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'})
+        self.assertEqual(response.json()['error']['code'], 'pairing_not_through_adapter')
+        member = test_backend_http.bootstrap_admin(self.identities, 303)
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET role='member' WHERE id=?", (member.id,))
+        response = self.client.get('/api/v1/workstation-pairings/code/' + code, headers=self.account_headers(member.id))
+        self.assertEqual(response.json()['error']['code'], 'permission_denied')
+        rejected = self.client.post(f'/api/v1/workstation-pairings/code/{code}/reject', headers=self.account_headers())
+        self.assertEqual(rejected.json()['status'], 'rejected')
+        self.assertEqual(self.client.get('/api/v1/workstation-pairings/' + pairing['id']).json()['status'], 'rejected')
+
+    def test_requests_expire_and_are_limited_per_source(self):
+        from backend import workstation_pairings
+        late = workstation_pairings.request(self.db, Client().public, 'Old', source='a',
+                                            now=datetime.now(timezone.utc) - timedelta(minutes=11))
+        self.assertEqual(self.client.get('/api/v1/workstation-pairings/' + late['id']).json()['status'], 'expired')
+        response = self.client.post(f"/api/v1/workstation-pairings/code/{late['code']}/approve",
+                                    headers=self.account_headers())
+        self.assertEqual(response.json()['error']['code'], 'pairing_not_found')
+        for _ in range(workstation_pairings.PER_SOURCE):
+            self.assertEqual(self.ask(Client()).status_code, 201)
+        self.assertEqual(self.ask(Client()).json()['error']['code'], 'pairing_rate_limited')
+        self.assertEqual(self.ask(Client(), via=None).status_code, 201, 'another source')
+
+    def test_an_administrator_unlinks_every_workstation_of_an_account(self):
+        client = Client()
+        with self.db.transaction() as conn:
+            client.id = client_keys.register(conn, 'workstation', client.public, name='x', account_id=self.admin.id)
+        response = self.client.delete(f'/api/v1/accounts/{self.admin.id}/workstations', headers=self.account_headers())
+        self.assertEqual(response.json()['workstations'], 0)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -33,5 +33,11 @@
   "appearance_hint": "The language is kept with the account, the theme in this browser.",
   "password_hint": "For signing in with your login. Changing it ends your other sessions.",
   "passkeys_hint": "Sign in without a password: a fingerprint, face or key on this or another device.",
-  "sessions_hint": "Where you are signed in. End any you do not recognise."
+  "sessions_hint": "Where you are signed in. End any you do not recognise.",
+  "workstations": "Workstation",
+  "workstations_hint": "Workstations linked to your account through the relay. They act with your roles.",
+  "no_workstations": "None linked.",
+  "unlink": "Unlink",
+  "workstation_unlinked": "Workstation unlinked.",
+  "link_workstation": "Link a Workstation"
 }

@@ -1,0 +1,13 @@
+{
+  "title": "Link Workstation",
+  "staff_only": "Only staff can link Workstation.",
+  "code": "Code shown in Workstation",
+  "continue": "Continue",
+  "confirm": "Link “{name}” to your account?",
+  "details": "Code {code} · asked from {source} · {date}",
+  "warning": "It will act with your roles. Confirm only a code you see in your own Workstation right now.",
+  "approve": "Link",
+  "reject": "Decline",
+  "approved": "“{name}” is linked. Return to Workstation.",
+  "rejected": "Declined. “{name}” is not linked."
+}

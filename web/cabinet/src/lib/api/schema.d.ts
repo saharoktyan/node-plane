@@ -134,6 +134,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/workstations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink Account Workstations
+         * @description Unlink every Workstation the account linked through the relay.
+         */
+        delete: operations["unlink_account_workstations_api_v1_accounts__account_id__workstations_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/metrics/nodes": {
         parameters: {
             query?: never;
@@ -1103,6 +1123,40 @@ export interface paths {
          */
         post: operations["telegram_link_preview_api_v1_me_telegram_link_preview_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/workstations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Workstations */
+        get: operations["my_workstations_api_v1_me_workstations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/workstations/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink My Workstation */
+        delete: operations["unlink_my_workstation_api_v1_me_workstations__key_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3256,6 +3310,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workstation-pairings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Pairing
+         * @description Workstation asks to link its key; a staff member confirms the code in the web cabinet.
+         */
+        post: operations["request_pairing_api_v1_workstation_pairings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workstation-pairings/code/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pairing Preview */
+        get: operations["pairing_preview_api_v1_workstation_pairings_code__code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workstation-pairings/code/{code}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Pairing
+         * @description Link the Workstation to this account; it acts with the account's roles.
+         */
+        post: operations["approve_pairing_api_v1_workstation_pairings_code__code__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workstation-pairings/code/{code}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Pairing */
+        post: operations["reject_pairing_api_v1_workstation_pairings_code__code__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workstation-pairings/{pairing_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pairing State */
+        get: operations["pairing_state_api_v1_workstation_pairings__pairing_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -3508,6 +3653,11 @@ export interface components {
             telegram_user_id: number | null;
             /** Username */
             username?: string | null;
+            /**
+             * Workstations
+             * @default 0
+             */
+            workstations: number;
         };
         /** AdminNodeOutput */
         AdminNodeOutput: {
@@ -3854,6 +4004,26 @@ export interface components {
             node_key: string;
             /** Phase */
             phase: string;
+        };
+        /** ClientKeyOutput */
+        ClientKeyOutput: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** ClientKeyPage */
+        ClientKeyPage: {
+            /** Items */
+            items: components["schemas"]["ClientKeyOutput"][];
         };
         /** ConfigArtifactFile */
         ConfigArtifactFile: {
@@ -4918,6 +5088,59 @@ export interface components {
             protocol: string;
             /** Status */
             status: string;
+        };
+        /** PairingDecision */
+        PairingDecision: {
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "approved" | "rejected";
+        };
+        /** PairingInput */
+        PairingInput: {
+            /** Name */
+            name?: string | null;
+            /** Public Key */
+            public_key: string;
+        };
+        /** PairingOutput */
+        PairingOutput: {
+            /** Code */
+            code: string;
+            /** Expires At */
+            expires_at: string;
+            /** Id */
+            id: string;
+            /** Url */
+            url: string | null;
+        };
+        /** PairingPreview */
+        PairingPreview: {
+            /** Code */
+            code: string;
+            /** Created At */
+            created_at: string;
+            /** Expires At */
+            expires_at: string;
+            /** Name */
+            name: string;
+            /** Source */
+            source: string;
+        };
+        /** PairingState */
+        PairingState: {
+            /** Expires At */
+            expires_at: string;
+            /** Key Id */
+            key_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "expired";
         };
         /** PasskeyInput */
         PasskeyInput: {
@@ -6319,6 +6542,39 @@ export interface operations {
         };
     };
     end_account_sessions_api_v1_accounts__account_id__sessions_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAccountOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_account_workstations_api_v1_accounts__account_id__workstations_delete: {
         parameters: {
             query?: never;
             header?: {
@@ -8289,6 +8545,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TelegramLinkPreview"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_workstations_api_v1_me_workstations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientKeyPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_my_workstation_api_v1_me_workstations__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -13271,6 +13589,169 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebCabinetEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_pairing_api_v1_workstation_pairings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PairingInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pairing_preview_api_v1_workstation_pairings_code__code__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_pairing_api_v1_workstation_pairings_code__code__approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingDecision"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_pairing_api_v1_workstation_pairings_code__code__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingDecision"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pairing_state_api_v1_workstation_pairings__pairing_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pairing_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PairingState"];
                 };
             };
             /** @description Validation Error */

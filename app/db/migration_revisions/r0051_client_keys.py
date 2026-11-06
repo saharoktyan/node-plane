@@ -4,6 +4,8 @@ A client keeps an Ed25519 key and signs every request with it; the
 controller keeps only the public key. A Workstation key belongs to an
 account and acts with its roles; a bot key acts as the Telegram adapter.
 Nonces seen in the last minutes are kept to refuse a replayed request.
+Workstation links its key with a short code a staff member confirms in the
+web cabinet; the request lives ten minutes.
 """
 
 
@@ -25,6 +27,18 @@ def create_schema(conn):
         seen_at TEXT NOT NULL,
         PRIMARY KEY (key_id, nonce))''')
     conn.execute('CREATE INDEX IF NOT EXISTS backend_request_nonces_seen ON backend_request_nonces(seen_at)')
+    conn.execute('''CREATE TABLE IF NOT EXISTS backend_workstation_pairings (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        public_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+        account_id TEXT REFERENCES backend_accounts(id) ON DELETE CASCADE,
+        key_id TEXT REFERENCES backend_client_keys(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL)''')
+    conn.execute('CREATE INDEX IF NOT EXISTS backend_workstation_pairings_source ON backend_workstation_pairings(source, created_at)')
 
 
 def upgrade(conn):

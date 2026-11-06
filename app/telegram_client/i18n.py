@@ -4410,3 +4410,16 @@ CATALOG['ru'].update({
     'cabinet.error.agent_unavailable': 'Агент ноды не отвечает.',
     'relay.error.relay_serves_cabinet': 'Relay раздаёт веб-кабинет: сначала перестаньте его раздавать.',
 })
+
+CATALOG['en'].update({
+    'sessions.card_workstations': 'Workstation through the relay: {count}',
+    'sessions.unlink_workstations': 'Unlink Workstation',
+    'sessions.unlink_workstations_confirm': 'Unlink every Workstation this account linked through the relay? '
+                                            'They stop working at once.',
+})
+CATALOG['ru'].update({
+    'sessions.card_workstations': 'Workstation через relay: {count}',
+    'sessions.unlink_workstations': 'Отвязать Workstation',
+    'sessions.unlink_workstations_confirm': 'Отвязать все Workstation, привязанные этим аккаунтом через relay? '
+                                            'Они сразу перестанут работать.',
+})

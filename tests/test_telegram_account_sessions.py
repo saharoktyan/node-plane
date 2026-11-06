@@ -91,3 +91,15 @@ class SessionTests(IsolatedAsyncioTestCase):
         self.assertEqual(rows[0][0].callback_data, 'akeysok:' + ACCOUNT)
         _, card = await self.press('akeysok:' + ACCOUNT, backend, sessions.account_sessions_cb)
         self.assertEqual((card, backend.calls[-1]), (True, ('DELETE', f'/api/v1/accounts/{ACCOUNT}/passkeys')))
+
+    async def test_administrator_unlinks_an_accounts_workstations(self):
+        account = {'id': ACCOUNT, 'workstations': 2}
+        self.assertIn('Workstation through the relay: 2', sessions.card_lines('en', account))
+        self.assertEqual(sessions.card_rows('en', account)[-1][0].callback_data, 'awks:' + ACCOUNT)
+        self.assertNotIn('Workstation', ' '.join(sessions.card_lines('en', {'id': ACCOUNT})))
+        backend = Backend()
+        (screen, rows), card = await self.press('awks:' + ACCOUNT, backend, sessions.account_sessions_cb)
+        self.assertIn('stop working at once', screen.plain())
+        self.assertEqual((card, backend.calls), (False, []))
+        _, card = await self.press(rows[0][0].callback_data, backend, sessions.account_sessions_cb)
+        self.assertEqual((card, backend.calls[-1]), (True, ('DELETE', f'/api/v1/accounts/{ACCOUNT}/workstations')))

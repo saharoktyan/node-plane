@@ -37,5 +37,8 @@
   "device_name_conflict": "A device with this name exists.",
   "invalid_device_name": "This name is not allowed.",
   "device_unavailable": "The device is unavailable.",
-  "revision_conflict": "It changed meanwhile. Look again and repeat."
+  "revision_conflict": "It changed meanwhile. Look again and repeat.",
+  "pairing_not_found": "No such code, or it has expired.",
+  "pairing_not_through_adapter": "Workstation is linked only in the web cabinet.",
+  "pairing_rate_limited": "Too many requests. Try again later."
 }

@@ -112,6 +112,8 @@ class AdminAccountOutput(AccountOutput):
     # Sessions the account is signed in with now.
     sessions: int = 0
     passkeys: int = 0
+    # Workstations linked through the relay.
+    workstations: int = 0
     profile_id: str | None = None
     revision: int
     telegram_user_id: int | None
@@ -225,6 +227,54 @@ class PasskeyOutput(BaseModel):
 
 class PasskeyPage(BaseModel):
     items: list[PasskeyOutput]
+
+
+class PairingInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    # Workstation's Ed25519 public key, raw and base64url.
+    public_key: StrictStr = Field(max_length=64)
+    name: StrictStr | None = Field(default=None, max_length=64)
+
+
+class PairingOutput(BaseModel):
+    # Known only to Workstation: it asks about the request by this id.
+    id: str
+    code: str
+    expires_at: str
+    # Where to confirm the code; None while the web cabinet is not served.
+    url: str | None
+
+
+class PairingState(BaseModel):
+    status: Literal['pending', 'approved', 'rejected', 'expired']
+    key_id: str | None
+    expires_at: str
+
+
+class PairingPreview(BaseModel):
+    code: str
+    name: str
+    source: str
+    created_at: str
+    expires_at: str
+
+
+class PairingDecision(BaseModel):
+    status: Literal['approved', 'rejected']
+    name: str
+
+
+class ClientKeyOutput(BaseModel):
+    id: str
+    kind: str
+    name: str
+    created_at: str
+    last_used_at: str | None
+    revoked_at: str | None
+
+
+class ClientKeyPage(BaseModel):
+    items: list[ClientKeyOutput]
 
 
 class InviteInput(BaseModel):
@@ -2068,6 +2118,47 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             passkeys.remove(conn, current.account.id, passkey_id)
         return Response(status_code=204)
 
+    @app.post('/api/v1/workstation-pairings', response_model=PairingOutput, status_code=201)
+    def request_pairing(body: PairingInput, request: Request):
+        """Workstation asks to link its key; a staff member confirms the code in the web cabinet."""
+        from . import workstation_pairings
+        return workstation_pairings.request(db, body.public_key, body.name, source=client_source(request))
+
+    @app.get('/api/v1/workstation-pairings/{pairing_id}', response_model=PairingState)
+    def pairing_state(pairing_id: UUID):
+        from . import workstation_pairings
+        return workstation_pairings.status(db, pairing_id.hex)
+
+    @app.get('/api/v1/workstation-pairings/code/{code}', response_model=PairingPreview)
+    def pairing_preview(code: str, current=Depends(actor)):
+        from . import workstation_pairings
+        return workstation_pairings.preview(db, current, code)
+
+    @app.post('/api/v1/workstation-pairings/code/{code}/approve', response_model=PairingDecision)
+    def approve_pairing(code: str, current=Depends(actor)):
+        """Link the Workstation to this account; it acts with the account's roles."""
+        from . import workstation_pairings
+        return workstation_pairings.decide(db, current, code, True)
+
+    @app.post('/api/v1/workstation-pairings/code/{code}/reject', response_model=PairingDecision)
+    def reject_pairing(code: str, current=Depends(actor)):
+        from . import workstation_pairings
+        return workstation_pairings.decide(db, current, code, False)
+
+    @app.get('/api/v1/me/workstations', response_model=ClientKeyPage)
+    def my_workstations(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import workstation_pairings
+        with db.connect() as conn:
+            return {'items': workstation_pairings.listed(conn, current.account.id)}
+
+    @app.delete('/api/v1/me/workstations/{key_id}', status_code=204)
+    def unlink_my_workstation(key_id: str, current=Depends(actor)):
+        require_permission(current, 'account.self.preferences.write')
+        with db.transaction() as conn:
+            client_keys.revoke(conn, key_id, account_id=current.account.id)
+        return Response(status_code=204)
+
     @app.get('/api/v1/registrations', response_model=RegistrationOpen)
     def registration_open():
         """Whether the web cabinet offers to register."""
@@ -3152,6 +3243,11 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def remove_account_passkeys(account_id: UUID, current=Depends(actor)):
         """Remove every passkey of the account, such as after a lost device."""
         return accounts.remove_passkeys(current, str(account_id))
+
+    @app.delete('/api/v1/accounts/{account_id}/workstations', response_model=AdminAccountOutput)
+    def unlink_account_workstations(account_id: UUID, current=Depends(actor)):
+        """Unlink every Workstation the account linked through the relay."""
+        return accounts.unlink_workstations(current, str(account_id))
 
     @app.patch('/api/v1/accounts/{account_id}', response_model=AdminAccountOutput)
     def update_account(account_id: UUID, body: AccountEditInput, request: Request, response: Response,

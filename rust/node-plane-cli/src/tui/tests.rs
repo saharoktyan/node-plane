@@ -9845,6 +9845,24 @@ fn the_own_account_sets_its_password_and_any_account_is_signed_out() {
     ));
     app.activate(Control::AccessBack);
     assert!(!app.access.passkeys_confirm);
+    // Unlinking the Workstations it linked through the relay asks first too.
+    app.access.card.as_mut().unwrap()["workstations"] = 2.into();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        format!("{:?}", terminal.backend().buffer()).contains("Workstation through the relay: 2")
+    );
+    app.activate(Control::AccessUnlinkWorkstations);
+    assert!(app.nodes_requested.is_none());
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    app.activate(Control::AccessUnlinkWorkstationsConfirm);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(
+            crate::access::Command::UnlinkWorkstations { id, .. }
+        )) if id == "other"
+    ));
+    app.activate(Control::AccessBack);
+    assert!(!app.access.workstations_confirm);
     app.access.card = Some(serde_json::json!(
         {"id":"me", "role":"admin", "status":"approved", "revision":3, "has_password":false, "sessions":0}
     ));

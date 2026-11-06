@@ -798,11 +798,13 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 count += 1 + usize::from(account["role"] != "admin");
                 if app.access.tab == Tab::Accounts {
                     // Edit access, Login, Sign-in link, the own Password, End
-                    // sessions and Remove passkeys while there are any.
+                    // sessions, Remove passkeys and Unlink Workstation while
+                    // there are any.
                     count += 3
                         + usize::from(app.own_account() == account["id"].as_str())
                         + usize::from(account["sessions"].as_u64().unwrap_or(0) > 0)
-                        + usize::from(account["passkeys"].as_u64().unwrap_or(0) > 0);
+                        + usize::from(account["passkeys"].as_u64().unwrap_or(0) > 0)
+                        + usize::from(account["workstations"].as_u64().unwrap_or(0) > 0);
                 }
             }
             if app.access.tab == Tab::Invites && card["status"] == "active" {
@@ -1117,6 +1119,11 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 card["sessions"].as_u64().unwrap_or(0),
                 card["passkeys"].as_u64().unwrap_or(0)
             )));
+            if let Some(count) = card["workstations"].as_u64().filter(|count| *count > 0) {
+                lines.push(Line::from(format!(
+                    "Workstation through the relay: {count}"
+                )));
+            }
         }
         if app.access.tab == Tab::Profiles {
             if card["deleting"] == true {
@@ -1179,6 +1186,14 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             buttons = vec![
                 ("Type the login", Control::AccessLoginInput),
                 ("Save", Control::AccessLoginSave),
+                ("Cancel", Control::AccessBack),
+            ];
+        } else if app.access.workstations_confirm {
+            lines.push(Line::from(
+                "Unlink every Workstation this account linked through the relay? They stop working at once.",
+            ));
+            buttons = vec![
+                ("Unlink", Control::AccessUnlinkWorkstationsConfirm),
                 ("Cancel", Control::AccessBack),
             ];
         } else if app.access.passkeys_confirm {
@@ -1258,6 +1273,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     }
                     if account["passkeys"].as_u64().unwrap_or(0) > 0 {
                         buttons.push(("Remove passkeys", Control::AccessRemovePasskeys));
+                    }
+                    if account["workstations"].as_u64().unwrap_or(0) > 0 {
+                        buttons.push(("Unlink Workstation", Control::AccessUnlinkWorkstations));
                     }
                     buttons.push(("Sign-in link", Control::AccessInviteAccount));
                 }

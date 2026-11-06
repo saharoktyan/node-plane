@@ -1,0 +1,13 @@
+{
+  "title": "Привязка Workstation",
+  "staff_only": "Привязывать Workstation может только персонал.",
+  "code": "Код из Workstation",
+  "continue": "Продолжить",
+  "confirm": "Привязать «{name}» к вашему аккаунту?",
+  "details": "Код {code} · запрос с {source} · {date}",
+  "warning": "Workstation будет действовать с вашими ролями. Подтверждайте только код, который видите в своём Workstation прямо сейчас.",
+  "approve": "Привязать",
+  "reject": "Отклонить",
+  "approved": "«{name}» привязан. Вернитесь в Workstation.",
+  "rejected": "Отклонено. «{name}» не привязан."
+}

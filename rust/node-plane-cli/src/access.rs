@@ -65,6 +65,11 @@ pub enum Command {
         id: String,
         key: Uuid,
     },
+    /// Unlinks every Workstation the account linked through the relay.
+    UnlinkWorkstations {
+        id: String,
+        key: Uuid,
+    },
     /// The tariffs a new invite can carry.
     InviteTemplates,
     /// A new invite: `account_id` for an account's sign-in, else a new account.
@@ -215,6 +220,12 @@ impl Command {
             Self::RemovePasskeys { id, key } => (
                 hyper::Method::DELETE,
                 format!("/api/v1/accounts/{id}/passkeys"),
+                None,
+                Some(*key),
+            ),
+            Self::UnlinkWorkstations { id, key } => (
+                hyper::Method::DELETE,
+                format!("/api/v1/accounts/{id}/workstations"),
                 None,
                 Some(*key),
             ),
@@ -817,6 +828,8 @@ pub struct Browser {
     pub password_field: usize,
     /// Removing the open account's passkeys waits for confirmation.
     pub passkeys_confirm: bool,
+    /// So does unlinking its Workstations.
+    pub workstations_confirm: bool,
     /// The template choice of a new invite, with the tariffs it can carry.
     pub invite_templates: Option<Vec<Value>>,
     /// The bot's username for invite links and whether Telegram is on.
@@ -1027,12 +1040,18 @@ impl Browser {
             }
             command @ (Command::AccountMutate { .. }
             | Command::EndSessions { .. }
-            | Command::RemovePasskeys { .. }) => {
+            | Command::RemovePasskeys { .. }
+            | Command::UnlinkWorkstations { .. }) => {
                 let body = match &command {
                     Command::AccountMutate { body, .. } => body.clone(),
                     Command::RemovePasskeys { .. } => {
                         self.passkeys_confirm = false;
                         self.result = Some("The account's passkeys were removed.".into());
+                        Value::Null
+                    }
+                    Command::UnlinkWorkstations { .. } => {
+                        self.workstations_confirm = false;
+                        self.result = Some("The account's Workstations were unlinked.".into());
                         Value::Null
                     }
                     _ => {

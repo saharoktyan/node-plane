@@ -1,5 +1,6 @@
 <!-- Settings: what each group is on the left, its controls on the right —
-     appearance, the password, passkeys and the sessions of this account. -->
+     appearance, the password, passkeys, the sessions of this account and,
+     for staff, the Workstations linked through the relay. -->
 <script lang="ts">
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
@@ -17,7 +18,9 @@
 
   const fetchSessions = async () => (await call(api.GET('/api/v1/me/sessions'))).items;
   const fetchPasskeys = async () => (await call(api.GET('/api/v1/me/passkeys'))).items;
+  const fetchWorkstations = async () => (await call(api.GET('/api/v1/me/workstations'))).items;
   let sessions = $state(fetchSessions());
+  let workstations = $state(account.staff ? fetchWorkstations() : Promise.resolve([]));
   let passkeys = $state(fetchPasskeys());
 
   async function run(work: () => Promise<unknown>, done: string) {
@@ -59,6 +62,12 @@
       await call(api.DELETE('/api/v1/me/passkeys/{passkey_id}', { params: { path: { passkey_id: id } } }));
       passkeys = fetchPasskeys();
     }, 'settings.passkey_removed');
+
+  const unlink = (id: string) =>
+    run(async () => {
+      await call(api.DELETE('/api/v1/me/workstations/{key_id}', { params: { path: { key_id: id } } }));
+      workstations = fetchWorkstations();
+    }, 'settings.workstation_unlinked');
 
   const endSession = (id: string) =>
     run(async () => {
@@ -140,6 +149,30 @@
     {/snippet}
   </Async>
 </div>
+
+{#if account.staff}
+  <div class="setting">
+    <div><h2>{t('settings.workstations')}</h2><p class="muted">{t('settings.workstations_hint')}</p></div>
+    <div>
+      <Async load={workstations}>
+        {#snippet children(items)}
+          <div class="rows">
+            {#each items as item (item.id)}
+              <div>
+                <span class="grow">{item.name}</span>
+                <span class="muted">{t('settings.used', { date: dateTime(item.last_used_at ?? item.created_at) })}</span>
+                <button class="danger" onclick={() => unlink(item.id)}>{t('settings.unlink')}</button>
+              </div>
+            {:else}
+              <p class="muted">{t('settings.no_workstations')}</p>
+            {/each}
+          </div>
+        {/snippet}
+      </Async>
+      <p class="after"><a href="/pair">{t('settings.link_workstation')}</a></p>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* An action under a list of rows keeps clear of the last rule. */

@@ -33,5 +33,11 @@
   "appearance_hint": "Язык сохраняется в аккаунте, тема — в этом браузере.",
   "password_hint": "Для входа по логину. После смены остальные сессии завершаются.",
   "passkeys_hint": "Вход без пароля: отпечаток, лицо или ключ на этом или другом устройстве.",
-  "sessions_hint": "Где выполнен вход. Чужую сессию можно завершить."
+  "sessions_hint": "Где выполнен вход. Чужую сессию можно завершить.",
+  "workstations": "Workstation",
+  "workstations_hint": "Workstation, привязанные к аккаунту через relay. Они действуют с вашими ролями.",
+  "no_workstations": "Не привязано.",
+  "unlink": "Отвязать",
+  "workstation_unlinked": "Workstation отвязан.",
+  "link_workstation": "Привязать Workstation"
 }
