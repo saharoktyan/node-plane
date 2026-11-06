@@ -635,12 +635,16 @@ pub fn run(mut request: Request) -> Result<()> {
                             .phrase
                             .extend(text.chars().filter(|c| !c.is_control()).take(remaining));
                     } else if app.controller_controls().get(app.controller.selected)
-                        == Some(&Control::ControllerAnnouncementInput)
-                        && let Some(value) = &mut app.controller.announcement_draft
+                        == Some(&Control::ControllerTextInput)
+                        && let Some((value, limit, _)) = app
+                            .controller
+                            .ltext
+                            .as_mut()
+                            .and_then(crate::localized::Editor::input)
                     {
                         app.text_input
                             .borrow_mut()
-                            .paste("Message", value, &text, 3000);
+                            .paste("Text", value, &text, limit);
                     } else if app.controller_controls().get(app.controller.selected)
                         == Some(&Control::ControllerDefaultsInput)
                         && let Some((_, value)) = &mut app.controller.defaults_input

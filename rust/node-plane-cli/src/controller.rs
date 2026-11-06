@@ -42,8 +42,11 @@ pub enum Command {
     RecoveryNode(String, usize),
     RecoveryAction(String, String, String, usize, Option<String>),
     AnnouncementOverview,
-    AnnouncementPreview(String),
-    AnnouncementCreate(String, Uuid, u64),
+    /// The texts by language (`localized`) and how many each would reach.
+    AnnouncementPreview(Value),
+    AnnouncementCreate(Value, Uuid, u64),
+    /// The languages the controller writes texts in.
+    Languages,
     AnnouncementStatus(Uuid),
     AlertPreferences(Value),
     AlertDismiss(Uuid),
@@ -68,7 +71,8 @@ pub enum Command {
     /// The tariff catalog, with the regions a tariff may grant.
     Tariffs,
     Tariff(Uuid),
-    TariffCreate(String),
+    /// A new tariff named in several languages.
+    TariffCreate(Value),
     /// A partial tariff document at the tariff's revision.
     TariffSave(Uuid, Value, u64),
     TariffDelete(Uuid, u64),
@@ -192,10 +196,10 @@ impl Command {
                 (Method::GET, "/api/v1/tariffs".into(), None, None)
             }
             Self::Tariff(id) => (Method::GET, format!("/api/v1/tariffs/{id}"), None, None),
-            Self::TariffCreate(title) => (
+            Self::TariffCreate(titles) => (
                 Method::POST,
                 "/api/v1/tariffs".into(),
-                Some(json!({"title":title})),
+                Some(json!({"titles":titles})),
                 None,
             ),
             Self::TariffSave(id, body, _) => (
@@ -331,16 +335,17 @@ impl Command {
                 None,
             ),
             Self::AnnouncementOverview => (Method::GET, "/api/v1/announcements".into(), None, None),
-            Self::AnnouncementPreview(text) => (
+            Self::Languages => (Method::GET, "/api/v1/system/languages".into(), None, None),
+            Self::AnnouncementPreview(texts) => (
                 Method::POST,
                 "/api/v1/announcements/preview".into(),
-                Some(json!({"text":text})),
+                Some(json!({"texts":texts})),
                 None,
             ),
-            Self::AnnouncementCreate(text, key, _) => (
+            Self::AnnouncementCreate(texts, key, _) => (
                 Method::POST,
                 "/api/v1/announcements".into(),
-                Some(json!({"text":text})),
+                Some(json!({"texts":texts})),
                 Some(*key),
             ),
             Self::AnnouncementStatus(id) => (
@@ -533,7 +538,8 @@ pub struct Browser {
     pub recovery_group_offset: usize,
     pub history_detail: Option<(&'static str, usize)>,
     pub announcement_overview: Option<Value>,
-    pub announcement_draft: Option<String>,
+    /// The announcement's texts as last previewed.
+    pub announcement_texts: Option<Value>,
     pub announcement_preview: Option<Value>,
     pub announcement_job: Option<Value>,
     pub announcement_key: Option<Uuid>,
@@ -559,6 +565,8 @@ pub struct Browser {
     pub defaults_advanced: bool,
     pub text_confirmation: bool,
     pub defaults_input: Option<(&'static str, String)>,
+    /// A text in several languages being written.
+    pub ltext: Option<crate::localized::Editor>,
     pub defaults_baseline: Option<Value>,
     pub backups: Option<Value>,
     pub backup_create_key: Option<Uuid>,
@@ -720,11 +728,25 @@ impl Browser {
                 self.announcement_job = value.get("last_job").filter(|v| v.is_object()).cloned();
                 self.announcement_overview = Some(value);
                 self.announcement_preview = None;
-                self.announcement_draft = None;
+                self.announcement_texts = None;
                 self.announcement_key = None;
                 self.selected = 0;
             }
+            Command::Languages => {
+                if let (Some(editor), Some(languages)) =
+                    (&mut self.ltext, value["languages"].as_array())
+                {
+                    let languages: Vec<String> = languages
+                        .iter()
+                        .filter_map(|name| name.as_str().map(str::to_owned))
+                        .collect();
+                    if !languages.is_empty() {
+                        editor.languages = languages;
+                    }
+                }
+            }
             Command::AnnouncementPreview(_) => {
+                self.ltext = None;
                 self.announcement_preview = Some(value);
                 self.announcement_job = None;
                 self.selected = 0;
@@ -764,6 +786,7 @@ impl Browser {
                 }
                 self.policies = Some(value);
                 self.defaults_input = None;
+                self.ltext = None;
                 self.selected = 0;
             }
             Command::Defaults | Command::DefaultsSave(_, _) => {
@@ -821,6 +844,7 @@ impl Browser {
                 }
                 self.tariff = Some(value);
                 self.defaults_input = None;
+                self.ltext = None;
                 if !matches!(&command, Command::TariffSave(..)) {
                     self.selected = 0;
                 }

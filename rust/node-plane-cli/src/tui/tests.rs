@@ -1851,34 +1851,157 @@ fn defaults_manual_port_validation_and_input_cancel_preserve_draft() {
 }
 
 #[test]
-fn request_message_edit_does_not_modify_installation_defaults() {
+fn request_message_is_written_by_language_and_saved_without_touching_defaults() {
     let mut app = test_profile_app();
     app.screen = Screen::Controller;
-    app.controller.policies = Some(serde_json::json!({"requests":{"gate_message":"Original"}}));
+    app.controller.policies = Some(
+        serde_json::json!({"requests":{"enabled":false,"gate_message":"Original",
+        "gate_messages":{"source":"en","texts":{"en":"Original"},"fallback":{},"shown":{"en":"en","ru":"en"}}}}),
+    );
     app.activate(Control::ControllerGateMessage);
-    assert!(app.controller_controls()[0] == Control::ControllerDefaultsInput);
-    app.controller.defaults_input.as_mut().unwrap().1 = "New text".into();
-    app.activate(Control::ControllerDefaultsInputApply);
-    assert!(app.controller.text_confirmation);
+    // The value names the languages, so nothing is asked for them.
     assert!(app.nodes_requested.is_none());
-    app.activate(Control::ControllerBack);
-    assert!(!app.controller.text_confirmation);
-    assert_eq!(
-        app.controller.defaults_input.as_ref().unwrap().1,
-        "New text"
-    );
-    app.activate(Control::ControllerDefaultsInputApply);
-    app.activate(Control::ControllerTextConfirm);
     assert!(
-        matches!(app.nodes_requested.take(),Some(crate::nodes::Command::Controller(_,crate::controller::Command::PolicySave("access-requests",body))) if body["gate_message"] == "New text")
+        app.controller_controls()[..2]
+            == [
+                Control::ControllerTextWrite(0),
+                Control::ControllerTextWrite(1)
+            ]
     );
+    app.activate(Control::ControllerTextWrite(1));
+    app.controller
+        .ltext
+        .as_mut()
+        .unwrap()
+        .editing
+        .as_mut()
+        .unwrap()
+        .1 = "Новый текст".into();
+    app.activate(Control::ControllerTextDone);
+    app.activate(Control::ControllerTextSave);
+    assert!(matches!(app.nodes_requested.take(),
+        Some(crate::nodes::Command::Controller(_, crate::controller::Command::PolicySave("access-requests", body)))
+        if body == serde_json::json!({"gate_messages":{"source":"en","texts":{"en":"Original","ru":"Новый текст"},"fallback":{}}})));
     assert!(app.controller.defaults.is_none());
-    assert!(app.controller.defaults_input.is_some());
     app.controller.apply(
         crate::controller::Command::PolicySave("access-requests", serde_json::json!({})),
-        serde_json::json!({"requests":{"gate_message":"New text"}}),
+        serde_json::json!({"requests":{"gate_message":"Original"}}),
     );
-    assert!(app.controller.defaults_input.is_none());
+    assert!(app.controller.ltext.is_none());
+}
+
+#[test]
+fn a_text_editor_goes_back_from_a_language_then_out() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.policies = Some(serde_json::json!({"requests":{"enabled":true,
+        "welcome_messages":{"source":"en","texts":{"en":"Hi"},"fallback":{},"shown":{"en":"en","ru":"en"}}}}));
+    app.activate(Control::ControllerGateMessage);
+    assert_eq!(
+        app.controller.ltext.as_ref().unwrap().purpose,
+        crate::localized::Purpose::WelcomeMessage
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerTextSave)
+    );
+    app.activate(Control::ControllerTextWrite(0));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerTextInput)
+    );
+    assert!(
+        app.hits
+            .iter()
+            .any(|hit| hit.control == Control::ControllerTextDone)
+    );
+    app.controller
+        .ltext
+        .as_mut()
+        .unwrap()
+        .editing
+        .as_mut()
+        .unwrap()
+        .1
+        .clear();
+    app.activate(Control::ControllerTextDone);
+    assert!(!app.error.is_empty());
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.ltext.as_ref().unwrap().editing.is_none());
+    assert_eq!(
+        app.controller.ltext.as_ref().unwrap().draft.texts["en"],
+        "Hi"
+    );
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.ltext.is_none());
+    assert!(app.controller.policies.is_some());
+}
+
+#[test]
+fn an_announcement_is_previewed_by_language_and_keeps_its_key_until_changed() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.screen = Screen::Controller;
+    app.controller.announcement_overview = Some(serde_json::json!({"last_job":null}));
+    app.activate(Control::ControllerAnnouncementCompose);
+    assert!(matches!(scoped_request(&mut app), Command::Languages));
+    app.controller.apply(
+        Command::Languages,
+        serde_json::json!({"languages":["en","ru"]}),
+    );
+    let editor = app.controller.ltext.as_mut().unwrap();
+    assert_eq!(editor.editing.as_ref().unwrap().0, "en");
+    editor.editing.as_mut().unwrap().1 = "Maintenance\ntonight".into();
+    app.activate(Control::ControllerTextDone);
+    app.activate(Control::ControllerTextSave);
+    let Command::AnnouncementPreview(texts) = scoped_request(&mut app) else {
+        panic!("expected a preview")
+    };
+    assert_eq!(texts["texts"]["en"], "Maintenance\ntonight");
+    let key = app.controller.announcement_key.unwrap();
+    let preview = serde_json::json!({"recipients":3,"languages":{"en":2,"ru":1},
+        "texts":{"source":"en","texts":{"en":"Maintenance\ntonight"},"fallback":{},"shown":{"en":"en","ru":"en"}}});
+    app.controller
+        .apply(Command::AnnouncementPreview(texts.clone()), preview.clone());
+    assert!(app.controller.ltext.is_none());
+    assert_eq!(
+        super::screens::preview_languages(&preview),
+        "\n\nEnglish · 2\nMaintenance\ntonight\n\nRussian · 1\nShows the English text."
+    );
+    // Back returns to the texts; previewing them unchanged keeps the key.
+    app.activate(Control::ControllerBack);
+    assert_eq!(
+        app.controller.ltext.as_ref().unwrap().draft.texts["en"],
+        "Maintenance\ntonight"
+    );
+    app.nodes_requested = None;
+    app.activate(Control::ControllerTextSave);
+    scoped_request(&mut app);
+    assert_eq!(app.controller.announcement_key, Some(key));
+    app.controller
+        .apply(Command::AnnouncementPreview(texts), preview);
+    app.activate(Control::ControllerAnnouncementSend);
+    assert!(matches!(scoped_request(&mut app),
+        Command::AnnouncementCreate(sent, sent_key, 3) if sent["texts"]["en"] == "Maintenance\ntonight" && sent_key == key));
+    app.activate(Control::ControllerBack);
+    app.nodes_requested = None;
+    app.controller.ltext.as_mut().unwrap().write(1);
+    app.controller
+        .ltext
+        .as_mut()
+        .unwrap()
+        .editing
+        .as_mut()
+        .unwrap()
+        .1 = "Работы".into();
+    app.activate(Control::ControllerTextDone);
+    app.activate(Control::ControllerTextSave);
+    assert_ne!(app.controller.announcement_key, Some(key));
 }
 
 fn node_settings_editor() -> crate::node_editor::Editor {
@@ -7053,8 +7176,8 @@ fn wizard_pairs_only_matching_regions_when_wide_and_pairs_protocols() {
 fn controller_text_dialogs_use_full_back_button_before_primary_action() {
     let mut app = test_profile_app();
     app.screen = Screen::Controller;
-    app.controller.policies = Some(serde_json::json!({"requests":{"gate_message":"Original"}}));
-    app.activate(Control::ControllerGateMessage);
+    app.controller.bot_title = Some(serde_json::json!({"title":"Original"}));
+    app.activate(Control::ControllerBotTitleEdit);
     app.controller.defaults_input.as_mut().unwrap().1 = "New text".into();
     for confirm in [false, true] {
         app.controller.text_confirmation = confirm;
@@ -8692,19 +8815,34 @@ fn inputs_handle_ctrl_w_and_ctrl_backspace_word_deletion() {
         "first second "
     );
 
-    app.controller.announcement_draft = Some("service maintenance alert".into());
+    app.controller.defaults_input = None;
+    let mut editor = crate::localized::Editor::open(
+        crate::localized::Purpose::Announcement,
+        &serde_json::Value::Null,
+        "en",
+    );
+    editor.editing.as_mut().unwrap().1 = "service maintenance alert".into();
+    app.controller.ltext = Some(editor);
     app.controller.selected = app
         .controller_controls()
         .iter()
-        .position(|c| *c == Control::ControllerAnnouncementInput)
+        .position(|c| *c == Control::ControllerTextInput)
         .unwrap();
     let mut ann_key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL);
     app.normalize_backspace(&mut ann_key);
     app.controller_key(ann_key);
     assert_eq!(
-        app.controller.announcement_draft.as_ref().unwrap(),
+        app.controller
+            .ltext
+            .as_ref()
+            .unwrap()
+            .editing
+            .as_ref()
+            .unwrap()
+            .1,
         "service maintenance "
     );
+    app.controller.ltext = None;
 
     // 2. Access inputs: search, grant draft identity, device name
     app.screen = Screen::Access;
@@ -9293,9 +9431,22 @@ fn tariff_card_changes_term_nodes_and_limits_and_back_returns_to_it() {
     assert!(app.controller.tariff.is_none());
     assert!(matches!(scoped_request(&mut app), Command::Tariffs));
     app.activate(Control::ControllerTariffNew);
-    app.controller.defaults_input = Some(("tariff_new", " Premium ".into()));
-    app.activate(Control::ControllerDefaultsInputApply);
-    assert!(matches!(scoped_request(&mut app), Command::TariffCreate(title) if title == "Premium"));
+    assert!(matches!(scoped_request(&mut app), Command::Languages));
+    app.controller
+        .ltext
+        .as_mut()
+        .unwrap()
+        .editing
+        .as_mut()
+        .unwrap()
+        .1 = " Premium ".into();
+    // A name is one line: Enter finishes it.
+    app.controller_key(KeyCode::Enter.into());
+    app.activate(Control::ControllerTextSave);
+    assert!(
+        matches!(scoped_request(&mut app), Command::TariffCreate(titles)
+        if titles == serde_json::json!({"source":"en","texts":{"en":"Premium"},"fallback":{}}))
+    );
 }
 
 #[test]

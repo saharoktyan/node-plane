@@ -2589,6 +2589,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Languages
+         * @description The languages texts can be written in.
+         */
+        get: operations["languages_api_v1_system_languages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/onboarding": {
         parameters: {
             query?: never;
@@ -3270,12 +3290,10 @@ export interface components {
         AccessRequestPolicyInput: {
             /** Enabled */
             enabled?: boolean | null;
-            /** Gate Message */
-            gate_message?: string | null;
+            gate_messages?: components["schemas"]["LocalizedTextInput"] | null;
             /** Notify Requests */
             notify_requests?: boolean | null;
-            /** Welcome Message */
-            welcome_message?: string | null;
+            welcome_messages?: components["schemas"]["LocalizedTextInput"] | null;
         };
         /** AccessRequestPolicyOutput */
         AccessRequestPolicyOutput: {
@@ -3283,6 +3301,7 @@ export interface components {
             enabled: boolean;
             /** Gate Message */
             gate_message: string;
+            gate_messages?: components["schemas"]["LocalizedTextOutput"] | null;
             /** Notify Requests */
             notify_requests?: boolean | null;
             /**
@@ -3292,6 +3311,7 @@ export interface components {
             telegram: boolean;
             /** Welcome Message */
             welcome_message: string;
+            welcome_messages?: components["schemas"]["LocalizedTextOutput"] | null;
         };
         /** AccountEditInput */
         AccountEditInput: {
@@ -3669,8 +3689,7 @@ export interface components {
         };
         /** AnnouncementInput */
         AnnouncementInput: {
-            /** Text */
-            text: string;
+            texts: components["schemas"]["LocalizedTextInput"];
         };
         /** AvailableNode */
         AvailableNode: {
@@ -4118,6 +4137,54 @@ export interface components {
         InviteTokenInput: {
             /** Token */
             token: string;
+        };
+        /** LanguagesOutput */
+        LanguagesOutput: {
+            /** Default */
+            default: string;
+            /** Languages */
+            languages: string[];
+        };
+        /**
+         * LocalizedTextInput
+         * @description A text in several languages: the source language's is required, the
+         *     others optional; a language without its own text shows the one chosen in
+         *     `fallback`, else the source's.
+         */
+        LocalizedTextInput: {
+            /**
+             * Fallback
+             * @default {}
+             */
+            fallback: {
+                [key: string]: "en" | "ru";
+            };
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "en" | "ru";
+            /** Texts */
+            texts: {
+                [key: string]: string;
+            };
+        };
+        /** LocalizedTextOutput */
+        LocalizedTextOutput: {
+            /** Fallback */
+            fallback: {
+                [key: string]: string;
+            };
+            /** Shown */
+            shown: {
+                [key: string]: string;
+            };
+            /** Source */
+            source: string;
+            /** Texts */
+            texts: {
+                [key: string]: string;
+            };
         };
         /** LoginInput */
         LoginInput: {
@@ -5357,14 +5424,50 @@ export interface components {
         /** TariffInput */
         TariffInput: {
             access_policy?: components["schemas"]["GrantPolicyInput"] | null;
+            descriptions?: components["schemas"]["LocalizedTextInput"] | null;
             /** Duration Days */
             duration_days?: number | null;
             /** Policies */
             policies?: {
                 [key: string]: unknown;
             } | null;
+            titles?: components["schemas"]["LocalizedTextInput"] | null;
+        };
+        /** TariffOutput */
+        TariffOutput: {
+            /** Access Policy */
+            access_policy?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at: string;
+            /** Description */
+            description?: string | null;
+            descriptions?: components["schemas"]["LocalizedTextOutput"] | null;
+            /** Duration Days */
+            duration_days?: number | null;
+            /** Id */
+            id: string;
+            /** Policies */
+            policies: {
+                [key: string]: unknown;
+            };
+            /** Profiles */
+            profiles: number;
+            /** Revision */
+            revision: number;
             /** Title */
-            title?: string | null;
+            title: string;
+            titles: components["schemas"]["LocalizedTextOutput"];
+            /** Updated At */
+            updated_at: string;
+        };
+        /** TariffPage */
+        TariffPage: {
+            /** Items */
+            items: components["schemas"]["TariffOutput"][];
+            /** Keys */
+            keys: string[];
         };
         /** TelegramBotUsername */
         TelegramBotUsername: {
@@ -11354,6 +11457,26 @@ export interface operations {
             };
         };
     };
+    languages_api_v1_system_languages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanguagesOutput"];
+                };
+            };
+        };
+    };
     onboarding_progress_api_v1_system_onboarding_get: {
         parameters: {
             query?: never;
@@ -12419,7 +12542,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TariffPage"];
                 };
             };
             /** @description Validation Error */
@@ -12454,7 +12577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TariffOutput"];
                 };
             };
             /** @description Validation Error */
@@ -12487,7 +12610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TariffOutput"];
                 };
             };
             /** @description Validation Error */
@@ -12557,7 +12680,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TariffOutput"];
                 };
             };
             /** @description Validation Error */

@@ -248,17 +248,15 @@
             ],
             "title": "Enabled"
           },
-          "gate_message": {
+          "gate_messages": {
             "anyOf": [
               {
-                "maxLength": 500,
-                "type": "string"
+                "$ref": "#/components/schemas/LocalizedTextInput"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Gate Message"
+            ]
           },
           "notify_requests": {
             "anyOf": [
@@ -271,17 +269,15 @@
             ],
             "title": "Notify Requests"
           },
-          "welcome_message": {
+          "welcome_messages": {
             "anyOf": [
               {
-                "maxLength": 500,
-                "type": "string"
+                "$ref": "#/components/schemas/LocalizedTextInput"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Welcome Message"
+            ]
           }
         },
         "title": "AccessRequestPolicyInput",
@@ -296,6 +292,16 @@
           "gate_message": {
             "title": "Gate Message",
             "type": "string"
+          },
+          "gate_messages": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "notify_requests": {
             "anyOf": [
@@ -316,6 +322,16 @@
           "welcome_message": {
             "title": "Welcome Message",
             "type": "string"
+          },
+          "welcome_messages": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1383,15 +1399,12 @@
       "AnnouncementInput": {
         "additionalProperties": false,
         "properties": {
-          "text": {
-            "maxLength": 3000,
-            "minLength": 1,
-            "title": "Text",
-            "type": "string"
+          "texts": {
+            "$ref": "#/components/schemas/LocalizedTextInput"
           }
         },
         "required": [
-          "text"
+          "texts"
         ],
         "title": "AnnouncementInput",
         "type": "object"
@@ -2790,6 +2803,115 @@
           "token"
         ],
         "title": "InviteTokenInput",
+        "type": "object"
+      },
+      "LanguagesOutput": {
+        "properties": {
+          "default": {
+            "title": "Default",
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "languages",
+          "default"
+        ],
+        "title": "LanguagesOutput",
+        "type": "object"
+      },
+      "LocalizedTextInput": {
+        "additionalProperties": false,
+        "description": "A text in several languages: the source language's is required, the\nothers optional; a language without its own text shows the one chosen in\n`fallback`, else the source's.",
+        "properties": {
+          "fallback": {
+            "additionalProperties": {
+              "enum": [
+                "en",
+                "ru"
+              ],
+              "type": "string"
+            },
+            "default": {},
+            "propertyNames": {
+              "enum": [
+                "en",
+                "ru"
+              ]
+            },
+            "title": "Fallback",
+            "type": "object"
+          },
+          "source": {
+            "enum": [
+              "en",
+              "ru"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "texts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "enum": [
+                "en",
+                "ru"
+              ]
+            },
+            "title": "Texts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "source",
+          "texts"
+        ],
+        "title": "LocalizedTextInput",
+        "type": "object"
+      },
+      "LocalizedTextOutput": {
+        "properties": {
+          "fallback": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fallback",
+            "type": "object"
+          },
+          "shown": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Shown",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "texts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Texts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "source",
+          "texts",
+          "fallback",
+          "shown"
+        ],
+        "title": "LocalizedTextOutput",
         "type": "object"
       },
       "LoginInput": {
@@ -6563,6 +6685,16 @@
               }
             ]
           },
+          "descriptions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "duration_days": {
             "anyOf": [
               {
@@ -6586,7 +6718,39 @@
             ],
             "title": "Policies"
           },
-          "title": {
+          "titles": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "TariffInput",
+        "type": "object"
+      },
+      "TariffOutput": {
+        "properties": {
+          "access_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Policy"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
             "anyOf": [
               {
                 "type": "string"
@@ -6595,10 +6759,93 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "title": "Description"
+          },
+          "descriptions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalizedTextOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Days"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "policies": {
+            "additionalProperties": true,
+            "title": "Policies",
+            "type": "object"
+          },
+          "profiles": {
+            "title": "Profiles",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "titles": {
+            "$ref": "#/components/schemas/LocalizedTextOutput"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
           }
         },
-        "title": "TariffInput",
+        "required": [
+          "id",
+          "title",
+          "titles",
+          "policies",
+          "revision",
+          "profiles",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "TariffOutput",
+        "type": "object"
+      },
+      "TariffPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TariffOutput"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "keys"
+        ],
+        "title": "TariffPage",
         "type": "object"
       },
       "TelegramBotUsername": {
@@ -17767,6 +18014,25 @@
         "summary": "Put Installation Defaults"
       }
     },
+    "/api/v1/system/languages": {
+      "get": {
+        "description": "The languages texts can be written in.",
+        "operationId": "languages_api_v1_system_languages_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguagesOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Languages"
+      }
+    },
     "/api/v1/system/onboarding": {
       "get": {
         "operationId": "onboarding_progress_api_v1_system_onboarding_get",
@@ -19691,7 +19957,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TariffPage"
+                }
               }
             },
             "description": "Successful Response"
@@ -19748,7 +20016,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TariffOutput"
+                }
               }
             },
             "description": "Successful Response"
@@ -19864,7 +20134,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TariffOutput"
+                }
               }
             },
             "description": "Successful Response"
@@ -19931,7 +20203,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TariffOutput"
+                }
               }
             },
             "description": "Successful Response"

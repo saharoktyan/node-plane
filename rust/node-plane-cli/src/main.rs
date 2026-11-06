@@ -6,6 +6,7 @@ mod connections;
 mod controller;
 mod events;
 mod installer;
+mod localized;
 mod node_editor;
 mod node_install;
 mod node_maintenance;

@@ -71,7 +71,7 @@ impl App {
                 || state.tariffs.is_some())
     }
 
-    fn open_tariff_id(&self) -> Option<(uuid::Uuid, u64)> {
+    pub(in crate::tui) fn open_tariff_id(&self) -> Option<(uuid::Uuid, u64)> {
         let tariff = self.controller.tariff.as_ref()?;
         Some((
             uuid::Uuid::parse_str(tariff["id"].as_str()?).ok()?,
@@ -90,18 +90,29 @@ impl App {
                 .and_then(|list| list["items"][index]["id"].as_str())
                 .and_then(|id| uuid::Uuid::parse_str(id).ok())
                 .map(Command::Tariff),
-            Control::ControllerTariffNew | Control::ControllerTariffRename => {
-                let (key, title) = if control == Control::ControllerTariffNew {
-                    self.controller.tariff = None;
-                    ("tariff_new", String::new())
+            Control::ControllerTariffNew => {
+                self.controller.tariff = None;
+                self.open_text(
+                    crate::localized::Purpose::TariffNew,
+                    &serde_json::Value::Null,
+                );
+                None
+            }
+            Control::ControllerTariffRename | Control::ControllerTariffDescribe => {
+                let (purpose, field) = if control == Control::ControllerTariffRename {
+                    (crate::localized::Purpose::TariffTitles, "titles")
                 } else {
-                    let title = state.tariff.as_ref().map_or(String::new(), |t| {
-                        t["title"].as_str().unwrap_or("").to_owned()
-                    });
-                    ("tariff_title", title)
+                    (
+                        crate::localized::Purpose::TariffDescriptions,
+                        "descriptions",
+                    )
                 };
-                self.controller.defaults_input = Some((key, title));
-                self.controller.selected = 0;
+                let value = state
+                    .tariff
+                    .as_ref()
+                    .map(|t| t[field].clone())
+                    .unwrap_or_default();
+                self.open_text(purpose, &value);
                 None
             }
             Control::ControllerTariffTerm => self.open_tariff_id().map(|(id, revision)| {
@@ -270,25 +281,6 @@ impl App {
         false
     }
 
-    /// A typed tariff name; false for other inputs.
-    pub(in crate::tui) fn tariff_input(&mut self, key: &str, input: &str) -> bool {
-        let title = input.trim().to_owned();
-        match key {
-            "tariff_new" => self.controller_command(Command::TariffCreate(title)),
-            "tariff_title" => {
-                if let Some((id, revision)) = self.open_tariff_id() {
-                    self.controller_command(Command::TariffSave(
-                        id,
-                        serde_json::json!({"title":title}),
-                        revision,
-                    ));
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
     /// The text and labelled controls of the open tariff view.
     pub(in crate::tui) fn tariff_view(&self) -> (String, Vec<(String, Control)>) {
         let state = &self.controller;
@@ -301,11 +293,14 @@ impl App {
         }
         if let Some(tariff) = &state.tariff {
             let mut text = format!(
-                "Tariff: {}\nProfiles: {}\n\n{}",
+                "Tariff: {}\nProfiles: {}",
                 tariff["title"].as_str().unwrap_or(""),
-                tariff["profiles"],
-                limit_lines(tariff).join("\n")
+                tariff["profiles"]
             );
+            if let Some(description) = tariff["description"].as_str() {
+                text.push_str(&format!("\n\n{description}"));
+            }
+            text.push_str(&format!("\n\n{}", limit_lines(tariff).join("\n")));
             text.push_str("\n\nLimits stay linked to the tariff's profiles; the term and nodes are copied when it is assigned.");
             let mut controls = vec![
                 (
@@ -344,6 +339,7 @@ impl App {
             controls.extend([
                 ("Limits".into(), Control::ControllerTariffLimits),
                 ("Rename".into(), Control::ControllerTariffRename),
+                ("Description".into(), Control::ControllerTariffDescribe),
                 ("Delete tariff".into(), Control::ControllerTariffDelete),
                 back,
             ]);

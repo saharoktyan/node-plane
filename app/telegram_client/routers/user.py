@@ -289,11 +289,8 @@ async def show_home(chat_id: int, user_id: int, bot: Bot, backend: BackendClient
         if pending:
             lines = (tr(locale, 'home.waiting'),)
         elif policy['enabled']:
-            welcome = policy.get('welcome_message')
-            if welcome and welcome != 'Request access to use this bot.':
-                lines = (welcome,)
-            else:
-                lines = (tr(locale, 'home.request_prompt'),)
+            # In the visitor's language, as the controller resolves it.
+            lines = (policy.get('welcome_message') or tr(locale, 'home.request_prompt'),)
         else:
             lines = (policy['gate_message'],)
     else:

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
+from .localized import LANGUAGES
 from .authorization import (
     AccessDenied, Principal, PrincipalKind, SELF_PERMISSIONS, APPROVED_PERMISSIONS,
     ADMIN_PERMISSIONS, require_permission, resolve_actor,
@@ -500,9 +501,34 @@ class SystemCleanupInput(BaseModel):
     confirmation_phrase: StrictStr = Field(min_length=1, max_length=64)
 
 
+class LocalizedTextInput(BaseModel):
+    """A text in several languages: the source language's is required, the
+    others optional; a language without its own text shows the one chosen in
+    `fallback`, else the source's."""
+    model_config = ConfigDict(extra='forbid')
+    source: Literal[LANGUAGES]
+    texts: dict[Literal[LANGUAGES], StrictStr]
+    fallback: dict[Literal[LANGUAGES], Literal[LANGUAGES]] = {}
+
+
+class LocalizedTextOutput(BaseModel):
+    source: str
+    texts: dict[str, str]
+    fallback: dict[str, str]
+    # For every supported language, whose text it shows.
+    shown: dict[str, str]
+
+
+class LanguagesOutput(BaseModel):
+    # The languages this version supports, for texts written in several.
+    languages: list[str]
+    default: str
+
+
 class AnnouncementInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    text: StrictStr = Field(min_length=1, max_length=3000)
+    # Up to 3000 characters in each language.
+    texts: LocalizedTextInput
 
 
 class AnnouncementDeliveryInput(BaseModel):
@@ -651,7 +677,7 @@ class MemberProfileSummary(BaseModel):
     expired: bool
     # Access suspended until the traffic quota resets.
     quota_suspended: bool = False
-    # The profile's tariff: id, title, duration_days, assigned_at.
+    # The profile's tariff: id, title and description in the reader's language, duration_days, assigned_at.
     tariff: dict[str, str | int | None] | None = None
     # The latest renewal request: id, status, created_at, decided_at, days, expires_at.
     renewal: dict[str, str | int | None] | None = None
@@ -1243,10 +1269,34 @@ class ProfileEditInput(BaseModel):
 
 class TariffInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    title: StrictStr | None = None
+    titles: LocalizedTextInput | None = None
+    # An optional description people see with the tariff; null removes it.
+    descriptions: LocalizedTextInput | None = None
     duration_days: StrictInt | None = None
     access_policy: GrantPolicyInput | None = None
     policies: dict[str, object] | None = None
+
+
+class TariffOutput(BaseModel):
+    id: str
+    # The title and description in the reader's language.
+    title: str
+    description: str | None = None
+    titles: LocalizedTextOutput
+    descriptions: LocalizedTextOutput | None = None
+    duration_days: int | None = None
+    access_policy: dict | None = None
+    policies: dict[str, object]
+    revision: int
+    profiles: int
+    created_at: str
+    updated_at: str
+
+
+class TariffPage(BaseModel):
+    items: list[TariffOutput]
+    # Limits a tariff may set.
+    keys: list[str]
 
 
 class ProfileTariffInput(BaseModel):
@@ -1305,8 +1355,9 @@ class AccessDecisionInput(BaseModel):
 class AccessRequestPolicyInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool | None = None
-    gate_message: StrictStr | None = Field(default=None, max_length=500)
-    welcome_message: StrictStr | None = Field(default=None, max_length=500)
+    # The bot's message to visitors while requests are off, and while on.
+    gate_messages: LocalizedTextInput | None = None
+    welcome_messages: LocalizedTextInput | None = None
     notify_requests: StrictBool | None = None
 
 
@@ -1314,8 +1365,12 @@ class AccessRequestPolicyOutput(BaseModel):
     enabled: bool
     # Whether the Telegram bot, which shows these messages, is on.
     telegram: bool = True
+    # In the reader's language.
     gate_message: str
     welcome_message: str
+    # Every language, for those who edit them.
+    gate_messages: LocalizedTextOutput | None = None
+    welcome_messages: LocalizedTextOutput | None = None
     notify_requests: bool | None = None
 
 
@@ -2082,7 +2137,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/announcements/preview')
     def announcement_preview(body: AnnouncementInput, current=Depends(actor)):
-        return announcements.preview(current, body.text)
+        return announcements.preview(current, body.texts.model_dump())
 
     @app.get('/api/v1/announcements')
     def latest_announcement(current=Depends(actor)):
@@ -2319,7 +2374,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/announcements', status_code=202)
     def announcement_create(body: AnnouncementInput, request: Request, current=Depends(actor)):
-        return announcements.queue(current, body.text, header(request,'Idempotency-Key'))
+        return announcements.queue(current, body.texts.model_dump(), header(request,'Idempotency-Key'))
 
     @app.get('/api/v1/announcements/{announcement_id}')
     def announcement_status(announcement_id: UUID, current=Depends(actor)):
@@ -2961,22 +3016,28 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
             profile_id=str(profile_id), revision=revision_header(request), values=body.model_dump())
         return mutation_response(response, result)
 
-    @app.get('/api/v1/tariffs')
+    @app.get('/api/v1/system/languages', response_model=LanguagesOutput)
+    def languages():
+        """The languages texts can be written in."""
+        from .localized import DEFAULT_LANGUAGE, LANGUAGES
+        return {'languages': list(LANGUAGES), 'default': DEFAULT_LANGUAGE}
+
+    @app.get('/api/v1/tariffs', response_model=TariffPage)
     def list_tariffs(current=Depends(actor)):
         from .tariffs import Tariffs
         return Tariffs(db).list(current)
 
-    @app.post('/api/v1/tariffs', status_code=201)
+    @app.post('/api/v1/tariffs', status_code=201, response_model=TariffOutput)
     def create_tariff(body: TariffInput, current=Depends(actor)):
         from .tariffs import Tariffs
         return Tariffs(db).create(current, body.model_dump(mode='json', exclude_unset=True))
 
-    @app.get('/api/v1/tariffs/{tariff_id}')
+    @app.get('/api/v1/tariffs/{tariff_id}', response_model=TariffOutput)
     def get_tariff(tariff_id: UUID, current=Depends(actor)):
         from .tariffs import Tariffs
         return Tariffs(db).get(current, tariff_id)
 
-    @app.patch('/api/v1/tariffs/{tariff_id}')
+    @app.patch('/api/v1/tariffs/{tariff_id}', response_model=TariffOutput)
     def edit_tariff(tariff_id: UUID, body: TariffInput, request: Request, current=Depends(actor)):
         from .tariffs import Tariffs
         return Tariffs(db).edit(current, tariff_id, revision_header(request),

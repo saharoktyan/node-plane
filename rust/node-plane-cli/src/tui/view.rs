@@ -500,8 +500,11 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                         .as_ref()
                         .is_some_and(|m| m.confirmation.is_some())))
             && !(matches!(app.screen, Screen::Controller)
-                && app.controller.announcement_draft.is_some()
-                && app.controller.announcement_job.is_none())
+                && app
+                    .controller
+                    .ltext
+                    .as_ref()
+                    .is_some_and(|e| e.editing.is_some()))
             && !(matches!(app.screen, Screen::Access)
                 && (app.access.editor.as_ref().is_some_and(|editor| {
                     editor.creation_step.is_some() || editor.duration_input.is_some()

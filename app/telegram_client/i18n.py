@@ -613,8 +613,6 @@ CATALOG = {
         'request_policy.current_message': 'Текст для пользователей без доступа: {value}',
         'request_policy.edit_message': 'Изменить текст для пользователей',
         'request_policy.edit_title': 'Текст доступа',
-        'request_policy.edit_prompt': 'Отправьте новый текст (до 500 символов).',
-        'request_policy.invalid': 'Текст не должен быть пустым и должен содержать не более 500 символов.',
         'settings.error_unavailable': 'Backend временно недоступен. Повторите позже.',
         'settings.error_generic': 'Не удалось выполнить действие. Повторите позже.',
         'settings.error_maintenance': 'Контроллер занят обслуживанием или ожидает проверки результата операции. Откройте диагностику и проверьте незавершённые задачи.',
@@ -1367,8 +1365,6 @@ CATALOG = {
         'request_policy.current_message': 'Message shown to users without access: {value}',
         'request_policy.edit_message': 'Edit user message',
         'request_policy.edit_title': 'Access message',
-        'request_policy.edit_prompt': 'Send the new message (up to 500 characters).',
-        'request_policy.invalid': 'The message must not be empty and must be at most 500 characters.',
         'settings.error_unavailable': 'The backend is temporarily unavailable. Try again later.',
         'settings.error_generic': 'Could not complete the action. Try again later.',
         'settings.error_maintenance': 'The controller is performing maintenance or awaiting confirmation of an operation result. Open Diagnostics and check unfinished operations.',
@@ -1853,8 +1849,6 @@ CATALOG['en'].update({
 
 CATALOG["en"].update({
     "announce.title": "Announcement", "announce.compose": "Compose", "announce.last": "Last delivery", "announce.preview": "Preview announcement",
-    "announce.prompt": "Send the announcement text (up to 3000 characters).",
-    "announce.invalid": "Enter between 1 and 3000 characters.",
     "announce.recipients": "Eligible recipients: {count}. The sender is excluded.",
     "announce.send": "Send", "announce.result": "Announcement delivery",
     "announce.notification": "Announcement", "announce.empty": "No eligible recipients.",
@@ -1867,8 +1861,6 @@ CATALOG["en"].update({
 })
 CATALOG["ru"].update({
     "announce.title": "Объявление", "announce.compose": "Написать", "announce.last": "Последняя доставка", "announce.preview": "Предпросмотр объявления",
-    "announce.prompt": "Отправьте текст объявления (до 3000 символов).",
-    "announce.invalid": "Введите от 1 до 3000 символов.",
     "announce.recipients": "Получателей: {count}. Отправитель исключён.",
     "announce.send": "Отправить", "announce.result": "Доставка объявления",
     "announce.notification": "Объявление", "announce.empty": "Нет подходящих получателей.",
@@ -3729,7 +3721,6 @@ CATALOG['en'].update({
     'tariff.empty': 'No tariffs yet.',
     'tariff.create': 'Create tariff',
     'tariff.rename': 'Rename',
-    'tariff.title_prompt': 'Send a tariff name (up to 64 characters).',
     'tariff.profiles': 'profiles: {count}',
     'tariff.profiles_title': 'Profiles',
     'tariff.term': 'Access term',
@@ -3782,7 +3773,6 @@ CATALOG['ru'].update({
     'tariff.empty': 'Тарифов пока нет.',
     'tariff.create': 'Создать тариф',
     'tariff.rename': 'Переименовать',
-    'tariff.title_prompt': 'Отправьте название тарифа (до 64 символов).',
     'tariff.profiles': 'профилей: {count}',
     'tariff.profiles_title': 'Профили',
     'tariff.term': 'Срок доступа',
@@ -4272,4 +4262,33 @@ CATALOG['ru'].update({
     'services.name.vpn': 'VPN', 'services.name.relay': 'Relay', 'services.name.telegram_bot': 'Telegram-бот',
     'services.state.off': 'выключен', 'services.state.active': 'работает', 'services.state.changes_pending': 'применяется',
     'services.state.failed': 'ошибка', 'services.state.removing': 'удаляется',
+})
+
+CATALOG['en'].update({
+    'ltext.language.en': 'English', 'ltext.language.ru': 'Russian',
+    'ltext.source': '{name} · source',
+    'ltext.edit': 'Edit', 'ltext.make_source': 'Make source', 'ltext.remove': 'Remove',
+    'ltext.write': 'Write', 'ltext.show_other': 'Show another',
+    'ltext.shows': 'Shows the {name} text.',
+    'ltext.save': 'Save', 'ltext.clear': 'Remove the text',
+    'ltext.hint': 'Only the source language needs a text. A language without its own shows the one chosen for it.',
+    'ltext.prompt': 'Send the text in {name} (up to {limit} characters).',
+    'ltext.current': 'Now',
+    'ltext.invalid': 'The text is empty or too long.',
+    'tariff.describe': 'Description',
+    'announce.language': '{name} · {count}',
+})
+CATALOG['ru'].update({
+    'ltext.language.en': 'Английский', 'ltext.language.ru': 'Русский',
+    'ltext.source': '{name} · исходный',
+    'ltext.edit': 'Изменить', 'ltext.make_source': 'Сделать исходным', 'ltext.remove': 'Убрать',
+    'ltext.write': 'Написать', 'ltext.show_other': 'Показать другой',
+    'ltext.shows': 'Показывается текст: {name}.',
+    'ltext.save': 'Сохранить', 'ltext.clear': 'Убрать текст',
+    'ltext.hint': 'Обязателен только текст на исходном языке. Язык без своего текста показывает выбранный для него.',
+    'ltext.prompt': 'Отправьте текст на языке «{name}» (до {limit} символов).',
+    'ltext.current': 'Сейчас',
+    'ltext.invalid': 'Текст пустой или слишком длинный.',
+    'tariff.describe': 'Описание',
+    'announce.language': '{name} · {count}',
 })

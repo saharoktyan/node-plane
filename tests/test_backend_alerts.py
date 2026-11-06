@@ -18,6 +18,7 @@ from backend.authorization import (
 )
 
 from tests import test_backend_http as fixture
+from backend.localized import plain
 
 HEALTHY = {
     "inspection_available": True,
@@ -139,7 +140,7 @@ class AlertTests(unittest.TestCase):
         resp = fixture.BackendHTTPTests.provision(self, 102)
         self.assertIn(resp.status_code, (200, 201))
         announcements = AnnouncementService(self.db)
-        queued = announcements.queue(self.actor, 'Hello', str(uuid4()))
+        queued = announcements.queue(self.actor, plain('Hello'), str(uuid4()))
         self.assertEqual(queued['total'], 1)
         self.assertIsNone(announcements.claim(self.transport, str(uuid4())))
 

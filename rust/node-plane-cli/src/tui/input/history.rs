@@ -36,8 +36,8 @@ impl App {
                     "announcement-job"
                 } else if state.announcement_preview.is_some() {
                     "announcement-preview"
-                } else if state.announcement_draft.is_some() {
-                    "announcement-draft"
+                } else if state.ltext.is_some() {
+                    "text-editor"
                 } else if state.announcement_overview.is_some() {
                     "announcements"
                 } else if state.defaults_input.is_some() {

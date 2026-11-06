@@ -25,7 +25,10 @@ impl App {
             self.screen = Screen::Controller;
             self.controller_sidebar = false;
         }
-        if self.activate_tariff(control) || self.activate_relay(control) {
+        if self.activate_localized(control)
+            || self.activate_tariff(control)
+            || self.activate_relay(control)
+        {
             return None;
         }
         match control {
@@ -60,7 +63,8 @@ impl App {
                         Some(serde_json::json!({"loading":true,"items":[],"offset":offset}));
                     self.controller.telegram_result = None;
                     self.controller.defaults_input = None;
-                    self.controller.announcement_draft = None;
+                    self.controller.announcement_texts = None;
+                    self.controller.ltext = None;
                     self.controller.announcement_preview = None;
                     self.controller.workstation_audit = None;
                     self.controller.recovery_history = None;
@@ -128,30 +132,20 @@ impl App {
                 None
             }
             Control::ControllerAnnouncementCompose => {
-                self.controller.announcement_draft = Some(String::new());
-                self.controller.announcement_key = Some(uuid::Uuid::new_v4());
+                self.controller.announcement_texts = None;
+                self.controller.announcement_key = None;
                 self.controller.announcement_preview = None;
                 self.controller.announcement_job = None;
-                self.controller.selected = 0;
-                None
-            }
-            Control::ControllerAnnouncementPreview => {
-                if let Some(text) = self
-                    .controller
-                    .announcement_draft
-                    .clone()
-                    .filter(|v| !v.trim().is_empty())
-                {
-                    self.controller_command(crate::controller::Command::AnnouncementPreview(text));
-                } else {
-                    self.error = "Enter announcement text first.".into();
-                }
+                self.open_text(
+                    crate::localized::Purpose::Announcement,
+                    &serde_json::Value::Null,
+                );
                 None
             }
             Control::ControllerAnnouncementSend => {
-                if let (Some(preview), Some(text)) = (
+                if let (Some(preview), Some(texts)) = (
                     &self.controller.announcement_preview,
-                    &self.controller.announcement_draft,
+                    &self.controller.announcement_texts,
                 ) {
                     let key = *self
                         .controller
@@ -159,14 +153,13 @@ impl App {
                         .get_or_insert_with(uuid::Uuid::new_v4);
                     let recipients = preview["recipients"].as_u64().unwrap_or(0);
                     self.controller_command(crate::controller::Command::AnnouncementCreate(
-                        text.clone(),
+                        texts.clone(),
                         key,
                         recipients,
                     ));
                 }
                 None
             }
-            Control::ControllerAnnouncementInput => None,
             Control::ControllerAnnouncementRefresh => {
                 let id = self
                     .controller
@@ -365,42 +358,27 @@ impl App {
                 self.controller_command(crate::controller::Command::SshKey);
                 None
             }
-            Control::ControllerGateMessage | Control::ControllerBotTitleEdit => {
-                let (key, value) = if control == Control::ControllerGateMessage {
-                    let requests_enabled = self
-                        .controller
-                        .policies
-                        .as_ref()
-                        .is_some_and(|p| p["requests"]["enabled"] == true);
-                    if requests_enabled {
-                        (
-                            "welcome_message",
-                            self.controller
-                                .policies
-                                .as_ref()?
-                                .pointer("/requests/welcome_message")
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("Request access to use this bot."),
-                        )
-                    } else {
-                        (
-                            "gate_message",
-                            self.controller
-                                .policies
-                                .as_ref()?
-                                .pointer("/requests/gate_message")
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or(""),
-                        )
-                    }
-                } else {
+            Control::ControllerGateMessage => {
+                let requests = &self.controller.policies.as_ref()?["requests"];
+                let (purpose, field) = if requests["enabled"] == true {
                     (
-                        "bot_title",
-                        self.controller.bot_title.as_ref()?["title"]
-                            .as_str()
-                            .unwrap_or(""),
+                        crate::localized::Purpose::WelcomeMessage,
+                        "welcome_messages",
                     )
+                } else {
+                    (crate::localized::Purpose::GateMessage, "gate_messages")
                 };
+                let value = requests[field].clone();
+                self.open_text(purpose, &value);
+                None
+            }
+            Control::ControllerBotTitleEdit => {
+                let (key, value) = (
+                    "bot_title",
+                    self.controller.bot_title.as_ref()?["title"]
+                        .as_str()
+                        .unwrap_or(""),
+                );
                 self.controller.defaults_input = Some((key, value.to_string()));
                 self.controller.selected = 0;
                 None
@@ -580,17 +558,8 @@ impl App {
             Control::ControllerTextConfirm => {
                 if self.controller.text_confirmation {
                     self.controller.text_confirmation = false;
-                    if let Some((key, input)) = self.controller.defaults_input.clone() {
-                        if key == "gate_message" || key == "welcome_message" {
-                            self.controller_command(crate::controller::Command::PolicySave(
-                                "access-requests",
-                                serde_json::json!({key: input}),
-                            ));
-                        } else if key == "bot_title" {
-                            self.controller_command(crate::controller::Command::BotTitleSave(
-                                input,
-                            ));
-                        }
+                    if let Some(("bot_title", input)) = self.controller.defaults_input.clone() {
+                        self.controller_command(crate::controller::Command::BotTitleSave(input));
                     }
                 }
                 None
@@ -600,7 +569,7 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
-                    if self.tariff_input(key, &input) || self.relay_input(key, &input) {
+                    if self.relay_input(key, &input) {
                         return None;
                     }
                     if key == "quota_anchor" {
@@ -697,14 +666,6 @@ impl App {
                             id,
                             input.trim().into(),
                         ));
-                        return None;
-                    }
-                    if key == "gate_message" || key == "welcome_message" {
-                        if input.trim().is_empty() || input.chars().count() > 500 {
-                            self.error = "Enter a message from 1 to 500 characters".into();
-                            return None;
-                        }
-                        self.controller.text_confirmation = true;
                         return None;
                     }
                     if key == "bot_title" {
@@ -1279,6 +1240,9 @@ impl App {
                     self.controller.text_confirmation = false;
                     return None;
                 }
+                if self.localized_back() {
+                    return None;
+                }
                 if self.controller.defaults_input.is_none()
                     && (self.relay_back() || self.tariff_back())
                 {
@@ -1338,12 +1302,13 @@ impl App {
                     return None;
                 }
                 if self.controller.announcement_preview.take().is_some() {
-                    self.controller.selected = 0;
-                    return None;
-                }
-                if self.controller.announcement_draft.take().is_some() {
-                    self.controller.announcement_key = None;
-                    self.controller.selected = 0;
+                    // Back to the texts that were previewed.
+                    let texts = self
+                        .controller
+                        .announcement_texts
+                        .clone()
+                        .unwrap_or_default();
+                    self.open_text(crate::localized::Purpose::Announcement, &texts);
                     return None;
                 }
                 if self.controller.announcement_overview.take().is_some() {
@@ -1555,7 +1520,8 @@ impl App {
         self.controller.backup_catalog = None;
         self.controller.backup_detail = None;
         self.controller.announcement_overview = None;
-        self.controller.announcement_draft = None;
+        self.controller.announcement_texts = None;
+        self.controller.ltext = None;
         self.controller.announcement_preview = None;
         self.controller.announcement_job = None;
         self.controller_viewport.set(0);
@@ -1625,6 +1591,14 @@ impl App {
                 .map(|(_, control)| control)
                 .collect();
         }
+        if state.ltext.is_some() {
+            return self
+                .localized_view()
+                .1
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect();
+        }
         if state.history_detail.is_some() {
             return vec![Control::ControllerBack];
         }
@@ -1652,13 +1626,6 @@ impl App {
         }
         if state.announcement_preview.is_some() {
             return vec![Control::ControllerBack, Control::ControllerAnnouncementSend];
-        }
-        if state.announcement_draft.is_some() {
-            return vec![
-                Control::ControllerAnnouncementInput,
-                Control::ControllerAnnouncementPreview,
-                Control::ControllerBack,
-            ];
         }
         if state.announcement_overview.is_some() {
             return vec![

@@ -43,8 +43,6 @@ GET /api/v1/system/updates
 GET /api/v1/system/updates/jobs/{job_id}
 GET /api/v1/system/updates/rollout
 GET /api/v1/system/updates/versions
-GET /api/v1/tariffs
-GET /api/v1/tariffs/{tariff_id}
 GET /api/v1/vpn-policies/installation
 GET /health/live
 GET /health/ready
@@ -55,7 +53,6 @@ PATCH /api/v1/system/backups/preferences
 PATCH /api/v1/system/controller-address
 PATCH /api/v1/system/traffic/preferences
 PATCH /api/v1/system/updates/preferences
-PATCH /api/v1/tariffs/{tariff_id}
 PATCH /api/v1/vpn-policies/installation
 POST /api/v1/accounts
 POST /api/v1/announcements
@@ -100,5 +97,4 @@ POST /api/v1/system/updates/jobs/{job_id}/dismiss
 POST /api/v1/system/updates/jobs/{job_id}/recheck
 POST /api/v1/system/updates/jobs/{job_id}/resume
 POST /api/v1/system/updates/run
-POST /api/v1/tariffs
 PUT /api/v1/system/installation-defaults

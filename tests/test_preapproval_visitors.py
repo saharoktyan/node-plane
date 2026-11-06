@@ -218,7 +218,8 @@ class PreapprovalVisitorTests(unittest.TestCase):
         # Admin disables access requests
         patch_pol = self.client.patch('/api/v1/system/access-requests',
             headers=self.headers_for(101),
-            json={'enabled': False, 'gate_message': 'Gate closed', 'welcome_message': 'Closed welcome'})
+            json={'enabled': False, 'gate_messages': {'source': 'en', 'texts': {'en': 'Gate closed'}},
+                  'welcome_messages': {'source': 'en', 'texts': {'en': 'Closed welcome'}}})
         self.assertEqual(patch_pol.status_code, 200, patch_pol.text)
 
         # Visitor sees disabled policy

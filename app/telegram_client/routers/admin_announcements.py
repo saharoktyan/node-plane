@@ -1,24 +1,23 @@
-"""Compose/preview/result screens; backend owns immutable delivery work."""
+"""Compose/preview/result screens; backend owns immutable delivery work.
 
-from contextlib import suppress
+The text is written in the languages the administrator wants
+(`localized_editor`); each recipient gets their language's text, or the one
+chosen for it. The preview shows how many read each language and what.
+"""
+
 from uuid import uuid4
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table
+from . import localized_editor
 from .common import render, schedule_refresh
 
 router = Router()
-
-
-class Compose(StatesGroup):
-    text = State()
 
 
 def button(locale, key, data, *, style=None):
@@ -29,15 +28,23 @@ async def preview(chat_id, message_id, user_id, bot, backend, state):
     data = await state.get_data()
     locale = normalize_locale(data.get("locale"))
     draft = data["announcement_draft"]
-    value = await backend.announcement_preview(user_id, draft["text"])
+    value = await backend.announcement_preview(user_id, draft["texts"])
+    texts = value["texts"]
+    sections = [Section(tr(locale, 'announce.rich.audience'),
+                        (tr(locale, 'announce.recipients', count=value['recipients']),))]
+    for language, count in value["languages"].items():
+        name = localized_editor.language_name(locale, language)
+        source = texts["shown"][language]
+        head = tr(locale, 'announce.language', name=name, count=count)
+        lines = (texts["texts"][source],) if source == language else (
+            tr(locale, 'ltext.shows', name=localized_editor.language_name(locale, source)),)
+        sections.append(Section(head, lines, collapsed=source != language))
     await render(
         bot,
         chat_id,
         Screen(
             tr(locale, "announce.preview"),
-            sections=(Section(tr(locale, 'announce.rich.message'), (value['text'],)),
-                Section(tr(locale, 'announce.rich.audience'),
-                    (tr(locale, 'announce.recipients', count=value['recipients']),))),
+            sections=tuple(sections),
             embedded_buttons=True, navigation=True,
         ),
         [
@@ -121,34 +128,11 @@ async def announcement_cb(
             me = await backend.me(query.from_user.id)
             if "settings.manage" not in me["permissions"]:
                 raise BackendError("permission_denied", 403)
-            data = await state.get_data()
-            if query.data == "announce_compose":
+            draft = (await state.get_data()).get("announcement_draft") if query.data == "announce_edit" else None
+            if not draft:
                 await state.update_data(announcement_draft=None)
-            await state.set_state(Compose.text)
-            draft = (
-                data.get("announcement_draft")
-                if query.data == "announce_edit"
-                else None
-            )
-            navigation = [button(locale, "back", "announce_menu")]
-            if draft:
-                navigation.append(
-                    button(locale, "announce.preview", "announce_preview", style='primary')
-                )
-            rows = [navigation]
-            await render(
-                bot,
-                query.message.chat.id,
-                Screen(
-                    tr(locale, "announce.title"),
-                    (tr(locale, "announce.prompt"),),
-                    sections=(Section(tr(locale, 'announce.rich.draft'), (draft['text'],)),) if draft else (),
-                    embedded_buttons=True, navigation=True,
-                ),
-                rows,
-                state,
-                query.message.message_id,
-            )
+            await localized_editor.open_editor(query.message.chat.id, query.from_user.id, query.message.message_id,
+                                               bot, backend, state, 'announcement', draft and draft["texts"])
         elif query.data == "announce_preview":
             await state.set_state(None)
             await preview(
@@ -165,7 +149,7 @@ async def announcement_cb(
             if not draft or draft["nonce"] != query.data.split(":")[1]:
                 return
             value = await backend.announcement_create(
-                query.from_user.id, draft["text"], draft["key"]
+                query.from_user.id, draft["texts"], draft["key"]
             )
             await result(query, bot, backend, state, value["id"])
         else:
@@ -181,46 +165,14 @@ async def announcement_cb(
         )
 
 
-@router.message(Compose.text, F.text)
-async def announcement_text(
-    message: Message, bot: Bot, backend: BackendClient, state: FSMContext
-):
-    if not message.from_user or message.chat.type != "private":
-        return
-    data = await state.get_data()
-    locale = normalize_locale(data.get("locale"))
-    with suppress(TelegramAPIError):
-        await message.delete()
-    text = (message.text or "").strip()
-    if not 1 <= len(text) <= 3000:
-        await render(
-            bot,
-            message.chat.id,
-            Screen(tr(locale, "announce.title"), (tr(locale, "announce.invalid"),), embedded_buttons=True, navigation=True),
-            [[button(locale, "back", "announce_menu")]],
-            state,
-            data.get("control_message_id"),
-        )
-        return
-    await state.update_data(
-        announcement_draft={"text": text, "key": str(uuid4()), "nonce": uuid4().hex[:8]}
-    )
-    await state.set_state(None)
-    try:
-        await preview(
-            message.chat.id,
-            data.get("control_message_id"),
-            message.from_user.id,
-            bot,
-            backend,
-            state,
-        )
-    except BackendError:
-        await render(
-            bot,
-            message.chat.id,
-            Screen(tr(locale, "announce.title"), (tr(locale, "announce.error"),), embedded_buttons=True, navigation=True),
-            [[button(locale, "back", "admin_menu")]],
-            state,
-            data.get("control_message_id"),
-        )
+async def _save(chat_id, user_id, message_id, bot, backend, state, value):
+    """The written text becomes the draft to preview; a changed text is a new
+    announcement, so it gets a new key."""
+    draft = (await state.get_data()).get("announcement_draft")
+    if not draft or draft["texts"] != value:
+        draft = {"texts": value, "key": str(uuid4()), "nonce": uuid4().hex[:8]}
+    await state.update_data(announcement_draft=draft)
+    await preview(chat_id, message_id, user_id, bot, backend, state)
+
+
+localized_editor.register('announcement', localized_editor.Context('announce.title', 'announce_menu', 3000, _save))

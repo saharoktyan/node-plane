@@ -11,6 +11,10 @@ from backend.authorization import AccessDenied, Principal, PrincipalKind, resolv
 from backend.identity_repository import SQLIdentityRepository
 
 
+
+def text(value, source='en', **others):
+    return {'source': source, 'texts': {source: value, **others}}
+
 class AccessRequestServiceTests(unittest.TestCase):
     def setUp(self):
         self.db = Database()
@@ -95,25 +99,19 @@ class AccessRequestServiceTests(unittest.TestCase):
             'enabled': True,
             'telegram': True,
             'gate_message': 'Authorization is required to use this bot.',
+            'gate_messages': None,
             'notify_requests': None,
             'welcome_message': 'Request access to use this bot.',
+            'welcome_messages': None,
         })
         updated = self.requests.update_policy(self.admin_actor, enabled=False,
-            gate_message='Contact the administrator.', notify_requests=False)
-        self.assertEqual(updated, {
-            'enabled': False,
-            'telegram': True,
-            'gate_message': 'Contact the administrator.',
-            'notify_requests': False,
-            'welcome_message': 'Request access to use this bot.',
-        })
-        self.assertEqual(self.requests.policy(self.member_actor), {
-            'enabled': False,
-            'telegram': True,
-            'gate_message': 'Contact the administrator.',
-            'notify_requests': None,
-            'welcome_message': 'Request access to use this bot.',
-        })
+            gate_messages=text('Contact the administrator.'), notify_requests=False)
+        self.assertEqual((updated['enabled'], updated['gate_message'], updated['notify_requests']),
+                         (False, 'Contact the administrator.', False))
+        self.assertEqual(updated['gate_messages']['texts'], {'en': 'Contact the administrator.'})
+        policy = self.requests.policy(self.member_actor)
+        self.assertEqual((policy['enabled'], policy['gate_message'], policy['gate_messages']),
+                         (False, 'Contact the administrator.', None))
         self.assertFalse(self.requests.policy(self.admin_actor)['notify_requests'])
         with self.assertRaises(AccessDenied) as error:
             self.requests.create(self.member_actor, str(uuid4()))
@@ -121,40 +119,29 @@ class AccessRequestServiceTests(unittest.TestCase):
         with self.assertRaises(AccessDenied):
             self.requests.update_policy(self.member_actor, enabled=True)
 
-    def test_welcome_message_persistence_mode_switch_validation_and_permissions(self):
-        # Update welcome_message independently
-        updated = self.requests.update_policy(self.admin_actor, welcome_message='Welcome to our private bot!')
+    def test_messages_in_several_languages_persist_across_mode_switches(self):
+        updated = self.requests.update_policy(self.admin_actor, welcome_messages=text(
+            'Welcome to our private bot!', ru='Добро пожаловать!'))
         self.assertEqual(updated['welcome_message'], 'Welcome to our private bot!')
         self.assertEqual(updated['gate_message'], 'Authorization is required to use this bot.')
-
-        # Mode switch to disabled retains welcome_message
-        disabled = self.requests.update_policy(self.admin_actor, enabled=False, gate_message='Registration closed.')
-        self.assertFalse(disabled['enabled'])
-        self.assertEqual(disabled['gate_message'], 'Registration closed.')
-        self.assertEqual(disabled['welcome_message'], 'Welcome to our private bot!')
-
-        # Mode switch back to enabled retains gate_message
+        disabled = self.requests.update_policy(self.admin_actor, enabled=False,
+                                               gate_messages=text('Registration closed.'))
+        self.assertEqual((disabled['gate_message'], disabled['welcome_message']),
+                         ('Registration closed.', 'Welcome to our private bot!'))
         enabled = self.requests.update_policy(self.admin_actor, enabled=True)
-        self.assertTrue(enabled['enabled'])
         self.assertEqual(enabled['gate_message'], 'Registration closed.')
-        self.assertEqual(enabled['welcome_message'], 'Welcome to our private bot!')
-
-        # Public policy read sees the updated welcome_message
-        self.assertEqual(self.requests.policy(self.member_actor)['welcome_message'], 'Welcome to our private bot!')
-
-        # Validation: empty or whitespace-only
-        with self.assertRaises(AccessDenied) as ctx:
-            self.requests.update_policy(self.admin_actor, welcome_message='   ')
-        self.assertEqual(ctx.exception.code, 'invalid_input')
-
-        # Validation: exceeds 500 characters
-        with self.assertRaises(AccessDenied) as ctx:
-            self.requests.update_policy(self.admin_actor, welcome_message='a' * 501)
-        self.assertEqual(ctx.exception.code, 'invalid_input')
-
-        # Nonadmin permission preservation
+        # A Russian reader gets the Russian text; the gate message has only English.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET locale='ru' WHERE id=?", (self.member_actor.account.id,))
+        policy = self.requests.policy(self.member_actor)
+        self.assertEqual((policy['welcome_message'], policy['gate_message']),
+                         ('Добро пожаловать!', 'Registration closed.'))
+        for value in (text('   '), text('a' * 501)):
+            with self.assertRaises(AccessDenied) as ctx:
+                self.requests.update_policy(self.admin_actor, welcome_messages=value)
+            self.assertEqual(ctx.exception.code, 'invalid_localized_text')
         with self.assertRaises(AccessDenied):
-            self.requests.update_policy(self.member_actor, welcome_message='Hacked')
+            self.requests.update_policy(self.member_actor, welcome_messages=text('Hacked'))
 
     def test_bot_title_is_backend_owned_and_admin_managed(self):
         self.assertEqual(self.system_settings.bot_title(self.member_actor),

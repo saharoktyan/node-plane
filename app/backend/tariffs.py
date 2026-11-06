@@ -1,5 +1,9 @@
 """Tariffs: named templates of profile limits, an access term and nodes.
 
+The title and an optional description are texts in several languages
+(`backend.localized`); `title` keeps the source language's, which orders
+tariffs and must be unique.
+
 Limits stay linked: a tariff's values are a policy layer between the
 installation and the profile (backend.vpn_policies.effective), so editing
 a tariff changes every profile on it, and a profile's own values still win.
@@ -14,8 +18,9 @@ from uuid import UUID, uuid4
 
 from .authorization import AccessDenied, require_permission
 
+# In the table's order: r0047 added the texts at the end.
 TARIFF_COLUMNS = ['id', 'title', 'canonical', 'duration_days', 'access_json', 'policies_json',
-                  'revision', 'created_at', 'updated_at']
+                  'revision', 'created_at', 'updated_at', 'titles_json', 'description_json']
 ASSIGNMENT_COLUMNS = ['profile_id', 'tariff_id', 'assigned_at']
 # What an assignment does with the profile's access term.
 EXPIRY = ('keep', 'start', 'extend')
@@ -24,6 +29,8 @@ EXPIRY = ('keep', 'start', 'extend')
 def create_schema(conn):
     from db.migration_revisions.r0022_tariffs import upgrade
     upgrade(conn)
+    from db.migration_revisions.r0047_localized_texts import tariff_columns
+    tariff_columns(conn)
 
 
 def policy_keys():
@@ -44,8 +51,22 @@ def canonical(title):
     return ' '.join(unicodedata.normalize('NFKC', title).casefold().split())
 
 
-def public(row, profiles=0):
-    return {'id': row['id'], 'title': row['title'], 'duration_days': row['duration_days'],
+def texts(row, language):
+    """The title and description a person with this language reads."""
+    from . import localized
+    titles = localized.loads(row['titles_json'], localized.plain(row['title']))
+    description = localized.loads(row['description_json'])
+    return {'title': localized.resolve(titles, language),
+            'description': localized.resolve(description, language) if description else None}
+
+
+def public(row, profiles=0, language=None):
+    from . import localized
+    titles = localized.loads(row['titles_json'], localized.plain(row['title']))
+    description = localized.loads(row['description_json'])
+    return {'id': row['id'], **texts(row, language), 'titles': localized.public(titles),
+            'descriptions': localized.public(description) if description else None,
+            'duration_days': row['duration_days'],
             'access_policy': json.loads(row['access_json']) if row['access_json'] else None,
             'policies': json.loads(row['policies_json']), 'revision': row['revision'],
             'profiles': profiles, 'created_at': row['created_at'], 'updated_at': row['updated_at']}
@@ -67,15 +88,19 @@ def _policies(values):
 
 
 def _fields(conn, values, *, partial):
-    allowed = {'title', 'duration_days', 'access_policy', 'policies'}
-    if not isinstance(values, dict) or set(values) - allowed or (not partial and 'title' not in values):
+    from . import localized
+    allowed = {'titles', 'descriptions', 'duration_days', 'access_policy', 'policies'}
+    if not isinstance(values, dict) or set(values) - allowed or (not partial and 'titles' not in values):
         raise AccessDenied('invalid_input', 422)
     fields = {}
-    if 'title' in values:
-        title = values['title']
-        if not isinstance(title, str) or not title.strip() or len(title) > 64:
-            raise AccessDenied('invalid_input', 422)
-        fields['title'], fields['canonical'] = title.strip(), canonical(title)
+    if 'titles' in values:
+        titles = localized.checked(values['titles'], max_length=64, multiline=False)
+        title = titles['texts'][titles['source']]
+        fields['title'], fields['canonical'], fields['titles_json'] = title, canonical(title), localized.dumps(titles)
+    if 'descriptions' in values:
+        description = values['descriptions']
+        fields['description_json'] = None if description is None else localized.dumps(
+            localized.checked(description, max_length=1000))
     if 'duration_days' in values:
         days = values['duration_days']
         if days is not None and (type(days) is not int or not 1 <= days <= 3650):
@@ -154,10 +179,11 @@ class Tariffs:
 
     def list(self, actor):
         require_permission(actor, 'profiles.manage')
+        from .localized import actor_language
         with self.db.connect() as conn:
-            counts = self._counts(conn)
+            counts, language = self._counts(conn), actor_language(conn, actor)
             rows = conn.execute('SELECT * FROM backend_tariffs ORDER BY canonical').fetchall()
-            return {'items': [public(row, counts.get(row['id'], 0)) for row in rows], 'keys': policy_keys()}
+            return {'items': [public(row, counts.get(row['id'], 0), language) for row in rows], 'keys': policy_keys()}
 
     def get(self, actor, tariff_id):
         require_permission(actor, 'profiles.manage')
@@ -165,7 +191,8 @@ class Tariffs:
             row = conn.execute('SELECT * FROM backend_tariffs WHERE id=?', (str(tariff_id),)).fetchone()
             if row is None:
                 raise AccessDenied('resource_not_found', 404)
-            return public(row, self._counts(conn).get(row['id'], 0))
+            from .localized import actor_language
+            return public(row, self._counts(conn).get(row['id'], 0), actor_language(conn, actor))
 
     def create(self, actor, values):
         require_permission(actor, 'settings.manage')
@@ -176,11 +203,14 @@ class Tariffs:
             if conn.execute('SELECT 1 FROM backend_tariffs WHERE canonical=?', (fields['canonical'],)).fetchone():
                 raise AccessDenied('tariff_exists', 409)
             now = datetime.now(timezone.utc).isoformat()
-            row = {'id': str(uuid4()), 'duration_days': None, 'access_json': None, 'policies_json': '{}',
+            row = {'id': str(uuid4()), 'description_json': None, 'duration_days': None, 'access_json': None,
+                   'policies_json': '{}',
                    'revision': 1, 'created_at': now, 'updated_at': now, **fields}
             conn.execute(f'''INSERT INTO backend_tariffs ({','.join(TARIFF_COLUMNS)})
                 VALUES ({','.join('?' for _ in TARIFF_COLUMNS)})''', tuple(row[c] for c in TARIFF_COLUMNS))
-            return public(conn.execute('SELECT * FROM backend_tariffs WHERE id=?', (row['id'],)).fetchone())
+            from .localized import actor_language
+            return public(conn.execute('SELECT * FROM backend_tariffs WHERE id=?', (row['id'],)).fetchone(),
+                          language=actor_language(conn, actor))
 
     def edit(self, actor, tariff_id, revision, values):
         require_permission(actor, 'settings.manage')
@@ -205,7 +235,8 @@ class Tariffs:
             conn.execute(f'UPDATE backend_tariffs SET {assignments}, revision=revision+1, updated_at=? WHERE id=?',
                          (*(fields[f] for f in sorted(fields)), datetime.now(timezone.utc).isoformat(), str(tariff_id)))
             row = conn.execute('SELECT * FROM backend_tariffs WHERE id=?', (str(tariff_id),)).fetchone()
-            return public(row, self._counts(conn).get(row['id'], 0))
+            from .localized import actor_language
+            return public(row, self._counts(conn).get(row['id'], 0), actor_language(conn, actor))
 
     def delete(self, actor, tariff_id, revision):
         require_permission(actor, 'settings.manage')
@@ -225,8 +256,9 @@ class Tariffs:
             conn.execute('DELETE FROM backend_tariffs WHERE id=?', (str(tariff_id),))
             return {'deleted_tariff_id': str(tariff_id)}
 
-    def of_profile(self, conn, profile_id):
+    def of_profile(self, conn, profile_id, language=None):
+        """The profile's tariff in the reader's language, or None."""
         row = conn.execute('''SELECT t.*, a.assigned_at FROM backend_profile_tariffs a
             JOIN backend_tariffs t ON t.id=a.tariff_id WHERE a.profile_id=?''', (profile_id,)).fetchone()
-        return None if row is None else {'id': row['id'], 'title': row['title'],
+        return None if row is None else {'id': row['id'], **texts(row, language),
                                          'duration_days': row['duration_days'], 'assigned_at': row['assigned_at']}

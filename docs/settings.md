@@ -16,7 +16,11 @@ Edit values, review the draft and save. Reset draft discards unsaved changes. De
 
 Traffic collection is controlled by an administrator. Enable it to collect supported profile traffic statistics. Server cards also expose monthly aggregate traffic when available. Disabling profile collection affects the user-facing statistics; counters are operational observations, not a quota enforcement system.
 
-**Requests settings** controls access requests and automatic approval rules. Check expiry and access grants when configuring approval; approving an account does not explain every protocol grant by itself.
+**Requests settings** controls access requests and automatic approval rules. Check expiry and access grants when configuring approval; approving an account does not explain every protocol grant by itself. It also holds the bot's messages to visitors: the **welcome message** while requests are on, the **stub message** while they are off.
+
+## Texts in several languages
+
+Tariff names and descriptions, announcements and the visitor messages are written per language, in every language this version supports (now English and Russian). Only the first text you write, the source, is required. A language without its own text shows the source's, or another written translation you choose with **Show another**, so people with that language still get the message. **Make source** moves the source to another written language. The bot and Workstation share the same editor; `GET /api/v1/system/languages` lists the languages, and the API takes such a text as `{"source": "en", "texts": {...}, "fallback": {"ru": "en"}}`.
 
 ## Bot name and SSH key
 
@@ -32,6 +36,6 @@ The relay is the web cabinet's public address. It runs as a service on a node wi
 
 ## Announcements
 
-Choose recipients, write the message and preview it before sending. The preview shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
+Choose recipients, write the message in one or more languages and preview it before sending. Each recipient gets the text in their language, or the one chosen for it; the preview shows how many read each language and what. It also shows how many recipients get it in Telegram and how many only in the Inbox (people without Telegram, or every recipient while the bot is off). Inspect delivery results. Recipients can close a received message and reopen it in Notifications; dismiss removes it from their list.
 
 For backups, alerts, audits and cleanup, see [Maintenance](maintenance.md).

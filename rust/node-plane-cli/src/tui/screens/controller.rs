@@ -420,9 +420,11 @@ pub(in crate::tui) fn draw_controller(
     }
 
     let right = if app.controller.defaults_input.is_some()
-        || (app.controller.announcement_draft.is_some()
-            && app.controller.announcement_preview.is_none()
-            && app.controller.announcement_job.is_none())
+        || app
+            .controller
+            .ltext
+            .as_ref()
+            .is_some_and(|e| e.editing.is_some())
     {
         let popup = centered(
             right,
@@ -689,6 +691,8 @@ pub(in crate::tui) fn draw_controller(
                 ));
             }
         }
+    } else if state.ltext.is_some() {
+        (text, controls) = app.localized_view();
     } else if let Some(job) = &state.announcement_job {
         let counts = &job["counts"];
         text = format!(
@@ -713,9 +717,9 @@ pub(in crate::tui) fn draw_controller(
         ]);
     } else if let Some(preview) = &state.announcement_preview {
         text = format!(
-            "Announcement preview · {}\n\n{}",
+            "Announcement preview · {}{}",
             preview_recipients(preview),
-            preview["text"].as_str().unwrap_or("")
+            preview_languages(preview)
         );
         controls.extend([
             ("Back".into(), Control::ControllerBack),
@@ -724,14 +728,6 @@ pub(in crate::tui) fn draw_controller(
                 Control::ControllerAnnouncementSend,
             ),
         ]);
-    } else if let Some(draft) = &state.announcement_draft {
-        text = "Write an announcement (up to 3000 characters).\nThe message will be sent to eligible users.".into();
-        controls.extend([
-            ("Message".into(), Control::ControllerAnnouncementInput),
-            ("Preview".into(), Control::ControllerAnnouncementPreview),
-            ("Back".into(), Control::ControllerBack),
-        ]);
-        let _ = draft;
     } else if let Some(overview) = &state.announcement_overview {
         if let Some(last) = overview.get("last_job").filter(|v| v.is_object()) {
             let counts = &last["counts"];
@@ -1555,10 +1551,7 @@ pub(in crate::tui) fn draw_controller(
         }
         return;
     }
-    if let Some(draft) = &state.announcement_draft
-        && state.announcement_preview.is_none()
-        && state.announcement_job.is_none()
-    {
+    if let Some((_, draft)) = state.ltext.as_ref().and_then(|e| e.editing.as_ref()) {
         let rows = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(3),
@@ -1570,22 +1563,21 @@ pub(in crate::tui) fn draw_controller(
         draw_multiline(
             frame,
             rows[1],
-            "Message",
+            "Text",
             draft,
-            app.controller_controls().get(state.selected)
-                == Some(&Control::ControllerAnnouncementInput),
+            app.controller_controls().get(state.selected) == Some(&Control::ControllerTextInput),
             app,
         );
         hits.push(Hit {
             area: rows[1],
-            control: Control::ControllerAnnouncementInput,
+            control: Control::ControllerTextInput,
         });
         let buttons = Layout::horizontal([Constraint::Fill(1); 2])
             .spacing(1)
             .split(rows[2]);
         for (index, (label, control)) in [
-            ("Cancel", Control::ControllerBack),
-            ("Preview", Control::ControllerAnnouncementPreview),
+            ("Back", Control::ControllerBack),
+            ("Done", Control::ControllerTextDone),
         ]
         .into_iter()
         .enumerate()
@@ -1880,14 +1872,6 @@ pub(in crate::tui) fn draw_controller(
                     &state.defaults_input.as_ref().unwrap().1,
                     index == state.selected,
                 );
-            } else if control == Control::ControllerAnnouncementInput {
-                draw_field(
-                    frame,
-                    rect,
-                    label,
-                    state.announcement_draft.as_deref().unwrap_or(""),
-                    index == state.selected,
-                );
             } else if control == Control::ControllerPhrase {
                 draw_field(frame, rect, label, &state.phrase, index == state.selected);
             } else if choice_row_label(control).is_some()
@@ -2071,6 +2055,26 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
 }
 
 /// Announcement recipients, split by channel when some are reached only in the Inbox.
+/// How many read each language, and what: their own text or whose.
+pub(in crate::tui) fn preview_languages(preview: &serde_json::Value) -> String {
+    let texts = &preview["texts"];
+    let Some(languages) = preview["languages"].as_object() else {
+        return String::new();
+    };
+    let mut text = String::new();
+    for (language, count) in languages {
+        let name = crate::localized::language_name(language);
+        let shown = texts["shown"][language].as_str().unwrap_or(language);
+        let body = if shown == language {
+            texts["texts"][language].as_str().unwrap_or("").to_owned()
+        } else {
+            format!("Shows the {} text.", crate::localized::language_name(shown))
+        };
+        text.push_str(&format!("\n\n{name} · {count}\n{body}"));
+    }
+    text
+}
+
 pub(in crate::tui) fn preview_recipients(preview: &serde_json::Value) -> String {
     let total = preview["recipients"].as_u64().unwrap_or(0);
     match preview["telegram"].as_u64() {

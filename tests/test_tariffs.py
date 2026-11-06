@@ -7,6 +7,10 @@ from backend.vpn_policies import effective
 from tests import test_connection_limits as fixture
 
 
+def titles(text, source='en', **others):
+    return {'source': source, 'texts': {source: text, **others}}
+
+
 class TariffTests(fixture.Fixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -18,7 +22,7 @@ class TariffTests(fixture.Fixture, unittest.TestCase):
 
     def tariff(self, **fields):
         response = self.client.post('/api/v1/tariffs', headers=self.headers_for(),
-                                    json={'title': 'Basic', **fields})
+                                    json={'titles': titles('Basic'), **fields})
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()
 
@@ -110,12 +114,16 @@ class TariffTests(fixture.Fixture, unittest.TestCase):
         self.assertEqual(self.resolved('speed.up_kbit')['speed.up_kbit'], 1000)
 
     def test_tariffs_are_validated_unique_and_kept_while_in_use(self):
-        for body in ({'title': ' '}, {'title': 'X', 'duration_days': 0}, {'title': 'X', 'policies': {'quota.timezone': 'UTC'}},
-                     {'title': 'X', 'policies': {'speed.up_kbit': -1}}, {'title': 'X', 'policies': {'unknown': 1}}):
+        for body in ({'titles': titles(' ')}, {'titles': titles('X', ru='a\nb')},
+                     {'titles': {'source': 'ru', 'texts': {'en': 'X'}}},
+                     {'titles': titles('X'), 'duration_days': 0},
+                     {'titles': titles('X'), 'policies': {'quota.timezone': 'UTC'}},
+                     {'titles': titles('X'), 'policies': {'speed.up_kbit': -1}},
+                     {'titles': titles('X'), 'policies': {'unknown': 1}}):
             response = self.client.post('/api/v1/tariffs', headers=self.headers_for(), json=body)
             self.assertEqual(response.status_code, 422, body)
         tariff = self.tariff()
-        duplicate = self.client.post('/api/v1/tariffs', headers=self.headers_for(), json={'title': ' basic '})
+        duplicate = self.client.post('/api/v1/tariffs', headers=self.headers_for(), json={'titles': titles(' basic ', 'ru')})
         self.assertEqual(duplicate.json()['error']['code'], 'tariff_exists')
         stale = self.client.patch(f"/api/v1/tariffs/{tariff['id']}", headers=self.headers_for(5),
                                   json={'duration_days': 7})
@@ -129,6 +137,24 @@ class TariffTests(fixture.Fixture, unittest.TestCase):
         self.assertEqual(listed['items'], [])
         self.assertIn('speed.up_kbit', listed['keys'])
         self.assertNotIn('quota.timezone', listed['keys'])
+
+    def test_titles_and_descriptions_in_several_languages(self):
+        tariff = self.tariff(titles=titles('Month', ru='Месяц'), duration_days=30,
+                             descriptions={'source': 'en', 'texts': {'en': 'Two devices.'}})
+        self.assertEqual((tariff['title'], tariff['description']), ('Month', 'Two devices.'))
+        self.assertEqual(tariff['titles']['shown'], {'en': 'en', 'ru': 'ru'})
+        self.assertEqual(tariff['descriptions']['shown'], {'en': 'en', 'ru': 'en'})
+        self.assertEqual(self.assign(tariff['id']).status_code, 200)
+        # The owner reads it in their language.
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET locale='ru' WHERE id=(SELECT owner_account_id FROM backend_profiles WHERE id=?)",
+                         (self.profile,))
+        from backend.profiles import ProfileRepository
+        summary = ProfileRepository(self.db).summary(self.profile, 'ru')
+        self.assertEqual((summary['tariff']['title'], summary['tariff']['description']), ('Месяц', 'Two devices.'))
+        edited = self.client.patch(f"/api/v1/tariffs/{tariff['id']}", headers=self.headers_for(1),
+                                   json={'descriptions': None})
+        self.assertIsNone(edited.json()['descriptions'], edited.text)
 
 
 if __name__ == '__main__':

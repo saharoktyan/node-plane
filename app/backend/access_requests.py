@@ -9,6 +9,17 @@ from .authorization import AccessDenied, account_permissions, require_permission
 from .profiles import _cursor, _page
 from .telegram_visitors import TelegramVisitor
 
+# The bot's messages to visitors until an administrator writes their own:
+# while requests are off (`gate_message`) and while they are on.
+MESSAGES = {
+    'gate_message': {'source': 'en', 'fallback': {}, 'texts': {
+        'en': 'Authorization is required to use this bot.',
+        'ru': 'Чтобы пользоваться ботом, нужна авторизация.'}},
+    'welcome_message': {'source': 'en', 'fallback': {}, 'texts': {
+        'en': 'Request access to use this bot.',
+        'ru': 'Запросите доступ для использования бота.'}},
+}
+
 
 def _command_key(value: str) -> str:
     try:
@@ -59,25 +70,33 @@ class AccessRequestService:
             upgrade(conn)
 
     @staticmethod
-    def _policy(conn):
+    def _policy(conn, language=None, editor=False):
+        """Whether requests are on, and the bot's messages in this language;
+        with every language for those who edit them."""
+        from . import localized
         rows = {row['key']: row['value'] for row in conn.execute('''SELECT key, value
             FROM backend_system_settings WHERE key IN ('access_requests_enabled', 'access_gate_message', 'access_welcome_message')''')}
         from .account_channels import enabled
-        return {
+        result = {
             'enabled': rows.get('access_requests_enabled', '1') == '1',
             'telegram': 'telegram' in enabled(conn),
-            'gate_message': rows.get('access_gate_message', 'Authorization is required to use this bot.'),
-            'welcome_message': rows.get('access_welcome_message', 'Request access to use this bot.'),
         }
+        for name, default in MESSAGES.items():
+            value = localized.loads(rows.get('access_' + name), default)
+            result[name] = localized.resolve(value, language)
+            result[name + 's'] = localized.public(value) if editor else None
+        return result
 
     def policy(self, actor):
+        from .localized import actor_language
         if isinstance(actor, TelegramVisitor):
             actor.require('access_requests.self.read')
             with self.db.connect() as conn:
-                return {**self._policy(conn), 'notify_requests': None}
+                return {**self._policy(conn, actor_language(conn, actor)), 'notify_requests': None}
         require_permission(actor, 'access_requests.self.read')
         with self.db.connect() as conn:
-            result = self._policy(conn)
+            editor = 'settings.manage' in account_permissions(actor.account)
+            result = self._policy(conn, actor_language(conn, actor), editor)
             if 'access_requests.manage' in account_permissions(actor.account) and actor.account.status == 'approved':
                 key = f"admin_request_notifications:{actor.account.id}"
                 row = conn.execute('SELECT value FROM backend_system_settings WHERE key = ?', (key,)).fetchone()
@@ -86,35 +105,32 @@ class AccessRequestService:
                 result['notify_requests'] = None
             return result
 
-    def update_policy(self, actor, *, enabled=None, gate_message=None, welcome_message=None, notify_requests=None):
+    def update_policy(self, actor, *, enabled=None, gate_messages=None, welcome_messages=None, notify_requests=None):
         require_permission(actor, 'settings.manage')
-        if enabled is None and gate_message is None and welcome_message is None and notify_requests is None:
+        if enabled is None and gate_messages is None and welcome_messages is None and notify_requests is None:
             raise AccessDenied('invalid_input', 422)
         if any(value is not None and type(value) is not bool
                for value in (enabled, notify_requests)):
             raise AccessDenied('invalid_input', 422)
-        for message in (gate_message, welcome_message):
-            if message is not None and (not isinstance(message, str) or
-                                       not message.strip() or len(message.strip()) > 500):
-                raise AccessDenied('invalid_input', 422)
+        from . import localized
+        messages = {name: localized.checked(value, max_length=500)
+                    for name, value in (('gate_message', gate_messages), ('welcome_message', welcome_messages))
+                    if value is not None}
         with self.db.transaction() as conn:
             from .maintenance_gate import admit
             admit(conn)
             if enabled is not None:
                 conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES ('access_requests_enabled', ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value''', ('1' if enabled else '0',))
-            if gate_message is not None:
-                conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES ('access_gate_message', ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value''', (gate_message.strip(),))
-            if welcome_message is not None:
-                conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES ('access_welcome_message', ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value''', (welcome_message.strip(),))
+            for name, value in messages.items():
+                conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value''', ('access_' + name, localized.dumps(value)))
             if notify_requests is not None:
                 key = f"admin_request_notifications:{actor.account.id}"
                 conn.execute('''INSERT INTO backend_system_settings(key, value) VALUES (?, ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value''',
                     (key, '1' if notify_requests else '0'))
-            result = self._policy(conn)
+            result = self._policy(conn, localized.actor_language(conn, actor), editor=True)
             key = f"admin_request_notifications:{actor.account.id}"
             row = conn.execute('SELECT value FROM backend_system_settings WHERE key = ?', (key,)).fetchone()
             result['notify_requests'] = not row or row['value'] != '0'

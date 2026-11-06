@@ -8,6 +8,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from backend.delivery_wakeup import DeliveryWakeup
+from backend.localized import plain
 from db.postgres_db import worker_connections
 from tests.test_worker_postgres import WorkerPostgresTests
 
@@ -121,7 +122,7 @@ class DeliveryHTTPPostgresTests(unittest.TestCase):
                     '/api/v1/integrations/telegram/deliveries/wait', headers=headers)
                 self.assertTrue(entered.wait(3))
                 started = time.monotonic()
-                announcement.queue(self.actor, 'Test notice', str(uuid4()))
+                announcement.queue(self.actor, plain('Test notice'), str(uuid4()))
                 self.assertEqual(waiting_response.result(timeout=3).status_code, 200)
                 self.assertLess(time.monotonic() - started, 3)
             claim_headers = {**headers, 'Idempotency-Key': str(uuid4())}

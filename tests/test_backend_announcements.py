@@ -16,6 +16,7 @@ from backend.authorization import (
 )
 
 from tests import test_backend_http as fixture
+from backend.localized import plain
 
 
 class AnnouncementTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class AnnouncementTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_account_channels SET address='555' WHERE account_id=?",
                                    (self.member['id'],))
         self.db.connection.commit()
-        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         self.assertEqual(tuple(self.db.connection.execute(
             "SELECT telegram_subject,status FROM backend_announcement_deliveries WHERE account_id=?",
             (self.member['id'],)).fetchone()), ('555', 'queued'))
@@ -55,14 +56,19 @@ class AnnouncementTests(unittest.TestCase):
         self.db.connection.execute("UPDATE backend_account_channels SET enabled=0 WHERE account_id=?",
                                    (self.member['id'],))
         self.db.connection.commit()
-        preview = self.service.preview(self.actor, 'Hello')
+        preview = self.service.preview(self.actor, plain('Hello'))
         self.assertEqual((preview['recipients'], preview['telegram']), (1, 0))
-        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         self.assertEqual(self.inbox_deliveries(), [(None, 'inbox_only')])
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
         from backend.authorization import resolve_actor
         member = resolve_actor(self.transport, self.identities, telegram_user_id=102)
         self.assertEqual(self.service.inbox(member)['items'][0]['text'], 'Hello')
+        # Each reader gets their language's text.
+        self.service.queue(self.actor, {'source': 'en', 'texts': {'en': 'Bye', 'ru': 'Пока'}}, str(uuid4()))
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE backend_accounts SET locale='ru' WHERE id=?", (member.account.id,))
+        self.assertEqual(self.service.inbox(member)['items'][0]['text'], 'Пока')
 
     def test_expiry_notice_reaches_the_inbox_of_an_account_without_telegram(self):
         self.db.connection.execute("DELETE FROM backend_account_channels WHERE account_id=?", (self.member['id'],))
@@ -72,12 +78,12 @@ class AnnouncementTests(unittest.TestCase):
 
     def test_turning_telegram_off_keeps_queued_announcements_in_the_inbox(self):
         from backend.account_channels import enabled, set_enabled
-        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         with self.db.transaction() as conn:
             self.assertEqual(enabled(conn), {'telegram'})
             set_enabled(conn, set())
         self.assertEqual(self.inbox_deliveries(), [('102', 'inbox_only')])
-        self.service.queue(self.actor, 'Again', str(uuid4()))
+        self.service.queue(self.actor, plain('Again'), str(uuid4()))
         self.assertIn((None, 'inbox_only'), self.inbox_deliveries())
         response = self.client.post("/api/v1/integrations/telegram/announcements/claim",
                                     headers={**self.headers, 'Idempotency-Key': str(uuid4())})
@@ -100,8 +106,8 @@ class AnnouncementTests(unittest.TestCase):
         orphan = resp.json()["account"]
         self.db.connection.execute('DELETE FROM backend_profiles WHERE owner_account_id=?', (orphan['id'],))
         self.db.connection.commit()
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 1)
-        self.assertEqual(self.service.queue(self.actor, 'Hello', str(uuid4()))['total'], 1)
+        self.assertEqual(self.service.preview(self.actor, plain('Hello'))['recipients'], 1)
+        self.assertEqual(self.service.queue(self.actor, plain('Hello'), str(uuid4()))['total'], 1)
 
     def test_deleted_profile_is_excluded_from_preview_and_queue_even_if_account_stays_approved(self):
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='delete',
@@ -110,11 +116,11 @@ class AnnouncementTests(unittest.TestCase):
         # approval is intentionally preserved by profile deletion.
         self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (self.member['id'],))
         self.db.connection.commit()
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 0)
-        self.assertEqual(self.service.queue(self.actor, 'Hello', str(uuid4()))['total'], 0)
+        self.assertEqual(self.service.preview(self.actor, plain('Hello'))['recipients'], 0)
+        self.assertEqual(self.service.queue(self.actor, plain('Hello'), str(uuid4()))['total'], 0)
 
     def test_profile_deleted_after_queue_is_skipped_before_delivery(self):
-        job = self.service.queue(self.actor, 'Hello', str(uuid4()))
+        job = self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='delete',
             profile_id=self.profile_id, revision=1)
         self.db.connection.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (self.member['id'],))
@@ -127,8 +133,8 @@ class AnnouncementTests(unittest.TestCase):
             display_name='Second profile', owner_account_id=self.member['id'])
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='delete',
             profile_id=self.profile_id, revision=1)
-        self.assertEqual(self.service.preview(self.actor, 'Hello')['recipients'], 0)
-        job = self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.assertEqual(self.service.preview(self.actor, plain('Hello'))['recipients'], 0)
+        job = self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         self.assertEqual(job['total'], 0)
         self.assertIsNone(self.service.claim(self.transport, str(uuid4())))
 
@@ -192,29 +198,33 @@ class AnnouncementTests(unittest.TestCase):
         fixture.BackendHTTPTests.register(self, 103)
         self.identities.resolve_telegram(104)
         self.identities.create_account()
-        preview = self.service.preview(self.actor, " Hello ")
-        self.assertEqual(preview, {"text": "Hello", "recipients": 1, "telegram": 1})
-        job = self.service.queue(self.actor, "Hello", str(uuid4()))
+        preview = self.service.preview(self.actor, plain(" Hello "))
+        self.assertEqual((preview["texts"]["texts"], preview["recipients"], preview["telegram"]),
+                         ({"en": "Hello"}, 1, 1))
+        # How many read it in each language; Russian readers get the English text.
+        self.assertEqual(sum(preview["languages"].values()), 1)
+        self.assertEqual(preview["texts"]["shown"]["ru"], "en")
+        job = self.service.queue(self.actor, plain("Hello"), str(uuid4()))
         self.assertEqual(job["total"], 1)
         self.assertEqual(job["counts"]["queued"], 1)
 
     def test_delivery_exposes_sender_only_when_telegram_username_is_known(self):
-        self.service.queue(self.actor, "First", str(uuid4()))
+        self.service.queue(self.actor, plain("First"), str(uuid4()))
         delivery = self.service.claim(self.transport, str(uuid4()))
         self.assertIsNone(delivery['sender_username'])
         fixture.BackendHTTPTests.register(self, 101, username='sender')
-        self.service.queue(self.actor, "Second", str(uuid4()))
+        self.service.queue(self.actor, plain("Second"), str(uuid4()))
         delivery = self.service.claim(self.transport, str(uuid4()))
         self.assertEqual(delivery['sender_username'], 'sender')
 
     def test_double_tap_and_changed_payload_reuse(self):
         key = str(uuid4())
-        first = self.service.queue(self.actor, "Hello", key)
+        first = self.service.queue(self.actor, plain("Hello"), key)
         self.assertEqual(
-            self.service.queue(self.actor, "Hello", key)["id"], first["id"]
+            self.service.queue(self.actor, plain("Hello"), key)["id"], first["id"]
         )
         with self.assertRaises(AccessDenied) as error:
-            self.service.queue(self.actor, "Changed", key)
+            self.service.queue(self.actor, plain("Changed"), key)
         self.assertEqual(error.exception.code, "idempotency_conflict")
         self.assertEqual(
             self.db.connection.execute(
@@ -224,7 +234,7 @@ class AnnouncementTests(unittest.TestCase):
         )
 
     def test_claim_ack_idempotency_and_completed_claim_is_not_replayed(self):
-        job = self.service.queue(self.actor, "Hello", str(uuid4()))
+        job = self.service.queue(self.actor, plain("Hello"), str(uuid4()))
         key = str(uuid4())
         delivery = self.service.claim(self.transport, key)
         self.assertEqual(delivery, self.service.claim(self.transport, key))
@@ -235,7 +245,7 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual(self.service.get(self.actor, job["id"])["counts"]["sent"], 1)
 
     def test_definite_rate_limit_defers_claim_and_survives_adapter_restart(self):
-        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         key = str(uuid4())
         delivery = self.service.claim(self.transport, key)
         self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 30)
@@ -260,7 +270,7 @@ class AnnouncementTests(unittest.TestCase):
         self.assertIsNone(restarted.claim(self.transport, str(uuid4())))
 
     def test_retry_delay_is_required_and_unknown_delivery_cannot_be_requeued(self):
-        self.service.queue(self.actor, 'Hello', str(uuid4()))
+        self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         key = str(uuid4())
         delivery = self.service.claim(self.transport, key)
         for delay in (None, 0, True, -1):
@@ -271,7 +281,7 @@ class AnnouncementTests(unittest.TestCase):
             self.service.acknowledge(self.transport, delivery['id'], key, 'retry', 30)
 
     def test_interrupted_delivery_expires_unknown_without_replay(self):
-        job = self.service.queue(self.actor, "Hello", str(uuid4()))
+        job = self.service.queue(self.actor, plain("Hello"), str(uuid4()))
         delivery = self.service.claim(self.transport, str(uuid4()))
         self.db.connection.execute(
             "UPDATE backend_announcement_deliveries SET claimed_until='2000-01-01T00:00:00+00:00'"
@@ -284,7 +294,7 @@ class AnnouncementTests(unittest.TestCase):
         self.assertIsNotNone(delivery)
 
     def test_revocation_before_delivery_skips_recipient(self):
-        job = self.service.queue(self.actor, "Hello", str(uuid4()))
+        job = self.service.queue(self.actor, plain("Hello"), str(uuid4()))
         self.db.connection.execute(
             "UPDATE backend_accounts SET status='disabled' WHERE id=?",
             (self.member["id"],),
@@ -308,7 +318,7 @@ class AnnouncementTests(unittest.TestCase):
                 "announcement_silent"
             ]
         )
-        self.service.queue(self.actor, "Hello", str(uuid4()))
+        self.service.queue(self.actor, plain("Hello"), str(uuid4()))
         self.assertTrue(self.service.claim(self.transport, str(uuid4()))["silent"])
         for body in (
             {},
@@ -327,7 +337,7 @@ class AnnouncementTests(unittest.TestCase):
         result = self.client.post(
             "/api/v1/announcements/preview",
             headers=self.headers_for(102),
-            json={"text": "Hello"},
+            json={"texts": plain("Hello")},
         )
         self.assertEqual(result.status_code, 403)
         for principal in (
@@ -346,7 +356,7 @@ class AnnouncementTests(unittest.TestCase):
         result = self.client.post(
             "/api/v1/announcements",
             headers={**self.headers_for(101), "Idempotency-Key": str(uuid4())},
-            json={"text": "Hello"},
+            json={"texts": plain("Hello")},
         )
         self.assertEqual(result.status_code, 202, result.text)
         job_id = result.json()["id"]
@@ -376,7 +386,7 @@ class AnnouncementTests(unittest.TestCase):
 
     def test_wait_requires_adapter_and_does_not_claim_pending_delivery(self):
         endpoint = '/api/v1/integrations/telegram/deliveries/wait?timeout=1'
-        job = self.service.queue(self.actor, 'Hello', str(uuid4()))
+        job = self.service.queue(self.actor, plain('Hello'), str(uuid4()))
         result = self.client.get(endpoint, headers=self.headers)
         self.assertEqual(result.status_code, 200, result.text)
         self.assertTrue(result.json()['ready'])

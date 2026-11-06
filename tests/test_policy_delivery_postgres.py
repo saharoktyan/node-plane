@@ -23,6 +23,7 @@ from backend.system_settings import SystemSettingsService
 from backend.traffic import TrafficService, MAX_COUNTER
 from tests import test_backups_postgres as fixture
 from tests.test_core_reliability_postgres import HookDatabase
+from backend.localized import plain
 
 
 class CounterDriver:
@@ -248,7 +249,7 @@ class AnnouncementPolicyPostgresTests(unittest.TestCase):
         self.service = AnnouncementService(self.db)
 
     def queue(self):
-        return self.service.queue(self.actor, 'Test notice', str(uuid4()))
+        return self.service.queue(self.actor, plain('Test notice'), str(uuid4()))
 
     def delete(self):
         ProfileCommands(self.db).execute(self.actor, str(uuid4()), action='delete',
@@ -261,7 +262,7 @@ class AnnouncementPolicyPostgresTests(unittest.TestCase):
         with self.db.transaction() as conn:
             conn.execute("UPDATE backend_accounts SET status='approved' WHERE id=?", (orphan.id,))
             conn.execute('DELETE FROM backend_profiles WHERE owner_account_id=?', (orphan.id,))
-        self.assertEqual(self.service.preview(self.actor, 'Test notice')['recipients'], 1)
+        self.assertEqual(self.service.preview(self.actor, plain('Test notice'))['recipients'], 1)
         self.assertEqual(self.queue()['total'], 1)
         self.assertEqual(self.service.claim(self.transport, str(uuid4()))['telegram_user_id'], 102)
 
@@ -315,7 +316,7 @@ class AnnouncementPolicyPostgresTests(unittest.TestCase):
         start = threading.Barrier(2)
         def queue():
             start.wait(timeout=5)
-            return self.service.queue(self.actor, 'Test notice', key)
+            return self.service.queue(self.actor, plain('Test notice'), key)
         with ThreadPoolExecutor(max_workers=2) as pool:
             first, second = pool.submit(queue), pool.submit(queue)
             self.assertEqual(first.result(timeout=5)['id'], second.result(timeout=5)['id'])
@@ -323,7 +324,7 @@ class AnnouncementPolicyPostgresTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT COUNT(*) AS count FROM backend_announcement_deliveries').fetchone()['count'], 1)
 
     def test_deleted_profile_between_preview_and_queue_is_not_admitted(self):
-        self.assertEqual(self.service.preview(self.actor, 'Test notice')['recipients'], 1)
+        self.assertEqual(self.service.preview(self.actor, plain('Test notice'))['recipients'], 1)
         self.delete()
         self.assertEqual(self.queue()['total'], 0)
 

@@ -760,7 +760,7 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_announcement_double_tap_reuses_command_key(self):
         from telegram_client.routers import admin_announcements
-        self.state_data['announcement_draft']={'text':'Hello','nonce':'test','key':'stable-key'}
+        self.state_data['announcement_draft']={'texts':{'source':'en','texts':{'en':'Hello'},'fallback':{}},'nonce':'test','key':'stable-key'}
         self.query.data='announce_send:test'
         backend=SimpleNamespace(announcement_create=AsyncMock(return_value={'id':'job'}),
             announcement_status=AsyncMock(return_value={'total':1,'status':'running',
@@ -772,21 +772,28 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
 
     async def test_announcement_edit_back_and_preview_share_row(self):
         from telegram_client.routers import admin_announcements
-        self.state_data['announcement_draft']={'text':'Hello','nonce':'test','key':'stable-key'}
+        from telegram_client.routers import localized_editor
+        self.state_data['announcement_draft']={'texts':{'source':'en','texts':{'en':'Hello'},'fallback':{}},'nonce':'test','key':'stable-key'}
         self.query.data='announce_edit'
-        backend=SimpleNamespace(me=AsyncMock(return_value={'permissions':['settings.manage']}))
-        with patch.object(admin_announcements,'render',new_callable=AsyncMock) as draw:
+        backend=SimpleNamespace(me=AsyncMock(return_value={'permissions':['settings.manage']}),
+            request=AsyncMock(return_value={'languages':['en','ru']}))
+        with patch.object(localized_editor,'render',new_callable=AsyncMock) as draw:
             await admin_announcements.announcement_cb(self.query,self.bot,backend,self.state)
-        self.assertEqual([b.callback_data for b in draw.call_args.args[3][0]],['announce_menu','announce_preview'])
+        # The draft opens in the editor: its texts, Save to preview, Back to the menu.
+        screen, rows = draw.call_args.args[2:4]
+        self.assertIn('Hello', screen.plain())
+        self.assertEqual([[b.callback_data for b in row] for row in rows],[['lt:ok'],['announce_menu']])
 
     async def test_announcement_rich_menu_preview_and_results_in_both_languages(self):
         from telegram_client.routers import admin_announcements as announcements
         counts = dict(queued=2, claimed=1, sent=3, failed=1, unknown=1, skipped=0)
         job = {'id': 'j1', 'total': 8, 'status': 'running', 'counts': counts}
         backend = SimpleNamespace(announcement_latest=AsyncMock(return_value={'last_job': job}),
-            announcement_preview=AsyncMock(return_value={'text': 'Hello', 'recipients': 8}),
+            announcement_preview=AsyncMock(return_value={'recipients': 8, 'languages': {'en': 5, 'ru': 3},
+                'texts': {'source': 'en', 'texts': {'en': 'Hello'}, 'fallback': {}, 'shown': {'en': 'en', 'ru': 'en'}}}),
             announcement_status=AsyncMock(return_value=job))
-        self.state_data['announcement_draft'] = {'text': 'Hello', 'nonce': 'test', 'key': 'stable-key'}
+        self.state_data['announcement_draft'] = {'texts': {'source': 'en', 'texts': {'en': 'Hello'}, 'fallback': {}},
+                                                 'nonce': 'test', 'key': 'stable-key'}
         for locale in ('en', 'ru'):
             self.state_data['locale'] = locale
             self.query.data = 'announce_menu'
@@ -801,7 +808,10 @@ class TelegramFlowTests(IsolatedAsyncioTestCase):
             with patch.object(announcements, 'render', new_callable=AsyncMock) as draw:
                 await announcements.preview(123, 77, 123, self.bot, backend, self.state)
             screen, rows = draw.call_args.args[2:4]
-            self.assertEqual(screen.sections[0].lines, ('Hello',))
+            self.assertEqual(screen.sections[1].lines, ('Hello',))
+            # Russian readers get the English text: the section says so and stays folded.
+            self.assertTrue(screen.sections[2].collapsed)
+            self.assertIn('3', screen.sections[2].title)
             self.assertEqual([b.callback_data for b in rows[0]], ['announce_edit', 'announce_send:test'])
             self.assertEqual(rows[0][1].style, 'primary')
             for status in ('running', 'completed'):

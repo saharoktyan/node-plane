@@ -9,12 +9,12 @@ from uuid import uuid4
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton
 
 from ..backend import BackendClient, BackendError
 from ..i18n import normalize_locale, tr
 from ..screens import Screen, Section, Table
+from . import localized_editor
 from .common import render
 
 router = Router()
@@ -41,10 +41,6 @@ TITLES = {'dev': 'devlimit.title', 'mode': 'connlimit.mode', 'max': 'connlimit.s
           'throttle': 'quota.field.throttle'}
 ERRORS = {'tariff_exists', 'tariff_in_use', 'tariff_without_term', 'tariff_without_access',
           'admin_access_permanent', 'revision_conflict', 'tariff_not_found'}
-
-
-class TariffTitle(StatesGroup):
-    waiting = State()
 
 
 async def _locale(state):
@@ -129,9 +125,10 @@ async def show_tariff(chat_id, user_id, message_id, tariff_id, bot, backend, sta
         (tr(locale, 'tariff.nodes'), access_label(locale, tariff['access_policy'], regions)),
         (tr(locale, 'tariff.profiles_title'), str(tariff['profiles']))))
     sections = (
-        Section(tariff['title'], tables=(summary,), rows=(
+        Section(tariff['title'], (tariff['description'],) if tariff.get('description') else (),
+                tables=(summary,), rows=(
             (button(tr(locale, 'tariff.term'), 'trf_term'), button(tr(locale, 'tariff.nodes'), 'trf_nodes')),
-            (button(tr(locale, 'tariff.rename'), 'trf_rename'),))),
+            (button(tr(locale, 'tariff.rename'), 'trf_rename'), button(tr(locale, 'tariff.describe'), 'trf_describe')))),
         Section(tr(locale, 'tariff.limits'), tuple(limits_lines(locale, tariff['policies'])),
                 rows=((button(tr(locale, 'tariff.limits.edit'), 'trf_limits'),),)),
         Section(tr(locale, 'settings.rich.danger'), collapsed=True,
@@ -163,45 +160,45 @@ async def tariff_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, stat
                         error_text(await _locale(state), exc))
 
 
-@router.callback_query(F.data.in_({'trf_new', 'trf_rename'}))
-async def title_prompt_cb(query: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+@router.callback_query(F.data.in_({'trf_new', 'trf_rename', 'trf_describe'}))
+async def texts_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    """The title (in several languages) of a new tariff, or the title or
+    description of the open one."""
     await query.answer()
-    locale = await _locale(state)
-    creating = query.data == 'trf_new'
-    if creating:
+    chat_id, user_id, message_id = query.message.chat.id, query.from_user.id, query.message.message_id
+    if query.data == 'trf_new':
         await state.update_data(tariff_id=None)
-    await state.set_state(TariffTitle.waiting)
-    await state.update_data(tariff_title_message=query.message.message_id)
-    back = 'tariffs' if creating else 'trf_back'
-    await render(bot, query.message.chat.id, Screen(tr(locale, 'tariff.create' if creating else 'tariff.rename'),
-        (tr(locale, 'tariff.title_prompt'),), embedded_buttons=True, navigation=True),
-        [[button(tr(locale, 'back'), back)]], state, query.message.message_id)
-
-
-@router.message(TariffTitle.waiting, F.text)
-async def title_message(message: Message, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+        return await localized_editor.open_editor(chat_id, user_id, message_id, bot, backend, state, 'tariff_new')
     data = await state.get_data()
-    if message.chat.type != 'private' or not message.from_user:
-        return
-    try:
-        await message.delete()
-    except Exception:
-        pass
-    locale, message_id = normalize_locale(data.get('locale')), data.get('tariff_title_message')
-    title = message.text.strip()
-    try:
-        if data.get('tariff_id'):
-            tariff = await backend.request('PATCH', f"/api/v1/tariffs/{data['tariff_id']}",
-                telegram_user_id=message.from_user.id, body={'title': title}, revision=data['tariff_revision'])
-        else:
-            tariff = await backend.request('POST', '/api/v1/tariffs', telegram_user_id=message.from_user.id,
-                                           body={'title': title})
-    except BackendError as exc:
-        await render(bot, message.chat.id, Screen(tr(locale, 'tariff.title'),
-            (error_text(locale, exc) if exc.code != 'invalid_input' else tr(locale, 'tariff.title_prompt'),),
-            embedded_buttons=True, navigation=True), [[button(tr(locale, 'back'), 'tariffs')]], state, message_id)
-        return
-    await show_tariff(message.chat.id, message.from_user.id, message_id, tariff['id'], bot, backend, state)
+    tariff = await backend.request('GET', f"/api/v1/tariffs/{data['tariff_id']}", telegram_user_id=user_id)
+    await state.update_data(tariff_revision=tariff['revision'])
+    if query.data == 'trf_rename':
+        return await localized_editor.open_editor(chat_id, user_id, message_id, bot, backend, state,
+                                                  'tariff_titles', tariff['titles'])
+    await localized_editor.open_editor(chat_id, user_id, message_id, bot, backend, state,
+                                       'tariff_descriptions', tariff['descriptions'])
+
+
+async def _save_new(chat_id, user_id, message_id, bot, backend, state, value):
+    tariff = await backend.request('POST', '/api/v1/tariffs', telegram_user_id=user_id, body={'titles': value})
+    await show_tariff(chat_id, user_id, message_id, tariff['id'], bot, backend, state)
+
+
+def _saver(field):
+    async def save(chat_id, user_id, message_id, bot, backend, state, value):
+        data = await state.get_data()
+        await backend.request('PATCH', f"/api/v1/tariffs/{data['tariff_id']}", telegram_user_id=user_id,
+                              body={field: value}, revision=data['tariff_revision'])
+        await show_tariff(chat_id, user_id, message_id, data['tariff_id'], bot, backend, state)
+    return save
+
+
+localized_editor.register('tariff_new', localized_editor.Context(
+    'tariff.create', 'tariffs', 64, _save_new, multiline=False))
+localized_editor.register('tariff_titles', localized_editor.Context(
+    'tariff.rename', 'trf_back', 64, _saver('titles'), multiline=False))
+localized_editor.register('tariff_descriptions', localized_editor.Context(
+    'tariff.describe', 'trf_back', 1000, _saver('descriptions'), optional=True))
 
 
 @router.callback_query(F.data == 'trf_back')

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Texts in several languages (migration r0047): tariff names and
+  descriptions, announcements and the bot's welcome and stub messages are
+  written per supported language (`GET /api/v1/system/languages`, now en
+  and ru). Only the source text is required; a language without its own
+  shows the source or a chosen translation. The API takes them as
+  `titles`/`descriptions`, `texts` and `gate_messages`/`welcome_messages`
+  (`{source, texts, fallback}`), and each reader gets their language. The
+  bot and Workstation share one editor; the announcement preview counts
+  readers per language. Tariffs get a description.
 - A relay for the coming web cabinet: `node-plane-relay serve` runs on a
   public server and `node-plane-relay link` on the controller, which dials
   out to it, so the controller stays unreachable from outside. The relay

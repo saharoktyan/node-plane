@@ -9,6 +9,7 @@ or from the generic one that renders what the type declares.
 """
 from datetime import datetime, timezone
 
+from . import localized
 from .authorization import RELAY_PERMISSION, AccessDenied, require_permission, service_permission
 from .service_instances import RELAY_STATES, TYPES as VPN_ENGINES
 
@@ -74,7 +75,7 @@ def catalog(db, actor):
     return items
 
 
-def _vpn(conn, row, now):
+def _vpn(conn, row, now, language):
     from .quotas import blocked
     renewal = conn.execute('''SELECT status FROM backend_renewal_requests WHERE profile_id=?
         ORDER BY created_at DESC LIMIT 1''', (row['id'],)).fetchone()
@@ -85,7 +86,8 @@ def _vpn(conn, row, now):
     if row['expires_at'] and not (renewal and renewal['status'] == 'pending'):
         actions.append('renewal')
     return {'status': status, 'actions': actions,
-            'summary': {'title': row['display_name'], 'devices': row['devices'], 'tariff': row['tariff'],
+            'summary': {'title': row['display_name'], 'devices': row['devices'],
+                        'tariff': localized.resolve(localized.loads(row['tariff']), language) if row['tariff'] else None,
                         'expires_at': row['expires_at'],
                         'renewal': renewal['status'] if renewal else None}}
 
@@ -97,9 +99,10 @@ def own(db, actor, now=None):
     now = now or datetime.now(timezone.utc)
     items = []
     with db.connect() as conn:
+        language = localized.actor_language(conn, actor)
         rows = conn.execute('''SELECT s.id, s.service, p.display_name, p.frozen, p.expires_at,
             (SELECT COUNT(*) FROM backend_devices v WHERE v.profile_id = p.id AND v.status = 'active') AS devices,
-            (SELECT t.title FROM backend_profile_tariffs pt JOIN backend_tariffs t ON t.id = pt.tariff_id
+            (SELECT t.titles_json FROM backend_profile_tariffs pt JOIN backend_tariffs t ON t.id = pt.tariff_id
                 WHERE pt.profile_id = p.id) AS tariff
             FROM backend_service_profiles s LEFT JOIN backend_profiles p ON p.id = s.id
             WHERE s.account_id = ?
@@ -108,6 +111,6 @@ def own(db, actor, now=None):
         for row in rows:
             kind = 'builtin' if row['service'] in BUILTIN else 'user'
             items.append({'id': row['id'], 'service': row['service'], 'kind': kind,
-                          **(_vpn(conn, row, now) if row['service'] == 'vpn' else
+                          **(_vpn(conn, row, now, language) if row['service'] == 'vpn' else
                              {'status': 'active', 'actions': [], 'summary': {}})})
     return items

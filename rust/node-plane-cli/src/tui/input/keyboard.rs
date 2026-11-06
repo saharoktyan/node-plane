@@ -17,7 +17,7 @@ impl App {
                     self.controller_controls().get(self.controller.selected),
                     Some(
                         Control::ControllerDefaultsInput
-                            | Control::ControllerAnnouncementInput
+                            | Control::ControllerTextInput
                             | Control::ControllerPhrase
                     )
                 ),
@@ -155,19 +155,30 @@ impl App {
             }
             return;
         }
-        if controls[current] == Control::ControllerAnnouncementInput
-            && let Some(value) = &mut self.controller.announcement_draft
-            && self
-                .text_input
-                .borrow_mut()
-                .edit("Message", value, key, 3000)
+        if controls[current] == Control::ControllerTextInput
+            && let Some((value, limit, multiline)) = self
+                .controller
+                .ltext
+                .as_mut()
+                .and_then(crate::localized::Editor::input)
         {
-            return;
+            // Enter starts a new line where the text may have several.
+            if key.code == KeyCode::Enter && !multiline {
+                self.activate(Control::ControllerTextDone);
+                return;
+            }
+            if self.text_input.borrow_mut().edit("Text", value, key, limit) {
+                return;
+            }
         }
         match key.code {
-            KeyCode::Enter if controls[current] == Control::ControllerAnnouncementInput => {
-                if let Some(value) = &mut self.controller.announcement_draft
-                    && value.chars().count() < 3000
+            KeyCode::Enter if controls[current] == Control::ControllerTextInput => {
+                if let Some((value, limit, _)) = self
+                    .controller
+                    .ltext
+                    .as_mut()
+                    .and_then(crate::localized::Editor::input)
+                    && value.chars().count() < limit
                 {
                     value.push('\n');
                 }
@@ -214,16 +225,25 @@ impl App {
                 }
             }
             KeyCode::Char(c)
-                if controls[current] == Control::ControllerAnnouncementInput && !c.is_control() =>
+                if controls[current] == Control::ControllerTextInput && !c.is_control() =>
             {
-                if let Some(value) = &mut self.controller.announcement_draft
-                    && value.chars().count() < 3000
+                if let Some((value, limit, _)) = self
+                    .controller
+                    .ltext
+                    .as_mut()
+                    .and_then(crate::localized::Editor::input)
+                    && value.chars().count() < limit
                 {
                     value.push(c);
                 }
             }
-            KeyCode::Backspace if controls[current] == Control::ControllerAnnouncementInput => {
-                if let Some(value) = &mut self.controller.announcement_draft {
+            KeyCode::Backspace if controls[current] == Control::ControllerTextInput => {
+                if let Some((value, _, _)) = self
+                    .controller
+                    .ltext
+                    .as_mut()
+                    .and_then(crate::localized::Editor::input)
+                {
                     super::super::text_input::delete_backwards(value, key);
                 }
             }

@@ -4,6 +4,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
 from telegram_client.routers import admin_tariffs as tariffs
+from telegram_client.routers import localized_editor
 from tests import test_telegram_admin_profiles_rich as fixture
 
 TARIFF = '11111111-1111-4111-8111-111111111111'
@@ -20,11 +21,14 @@ class Store:
     async def request(self, method, path, **kwargs):
         if method != 'GET':
             self.calls.append((method, path, kwargs.get('body'), kwargs.get('revision'), kwargs.get('command_key')))
+        if path == '/api/v1/system/languages':
+            return {'languages': ['en', 'ru']}
         if path.startswith('/api/v1/regions'):
             return {'items': [{'id': 'r1', 'title': 'Europe'}], 'next_cursor': None}
         if path == '/api/v1/tariffs':
             if method == 'POST':
-                self.tariff['title'] = kwargs['body']['title']
+                titles = kwargs['body']['titles']
+                self.tariff.update(title=titles['texts'][titles['source']], titles=titles)
                 return self.tariff
             return {'items': [self.tariff], 'keys': []}
         if path.startswith('/api/v1/tariffs/'):
@@ -52,11 +56,14 @@ class TariffScreenTests(IsolatedAsyncioTestCase):
         message = SimpleNamespace(chat=SimpleNamespace(id=123, type='private'), from_user=SimpleNamespace(id=123),
                                   text=' Basic ', delete=AsyncMock())
         self.query.data = 'trf_new'
-        with patch.object(tariffs, 'render', new_callable=AsyncMock):
-            await tariffs.title_prompt_cb(self.query, self.bot, self.state)
+        with patch.object(localized_editor, 'render', new_callable=AsyncMock):
+            await tariffs.texts_cb(self.query, self.bot, backend, self.state)
+            await localized_editor.text_message(message, self.bot, backend, self.state)
+        self.query.data = 'lt:ok'
         with patch.object(tariffs, 'render', new_callable=AsyncMock) as draw:
-            await tariffs.title_message(message, self.bot, backend, self.state)
-        self.assertEqual(store.calls[0][:3], ('POST', '/api/v1/tariffs', {'title': 'Basic'}))
+            await localized_editor.editor_cb(self.query, self.bot, backend, self.state)
+        self.assertEqual(store.calls[0][:3], ('POST', '/api/v1/tariffs',
+                                             {'titles': {'source': 'en', 'texts': {'en': 'Basic'}, 'fallback': {}}}))
         self.assertIn('30 days', draw.call_args.args[2].plain())
         self.assertEqual(self.data['tariff_id'], TARIFF)
         await self.press(tariffs.term_cb, 'trf_term:90', backend)

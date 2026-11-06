@@ -1,5 +1,6 @@
 mod access;
 mod controller;
+mod localized;
 mod nodes;
 mod relay;
 mod settings;
@@ -368,9 +369,7 @@ impl App {
             | Control::ControllerRecoveryHistory
             | Control::ControllerAnnouncement
             | Control::ControllerAnnouncementCompose
-            | Control::ControllerAnnouncementPreview
             | Control::ControllerAnnouncementSend
-            | Control::ControllerAnnouncementInput
             | Control::ControllerAnnouncementRefresh
             | Control::ControllerHistoryItem(..)
             | Control::ControllerHistoryPage(..)
@@ -382,6 +381,14 @@ impl App {
             | Control::ControllerBotTitle
             | Control::ControllerSshKey
             | Control::ControllerGateMessage
+            | Control::ControllerTextWrite(_)
+            | Control::ControllerTextSource(_)
+            | Control::ControllerTextRemove(_)
+            | Control::ControllerTextFallback(_)
+            | Control::ControllerTextInput
+            | Control::ControllerTextDone
+            | Control::ControllerTextSave
+            | Control::ControllerTextClear
             | Control::ControllerBotTitleEdit
             | Control::ControllerTelegram
             | Control::ControllerTelegramToken
@@ -408,6 +415,7 @@ impl App {
             | Control::ControllerTariffRegion(..)
             | Control::ControllerTariffLimits
             | Control::ControllerTariffRename
+            | Control::ControllerTariffDescribe
             | Control::ControllerTariffDelete
             | Control::ControllerTariffPick(..)
             | Control::ControllerTariffExpiry

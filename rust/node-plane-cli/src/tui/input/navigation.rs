@@ -162,7 +162,7 @@ impl App {
     pub(in crate::tui) fn move_spatial(&mut self, direction: KeyCode) -> bool {
         if matches!(self.screen, Screen::Controller)
             && self.controller_controls().get(self.controller.selected)
-                == Some(&Control::ControllerAnnouncementInput)
+                == Some(&Control::ControllerTextInput)
         {
             return false;
         }

@@ -16,6 +16,7 @@ from ..screens import Screen, Section, Table, format_size
 from ..documentation import title as documentation_title
 from ..i18n import normalize_locale, tr
 from .callbacks import AdminSettingsCallback, RequestPolicyCallback, UpdatesCallback
+from . import localized_editor
 from .common import render
 from .admin_recovery import RecoveryPage
 
@@ -32,7 +33,6 @@ async def update_notice_close(query: CallbackQuery) -> None:
 
 
 class RequestPolicyState(StatesGroup):
-    waiting_for_gate_message = State()
     waiting_for_bot_title = State()
 
 
@@ -208,9 +208,7 @@ async def show_request_policy(chat_id: int, user_id: int, message_id: int,
     await state.update_data(settings_text_confirmation=None)
     policy = await backend.access_request_policy(user_id)
     if policy['enabled']:
-        welcome = policy.get('welcome_message')
-        if not welcome or welcome == 'Request access to use this bot.':
-            welcome = tr(locale, 'home.request_prompt')
+        welcome = policy.get('welcome_message') or tr(locale, 'home.request_prompt')
         sections = (
             Section(tr(locale, 'settings.rich.requests'), rows=(policy_choices(locale, 'request_policy_enabled', True),)),
             Section(tr(locale, 'settings.rich.notifications'), rows=(policy_choices(locale, 'request_policy_notify', policy.get('notify_requests', True)),)),
@@ -307,50 +305,28 @@ async def request_policy_notify_cb(query: CallbackQuery, bot: Bot,
 
 @router.callback_query(F.data.startswith('request_policy_edit'))
 async def request_policy_edit_cb(query: CallbackQuery, bot: Bot, backend: BackendClient, state: FSMContext) -> None:
+    """The message visitors see, in every language (`localized_editor`)."""
     await query.answer()
-    locale = await _locale(state)
     parts = query.data.split(':', 1)
+    policy = await backend.access_request_policy(query.from_user.id)
     if len(parts) > 1 and parts[1] in {'gate_message', 'welcome_message'}:
         field = parts[1]
     else:
-        policy = await backend.access_request_policy(query.from_user.id)
         field = 'welcome_message' if policy['enabled'] else 'gate_message'
-    await state.set_state(RequestPolicyState.waiting_for_gate_message)
-    await state.update_data(request_policy_field=field)
-    await render(bot, query.message.chat.id,
-        Screen(tr(locale, 'request_policy.edit_title'), (tr(locale, 'request_policy.edit_prompt'),), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RequestPolicyCallback().pack())]],
-        state, query.message.message_id)
+    await localized_editor.open_editor(query.message.chat.id, query.from_user.id, query.message.message_id,
+                                       bot, backend, state, field, policy[field + 's'])
 
 
-@router.message(RequestPolicyState.waiting_for_gate_message, F.text)
-async def request_policy_text(message: Message, bot: Bot, backend: BackendClient,
-                              state: FSMContext) -> None:
-    if message.from_user is None or message.chat.type != 'private':
-        return
-    try:
-        await message.delete()
-    except Exception:
-        pass
-    locale = await _locale(state)
-    value = (message.text or '').strip()
-    data = await state.get_data()
-    message_id = data.get('control_message_id')
-    field = data.get('request_policy_field', 'welcome_message')
-    if not value or len(value) > 500:
-        await render(bot, message.chat.id,
-            Screen(tr(locale, 'request_policy.edit_title'), (tr(locale, 'request_policy.invalid'),), embedded_buttons=True, navigation=True),
-            [[InlineKeyboardButton(text=tr(locale, 'back'), callback_data=RequestPolicyCallback().pack())]],
-            state, message_id)
-        return
-    await state.set_state(None)
-    nonce = uuid4().hex[:12]
-    await state.update_data(settings_text_confirmation={'kind': 'request', 'field': field, 'value': value,
-        'nonce': nonce, 'message_id': message_id})
-    await render(bot, message.chat.id,
-        Screen(tr(locale, 'request_policy.title'), (tr(locale, 'settings.confirm_text'), value), embedded_buttons=True, navigation=True),
-        [[InlineKeyboardButton(text=tr(locale, 'cancel'), callback_data=RequestPolicyCallback().pack()),
-          InlineKeyboardButton(text=tr(locale, 'policy.confirm'), callback_data='settings_text_confirm:' + nonce)]], state, message_id)
+def _request_message_saver(field):
+    async def save(chat_id, user_id, message_id, bot, backend, state, value):
+        await backend.update_access_request_policy(user_id, {field + 's': value})
+        await show_request_policy(chat_id, user_id, message_id, bot, backend, state)
+    return save
+
+
+for _field in ('gate_message', 'welcome_message'):
+    localized_editor.register(_field, localized_editor.Context(
+        'request_policy.edit_title', RequestPolicyCallback().pack(), 500, _request_message_saver(_field)))
 
 
 @router.callback_query(SshKeyCallback.filter())
@@ -667,15 +643,10 @@ async def settings_text_confirm(query: CallbackQuery, bot: Bot, backend: Backend
         await query.answer(tr(locale, 'profile.role.stale'), show_alert=True)
         return
     try:
-        if pending['kind'] == 'title':
-            await backend.update_bot_title(query.from_user.id, pending['value'])
-        else:
-            field = pending.get('field', 'gate_message')
-            await backend.update_access_request_policy(query.from_user.id, {field: pending['value']})
+        await backend.update_bot_title(query.from_user.id, pending['value'])
     except BackendError as exc:
         await query.answer(_friendly_error(locale, exc), show_alert=True)
         return
     await state.update_data(settings_text_confirmation=None)
     await query.answer()
-    view = bot_title_settings_view if pending['kind'] == 'title' else show_request_policy
-    await view(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)
+    await bot_title_settings_view(query.message.chat.id, query.from_user.id, query.message.message_id, bot, backend, state)

@@ -243,7 +243,7 @@ class ProfileRepository:
                 WHERE g.profile_id = ? ORDER BY g.node_key, g.protocol''', (profile_id,)).fetchall()
         return [grant(row) for row in rows]
 
-    def summary(self, profile_id):
+    def summary(self, profile_id, language=None):
         with self.db.connect() as conn:
             profile = conn.execute('''SELECT id, display_name, frozen, expires_at, created_at
                 FROM backend_profiles WHERE id = ?''', (profile_id,)).fetchone()
@@ -255,7 +255,7 @@ class ProfileRepository:
             suspended = blocked(conn, profile_id)
             quota = overview(conn, profile_id)
             from .tariffs import Tariffs
-            tariff = Tariffs(self.db).of_profile(conn, profile_id)
+            tariff = Tariffs(self.db).of_profile(conn, profile_id, language)
             from .renewals import latest
             renewal = latest(conn, profile_id)
             activity = conn.execute('''SELECT COUNT(*) AS issued_count,
@@ -377,20 +377,25 @@ class ProfileService:
         self.get(actor, profile_id)
         return {'items': self.repository.grants(profile_id)}
 
+    def _language(self, actor):
+        from .localized import actor_language
+        with self.repository.db.connect() as conn:
+            return actor_language(conn, actor)
+
     def own_summary(self, actor, profile_id):
         require_permission(actor, 'profiles.self.read')
         profile = self.get(actor, profile_id)
         if profile['owner_account_id'] != actor.account.id:
             raise AccessDenied('resource_not_found', 404)
         from .traffic import TrafficService
-        return {**self.repository.summary(profile_id),
+        return {**self.repository.summary(profile_id, self._language(actor)),
                 'traffic': TrafficService(self.repository.db).summary(actor.account.id, profile_id)}
 
     def admin_summary(self, actor, profile_id):
         require_permission(actor, 'profiles.manage')
         profile = self.get(actor, profile_id)
         from .traffic import TrafficService
-        return {**self.repository.summary(profile_id),
+        return {**self.repository.summary(profile_id, self._language(actor)),
                 'traffic': TrafficService(self.repository.db).summary(profile['owner_account_id'], profile_id)}
 
     def available_nodes(self, actor, *, limit=25, cursor=None):
