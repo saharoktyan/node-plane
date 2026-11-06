@@ -334,8 +334,8 @@
     font-weight: 400;
     padding: 0.1rem 0;
   }
+  /* The same weight as the others, so no column moves when one is chosen. */
   td.slot button.chosen {
-    font-weight: 600;
     text-decoration-color: var(--accent);
     text-decoration-thickness: 2px;
     color: var(--text);
