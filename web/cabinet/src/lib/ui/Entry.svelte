@@ -5,22 +5,23 @@
 </script>
 
 <main>
-  <div class="panel">
-    <h1>{title}</h1>
-    {@render children()}
-  </div>
+  <p class="brand">Node Plane</p>
+  <h1>{title}</h1>
+  {@render children()}
 </main>
 
 <style>
   main {
     max-width: 24rem;
-    margin: 10vh auto;
+    margin: 12vh auto;
     padding: 0 1rem;
   }
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 1.5rem;
+  .brand {
+    font-family: var(--serif);
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 0 0 2.5rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 2px solid var(--text);
   }
 </style>

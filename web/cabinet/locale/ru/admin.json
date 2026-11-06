@@ -47,5 +47,8 @@
   "active": "активно: {count}",
   "no_problems": "Проблем нет.",
   "node": "Нода",
-  "region": "Регион"
+  "region": "Регион",
+  "group_people": "Люди",
+  "group_infrastructure": "Инфраструктура",
+  "group_system": "Система"
 }

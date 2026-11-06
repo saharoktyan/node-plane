@@ -2,6 +2,7 @@
      own. Until stage I it shows the profile's summary; the connection fields
      and actions a manifest declares come with it. -->
 <script lang="ts">
+  import { tiles } from '$lib/ui/tiles';
   import type { ServiceProfile } from '$lib/services/registry';
 
   let { profile }: { profile: ServiceProfile } = $props();
@@ -9,7 +10,7 @@
 </script>
 
 {#if entries.length}
-  <div class="stats">
+  <div class="stats" use:tiles>
     {#each entries as [name, value] (name)}
       <div><div class="label">{name}</div><div class="value small">{value}</div></div>
     {/each}

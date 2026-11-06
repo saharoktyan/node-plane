@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The web cabinet's new look, light and dark: serif headings and figures,
+  hairline rules, one accent; actions are words and fields are lines. The
+  side panel groups sections; tiles wrap into an even grid. The VPN page
+  puts the tariff beside connecting and the devices, shows the next traffic
+  reset, and connects through a subscription (to come) or a server chosen
+  from a searchable, paged list with a column for each protocol.
 - The web cabinet's VPN page: what the tariff includes (name, description,
   limits in force), the devices (add, rename, a new VLESS or AWG key,
   remove) and configurations for a device on a server, with the link, a QR

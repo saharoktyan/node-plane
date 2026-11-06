@@ -31,7 +31,9 @@ try {
     // access token after a reload, 503 in the errors scenario.
     page.on('console', (message) => message.type() === 'error' && !/status of (401|503)/.test(message.text())
       && errors.push(message.text()));
-    page.on('pageerror', (error) => errors.push(String(error)));
+    // MSW unregisters its worker when the last page using it goes; the
+    // browser's later update of that registration fails. Mock noise only.
+    page.on('pageerror', (error) => !/Failed to update a ServiceWorker/.test(String(error)) && errors.push(String(error)));
     await page.goto(`${base}/login?scenario=${scenario}&role=${role}&lang=${lang}`);
     await page.fill('input[autocomplete=username]', 'saharoktyan');
     await page.fill('input[type=password]', 'secret');
@@ -51,10 +53,11 @@ try {
         failures.push(`${scenario}/${role} ${path}: no error shown`);
       if (shots) await page.screenshot({ path: `${shots}/${scenario}-${role}${path.replace(/\//g, '_') || '_'}.png`, fullPage: true });
     }
-    // A configuration is issued on the VPN page and opens with its QR code.
+    // A configuration is issued for a server chosen by hand and opens with its QR code.
     if (scenario === 'default') {
       await page.goto(base + '/services/6f1c1a52-8f3e-4c8e-9b8a-0f6f2d0c1a11');
-      await page.getByRole('button', { name: 'VLESS · XHTTP' }).click();
+      await page.getByRole('tab', { name: 'Выбрать сервер' }).click();
+      await page.getByRole('button', { name: 'VLESS · XHTTP' }).first().click();
       try {
         await page.waitForSelector('.config svg', { timeout: 5000 });
         if (!(await page.inputValue('.config textarea')).startsWith('vless://'))

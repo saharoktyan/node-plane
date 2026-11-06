@@ -1,7 +1,14 @@
-<!-- The frame of a signed-in page: a side panel with the sections, the way
-     between the cabinet and the administration, and the account; the page
-     takes the rest of the width. The panel folds to icons on a desktop
-     (remembered in this browser) and slides in over the page on a phone. -->
+<!-- The frame of a signed-in page: a side panel with the sections in groups,
+     the way between the cabinet and the administration, and the account;
+     the page takes the rest of the width. The panel folds to icons on a
+     desktop (remembered in this browser) and slides in over the page on a
+     phone. -->
+<script lang="ts" module>
+  /** A section; neighbours with the same `group` go under its heading. `dot`
+   * marks one that wants attention, `count` says how many things wait there. */
+  export type Link = { href: string; label: string; icon: string; group?: string; count?: number; dot?: boolean };
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
@@ -9,7 +16,6 @@
   import { t } from '$lib/i18n/index.svelte';
   import Icon from './Icon.svelte';
 
-  type Link = { href: string; label: string; icon: string };
   let {
     sections,
     title,
@@ -44,6 +50,13 @@
       : path.startsWith(href);
   }
 
+  // Each group's sections, in the order given.
+  const groups = $derived(sections.reduce<{ name: string; links: Link[] }[]>((all, link) => {
+    if (!all.length || all[all.length - 1].name !== (link.group ?? '')) all.push({ name: link.group ?? '', links: [] });
+    all[all.length - 1].links.push(link);
+    return all;
+  }, []));
+
   $effect(() => {
     page.url.pathname;
     open = false;
@@ -53,39 +66,49 @@
 <div class="frame" class:folded>
   <aside class:open>
     <div class="head">
-      <span class="title">{title}</span>
-      <button class="icon fold" onclick={fold} title={t(folded ? 'common.expand' : 'common.collapse')}>
+      <div class="brand">
+        <span class="name">Node Plane</span>
+        <span class="caps title">{title}</span>
+      </div>
+      <button class="bare fold" onclick={fold} aria-label={t(folded ? 'common.expand' : 'common.collapse')}
+        title={t(folded ? 'common.expand' : 'common.collapse')}>
         <Icon name={folded ? 'expand' : 'collapse'} />
       </button>
     </div>
     <nav>
-      {#each sections as section (section.href)}
-        <a href={section.href} class:active={current(section.href)} title={section.label}>
-          <Icon name={section.icon} /><span>{section.label}</span>
-        </a>
+      {#each groups as group, index (group.name + index)}
+        <div class="group">
+          {#if group.name}<span class="caps heading">{group.name}</span>{/if}
+          {#each group.links as section (section.href)}
+            <a href={section.href} class:active={current(section.href)} title={section.label}
+              aria-current={current(section.href) ? 'page' : undefined}>
+              <Icon name={section.icon} /><span class="label">{section.label}</span>
+              {#if section.count}<span class="count">{section.count}</span>
+              {:else if section.dot}<span class="dot" aria-label={t('common.attention')}>●</span>{/if}
+            </a>
+          {/each}
+        </div>
       {/each}
     </nav>
     <div class="foot">
       {#if switchTo}
-        <a href={switchTo.href} class="switch" title={switchTo.label}>
-          <Icon name={switchTo.icon} /><span>{switchTo.label}</span>
-        </a>
+        <a href={switchTo.href} title={switchTo.label}><Icon name={switchTo.icon} /><span class="label">{switchTo.label}</span></a>
       {/if}
       <!-- The account's name opens its settings; they have no section of their own. -->
-      <a href="/settings" class="who" class:active={page.url.pathname.startsWith('/settings')} title={account.me?.login ?? ''}>
+      <a href="/settings" class:active={page.url.pathname.startsWith('/settings')} title={account.me?.login ?? ''}>
         <span class="avatar">{(account.me?.display_name ?? account.me?.login ?? '?').slice(0, 1).toUpperCase()}</span>
-        <span>{account.me?.display_name ?? account.me?.login ?? ''}</span>
+        <span class="label">{account.me?.display_name ?? account.me?.login ?? ''}</span>
       </a>
-      <button class="link" onclick={() => account.signOut()} title={t('common.sign_out')}>
-        <Icon name="out" /><span>{t('common.sign_out')}</span>
+      <button class="out" onclick={() => account.signOut()} title={t('common.sign_out')}>
+        <Icon name="out" /><span class="label">{t('common.sign_out')}</span>
       </button>
     </div>
   </aside>
   {#if open}<button class="scrim" aria-label={t('common.collapse')} onclick={() => (open = false)}></button>{/if}
   <div class="body">
     <header class="mobile">
-      <button class="icon" onclick={() => (open = true)} aria-label={t('common.menu')}><Icon name="menu" /></button>
-      <span class="title">{title}</span>
+      <button class="bare" onclick={() => (open = true)} aria-label={t('common.menu')}><Icon name="menu" /></button>
+      <span class="name">Node Plane</span>
     </header>
     <main>{@render children()}</main>
   </div>
@@ -93,13 +116,13 @@
 
 <style>
   .frame {
-    --panel: 15rem;
+    --width: 15rem;
     display: grid;
-    grid-template-columns: var(--panel) 1fr;
+    grid-template-columns: var(--width) 1fr;
     min-height: 100vh;
   }
   .frame.folded {
-    --panel: 3.75rem;
+    --width: 3.75rem;
   }
   aside {
     position: sticky;
@@ -107,100 +130,125 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.75rem 0.6rem;
+    gap: 1.25rem;
+    padding: 1.25rem 0.75rem;
     box-sizing: border-box;
-    background: var(--surface);
+    background: var(--panel);
     border-right: 1px solid var(--line);
-    overflow: hidden;
+    overflow: hidden auto;
   }
   .head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    padding: 0.25rem 0.4rem 0.75rem;
+    padding: 0 0.25rem 0 0.6rem;
   }
-  .title {
+  .brand {
+    display: grid;
+    gap: 0.1rem;
+  }
+  .name {
+    font-family: var(--serif);
+    font-size: 1.3rem;
     font-weight: 600;
     white-space: nowrap;
   }
-  nav,
+  .title {
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  nav {
+    display: grid;
+    gap: 1.1rem;
+  }
+  .group,
   .foot {
     display: grid;
-    gap: 0.15rem;
+    gap: 0.1rem;
+  }
+  .heading {
+    padding: 0 0.6rem 0.25rem;
+    white-space: nowrap;
   }
   .foot {
     margin-top: auto;
     border-top: 1px solid var(--line);
-    padding-top: 0.5rem;
+    padding-top: 0.75rem;
   }
   nav a,
-  .switch,
-  .who,
-  .link {
+  .foot a,
+  .out {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.6rem;
-    border-radius: 8px;
-    color: var(--muted);
+    gap: 0.7rem;
+    padding: 0.45rem 0.6rem;
+    border-left: 2px solid transparent;
+    color: var(--soft);
     text-decoration: none;
     white-space: nowrap;
-    border: none;
-    background: none;
-    font: inherit;
-    cursor: pointer;
+    font-weight: 400;
     text-align: left;
   }
+  nav a :global(svg),
+  .foot :global(svg) {
+    flex: none;
+    color: var(--muted);
+  }
   nav a:hover,
-  .switch:hover,
-  .who:hover,
-  .link:hover {
-    background: var(--bg);
+  .foot a:hover,
+  .out:hover {
     color: var(--text);
   }
   nav a.active,
-  .who.active {
-    background: var(--accent-soft);
+  .foot a.active {
+    color: var(--text);
+    font-weight: 600;
+    border-left-color: var(--accent);
+  }
+  .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .count,
+  .dot {
     color: var(--accent);
-  }
-  .switch {
-    color: var(--text);
-  }
-  .who {
-    color: var(--text);
+    font-weight: 600;
+    font-size: 12px;
   }
   .avatar {
     flex: none;
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-size: 0.75rem;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 11px;
+    font-weight: 600;
     display: grid;
     place-items: center;
   }
-  .icon {
-    border: none;
-    background: none;
-    padding: 0.3rem;
-    color: var(--muted);
-    display: grid;
-  }
-  .folded aside .title,
-  .folded nav span,
-  .folded .foot span:not(.avatar) {
+  .folded .brand,
+  .folded .heading,
+  .folded .label,
+  .folded .count {
     display: none;
   }
   .folded .head {
     justify-content: center;
+    padding: 0;
+  }
+  .folded .dot {
+    position: absolute;
+    margin-left: 14px;
+    margin-top: -12px;
   }
   .body {
     min-width: 0;
   }
   main {
-    padding: 1.5rem 2rem 3rem;
+    padding: 1.5rem 2.5rem 3rem;
   }
   .mobile,
   .scrim {
@@ -225,10 +273,14 @@
     .fold {
       display: none;
     }
-    .folded aside .title,
-    .folded nav span,
-    .folded .foot span:not(.avatar) {
-      display: inline;
+    .folded .brand,
+    .folded .heading,
+    .folded .label,
+    .folded .count {
+      display: revert;
+    }
+    .folded .head {
+      justify-content: space-between;
     }
     .scrim {
       display: block;
@@ -236,15 +288,19 @@
       inset: 0;
       z-index: 10;
       border: none;
-      background: rgb(0 0 0 / 0.35);
+      background: rgb(0 0 0 / 0.4);
+      padding: 0;
     }
     .mobile {
       display: flex;
       align-items: center;
       gap: 0.5rem;
       padding: 0.5rem 1rem;
-      background: var(--surface);
+      background: var(--panel);
       border-bottom: 1px solid var(--line);
+    }
+    .mobile .name {
+      font-size: 1.1rem;
     }
     main {
       padding: 1rem;

@@ -26,6 +26,8 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@fontsource/golos-text": "^5.2.8",
+    "@fontsource/literata": "^5.2.8",
     "openapi-fetch": "^0.14.1",
     "qrcode-generator": "^1.4.4"
   }

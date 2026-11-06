@@ -1,6 +1,7 @@
 <!-- The administration's overview: the same numbers as the bot's admin
      panel, in one line; nodes with problems below. Charts come next. -->
 <script lang="ts">
+  import { tiles } from '$lib/ui/tiles';
   import { api, call } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
   import Async from '$lib/ui/Async.svelte';
@@ -16,7 +17,7 @@
       <span class="muted">{t('admin.version', { version: overview.version })} ·
         {t('admin.checked', { time: dateTime(overview.checked_at) })}</span>
     </div>
-    <div class="stats">
+    <div class="stats" use:tiles>
       <div><div class="label">{t('admin.nodes')}</div><div class="value">{overview.nodes_total}</div>
         <div class="note">{t('admin.enabled', { count: overview.nodes_enabled })}</div></div>
       <div><div class="label">{t('admin.profiles')}</div><div class="value">{overview.profiles_total}</div>

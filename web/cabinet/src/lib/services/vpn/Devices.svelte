@@ -21,6 +21,7 @@
   const room = $derived(list.device_limit == null || active < list.device_limit);
 
   let name = $state('');
+  let adding = $state(false);
   let renaming = $state<{ id: string; name: string } | null>(null);
   // An action waiting for its confirmation, with the key it is sent with.
   let confirming = $state<{ id: string; action: 'rotate_xray' | 'rotate_awg' | 'delete'; key: string } | null>(null);
@@ -54,7 +55,10 @@
         params: { path: { profile_id: profileId }, header: { 'Idempotency-Key': key() } },
         headers: match(profile.desired_revision), body: { display_name: name.trim() } }));
     });
-    if (added) name = '';
+    if (added) {
+      name = '';
+      adding = false;
+    }
   }
 
   async function rename(device: Device, event: SubmitEvent) {
@@ -89,10 +93,22 @@
 </script>
 
 <section class="block">
-  <h2>{t('vpn.devices')}
-    {#if list.device_limit != null}<span class="muted count">{t('vpn.devices_of', { count: active, limit: list.device_limit })}</span>{/if}
-  </h2>
-  <p class="muted">{items.length ? t('vpn.devices_hint') : t('vpn.devices_empty')}</p>
+  <div class="block-head">
+    <h2>{t('vpn.devices')}
+      {#if list.device_limit != null}<small>{t('vpn.devices_of', { count: active, limit: list.device_limit })}</small>{/if}
+    </h2>
+    {#if room && !adding}<button class="primary" onclick={() => (adding = true)}>{t('vpn.add_short')}</button>{/if}
+  </div>
+  {#if adding && room}
+    <form class="row add" onsubmit={add}>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input class="name" maxlength="256" placeholder={t('vpn.device_name')} aria-label={t('vpn.device_name')}
+        bind:value={name} autofocus />
+      <button class="primary" disabled={busy || !name.trim()}>{t('vpn.add_device')}</button>
+      <button type="button" onclick={() => { adding = false; name = ''; }}>{t('vpn.cancel')}</button>
+    </form>
+  {/if}
+  {#if !items.length}<p class="muted">{t('vpn.devices_empty')}</p>{/if}
   <div class="rows">
     {#each items as device (device.id)}
       <div>
@@ -103,12 +119,10 @@
             <button type="button" onclick={() => (renaming = null)}>{t('vpn.cancel')}</button>
           </form>
         {:else}
-          <div class="grow">
-            <strong>{device.display_name}</strong>
-            {#if device.status === 'deleting'}<span class="muted"> · {t('vpn.deleting')}</span>{/if}
-            {#if device.status === 'active' && device.networks}
-              <div class="muted small">{t('vpn.networks', device.networks)}</div>
-            {/if}
+          <div class="grow line">
+            <strong class="title">{device.display_name}</strong>
+            {#if device.status === 'deleting'}<span class="muted small">{t('vpn.deleting')}</span>
+            {:else if device.networks}<span class="muted small">{t('vpn.networks', device.networks)}</span>{/if}
           </div>
           {#if device.status === 'active'}
             <Menu label={t('vpn.device_actions', { name: device.display_name })} items={[
@@ -133,26 +147,27 @@
       </div>
     {/each}
   </div>
-  {#if room}
-    <form class="row add" onsubmit={add}>
-      <input class="name" maxlength="256" placeholder={t('vpn.device_name')} aria-label={t('vpn.device_name')}
-        bind:value={name} />
-      <button class="primary" disabled={busy || !name.trim()}>{t('vpn.add_device')}</button>
-    </form>
-  {:else}
-    <p class="muted">{t('vpn.limit_reached')}</p>
-  {/if}
+  {#if items.length}<p class="muted small hint">{room ? t('vpn.devices_hint') : t('vpn.limit_reached')}</p>{/if}
   {#if notice}<p class="error">{notice}</p>{/if}
 </section>
 
 <style>
-  .count {
-    font-weight: 400;
-    font-size: 0.9rem;
-    margin-left: 0.5rem;
+  .rows > div {
+    padding: 0.35rem 0;
+    min-height: 2.6rem;
+  }
+  .line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.1rem 1rem;
+  }
+  .title {
+    flex: 0 0 14rem;
+    max-width: 100%;
   }
   .small {
-    font-size: 0.85rem;
+    font-size: 13px;
   }
   .name {
     flex: 1 1 14rem;
@@ -160,15 +175,19 @@
     max-width: 24rem;
   }
   .add {
-    margin-top: 0.9rem;
+    padding: 0.75rem 0 0.5rem;
+  }
+  .hint {
+    margin-top: 0.6rem;
   }
   .confirm {
     flex-basis: 100%;
-    padding: 0.5rem 0.75rem;
-    border-left: 3px solid var(--warn);
-    background: var(--surface);
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 0.4rem;
+    border-left: 2px solid var(--warn);
+    background: var(--panel);
   }
   .confirm p {
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.25rem;
   }
 </style>

@@ -1,69 +1,97 @@
+/* The cabinet's look: editorial type (Literata for headings and figures,
+   Golos Text for the interface), hairline rules instead of boxes, one red
+   accent. Actions are words, fields are lines; a few tiles where numbers
+   matter. Light and dark share every rule; only the tokens change. The
+   fonts are served with the cabinet, so no page asks another site. */
+@import '@fontsource/literata/400.css';
+@import '@fontsource/literata/500.css';
+@import '@fontsource/literata/600.css';
+@import '@fontsource/literata/400-italic.css';
+@import '@fontsource/golos-text/400.css';
+@import '@fontsource/golos-text/500.css';
+@import '@fontsource/golos-text/600.css';
+
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --text: #16181d;
-  --muted: #5d6470;
-  --line: #dfe2e8;
-  --accent: #2f6fed;
+  --bg: #ffffff;
+  --panel: #fafaf8;
+  --text: #141414;
+  --soft: #3d3d3d;
+  --muted: #6b6b6b;
+  --faint: #8a8a8a;
+  --line: #e4e4e1;
+  --accent: #d9381e;
   --accent-text: #ffffff;
-  --accent-soft: #e8effd;
-  /* Controls are fills, not outlines: a quiet one, darker under the pointer. */
-  --fill: #eaecf0;
-  --fill-hover: #dfe2e8;
-  --danger-soft: #fbe9ea;
-  --danger: #c62f3b;
-  --ok: #1f8a4c;
-  --warn: #b26a00;
-  --radius: 10px;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ok: #1f7a45;
+  --warn: #9a5b00;
+  --danger: var(--accent);
+  /* Older names some parts still use. */
+  --surface: var(--panel);
+  --radius: 0;
+  --serif: 'Literata', Georgia, serif;
+  --sans: 'Golos Text', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--sans);
+  font-size: 14px;
   color: var(--text);
   background: var(--bg);
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #111317;
-    --surface: #1a1d23;
-    --text: #e8eaee;
-    --muted: #9aa1ad;
-    --line: #2c313a;
-    --accent: #5b8ff5;
-    --accent-soft: #1d2a45;
-    --fill: #252930;
-    --fill-hover: #2e333c;
-    --danger-soft: #3a1f23;
-    --danger: #ef5b66;
-    --ok: #3cbf74;
-    --warn: #e6a23c;
+    --bg: #111214;
+    --panel: #16171a;
+    --text: #ecebe7;
+    --soft: #c9c8c3;
+    --muted: #9c9b96;
+    --faint: #7c7b77;
+    --line: #2a2b2f;
+    --accent: #ff6a4d;
+    --accent-text: #111214;
+    --ok: #4cc38a;
+    --warn: #f2a541;
+    color-scheme: dark;
   }
 }
 :root[data-theme='dark'] {
-  --bg: #111317;
-  --surface: #1a1d23;
-  --text: #e8eaee;
-  --muted: #9aa1ad;
-  --line: #2c313a;
-  --accent: #5b8ff5;
-  --accent-soft: #1d2a45;
-  --fill: #252930;
-  --fill-hover: #2e333c;
-  --danger-soft: #3a1f23;
-  --danger: #ef5b66;
-  --ok: #3cbf74;
-  --warn: #e6a23c;
+  --bg: #111214;
+  --panel: #16171a;
+  --text: #ecebe7;
+  --soft: #c9c8c3;
+  --muted: #9c9b96;
+  --faint: #7c7b77;
+  --line: #2a2b2f;
+  --accent: #ff6a4d;
+  --accent-text: #111214;
+  --ok: #4cc38a;
+  --warn: #f2a541;
+  color-scheme: dark;
 }
 body {
   margin: 0;
   background: var(--bg);
+  line-height: 1.45;
 }
 a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+a:hover {
   color: var(--accent);
 }
 h1 {
-  font-size: 1.4rem;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 2.25rem;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   margin: 0 0 1rem;
 }
 h2 {
-  font-size: 1.1rem;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 1.55rem;
   margin: 1.5rem 0 0.75rem;
 }
 .muted {
@@ -71,82 +99,115 @@ h2 {
 }
 .row {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.5rem 1.25rem;
   flex-wrap: wrap;
   align-items: center;
 }
+
+/* Actions are words: underlined, the main one in the accent. */
 button,
 .button {
   font: inherit;
   font-weight: 500;
   border: none;
-  background: var(--fill);
+  background: none;
   color: var(--text);
-  border-radius: 10px;
-  padding: 0.5rem 1rem;
+  padding: 0.35rem 0;
   cursor: pointer;
-  text-decoration: none;
-  transition: background 0.12s, color 0.12s;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
 }
 button:hover:not(:disabled),
 .button:hover {
-  background: var(--fill-hover);
+  color: var(--accent);
 }
 button.primary,
 .button.primary {
-  background: var(--accent);
-  color: var(--accent-text);
-}
-button.primary:hover:not(:disabled),
-.button.primary:hover {
-  background: var(--accent);
-  filter: brightness(1.08);
+  font-weight: 600;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
 }
 button.danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-button.danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-  filter: brightness(0.96);
+  color: var(--accent);
 }
 button:disabled {
-  opacity: 0.55;
+  color: var(--faint);
   cursor: default;
 }
 button:focus-visible,
-.button:focus-visible {
+.button:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
+/* A control without words: an icon or ⋯. */
+button.bare {
+  text-decoration: none;
+  color: var(--muted);
+  min-width: 40px;
+  min-height: 36px;
+  padding: 0 0.4rem;
+}
+
+/* Fields are lines. */
 input,
 select,
 textarea {
   font: inherit;
-  padding: 0.55rem 0.75rem;
-  border: none;
-  border-radius: 10px;
-  background: var(--fill);
+  font-size: 15px;
   color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--text);
+  border-radius: 0;
+  padding: 0.35rem 0;
   width: 100%;
   box-sizing: border-box;
-  outline: 2px solid transparent;
-  transition: outline-color 0.12s;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+select {
+  cursor: pointer;
+}
+select option {
+  background: var(--bg);
+  color: var(--text);
 }
 input::placeholder,
 textarea::placeholder {
-  color: var(--muted);
+  color: var(--faint);
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline-color: var(--accent);
+  border-bottom-color: var(--accent);
+  box-shadow: 0 1px 0 var(--accent);
+}
+textarea {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: none;
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+}
+textarea:focus {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 label {
   display: grid;
-  gap: 0.3rem;
-  margin-bottom: 0.75rem;
+  gap: 0.2rem;
+  margin-bottom: 1rem;
+  font-size: 12px;
+  color: var(--muted);
 }
+label > input,
+label > select {
+  color: var(--text);
+}
+
+/* Tables: small-caps heads, hairline rows. */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -154,41 +215,50 @@ table {
 th,
 td {
   text-align: left;
-  padding: 0.45rem 0.5rem;
+  padding: 0.6rem 0.75rem 0.6rem 0;
   border-bottom: 1px solid var(--line);
+  vertical-align: middle;
 }
 th {
   color: var(--muted);
   font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+/* A table too wide for a phone scrolls in its own box. */
+.table {
+  overflow-x: auto;
 }
 .badge {
-  display: inline-block;
-  font-size: 0.8rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
 }
 .badge.ok {
   color: var(--ok);
-  border-color: var(--ok);
 }
 .badge.warn {
   color: var(--warn);
-  border-color: var(--warn);
 }
 .badge.danger {
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--accent);
 }
 .error {
-  color: var(--danger);
+  color: var(--accent);
+}
+.caps {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
-/* Page head: the title with the page's actions on the right. */
+/* Page head: the title with one or two actions on the right. */
 .page-head {
   display: flex;
-  align-items: center;
-  gap: 1rem;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
   flex-wrap: wrap;
   margin-bottom: 1.25rem;
 }
@@ -198,47 +268,153 @@ th {
 .page-head .actions {
   margin-left: auto;
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
 }
-/* Key numbers in one line, divided by rules, not boxes. */
+.crumbs {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.crumbs a {
+  color: var(--muted);
+}
+
+/* Tiles: key numbers in cells divided by hairlines. */
 .stats {
+  /* `tiles` in lib/ui sets --columns; a shorter last line stretches. */
+  --columns: 4;
   display: flex;
   flex-wrap: wrap;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 1.5rem;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin-bottom: 2rem;
 }
-.stats > div {
-  flex: 1 1 10rem;
-  padding: 0.9rem 1.25rem;
-  border-left: 1px solid var(--line);
-}
-.stats > div:first-child {
-  border-left: none;
-  padding-left: 0;
+.stats > * {
+  flex: 1 1 calc((100% - var(--columns) * 1px) / var(--columns));
+  box-sizing: border-box;
+  background: var(--bg);
+  padding: 0.9rem 1.1rem;
+  min-width: 0;
 }
 .stats .label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--muted);
-  font-size: 0.85rem;
 }
 .stats .value {
-  font-size: 1.35rem;
-  font-weight: 600;
-  margin-top: 0.2rem;
+  font-family: var(--serif);
+  font-size: 1.75rem;
+  line-height: 1.2;
+  margin-top: 0.3rem;
+}
+.stats .value small {
+  font-size: 1rem;
+  color: var(--muted);
 }
 .stats .note {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 13px;
 }
-/* A section of a page: heading, then rows or a table across the width. */
+.meter {
+  height: 2px;
+  margin-top: 0.5rem;
+  background: var(--line);
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--text);
+}
+
+/* A section: its heading over a heavy rule, then rows or a table. */
 section.block {
-  margin-bottom: 2rem;
+  margin-bottom: 2.25rem;
+}
+.block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1.25rem;
+  border-bottom: 2px solid var(--text);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.block-head h2,
+section.block > h2 {
+  margin: 0;
+  font-size: 1.4rem;
 }
 section.block > h2 {
-  margin: 0 0 0.5rem;
+  border-bottom: 2px solid var(--text);
   padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.block-head h2 small {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--muted);
+  margin-left: 0.4rem;
+}
+/* Main column and aside. */
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem 2.5rem;
+  align-items: flex-start;
+}
+.columns > .main {
+  flex: 999 1 520px;
+  min-width: 0;
+}
+.columns > aside {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+/* Facts in an aside: a name on the left, its value on the right. */
+dl.facts {
+  margin: 0.75rem 0 0;
+}
+dl.facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
   border-bottom: 1px solid var(--line);
 }
+dl.facts dt {
+  color: var(--muted);
+  flex: 0 1 auto;
+}
+dl.facts dd {
+  margin: 0;
+  text-align: right;
+}
+/* Tabs: words with the accent under the chosen one. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.5rem;
+}
+.tabs > button,
+.tabs > a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 0.5rem 0;
+  margin-bottom: -2px;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+}
+.tabs > [aria-selected='true'],
+.tabs > [aria-current='page'] {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
 /* Rows that open something: full width, divided by rules. */
 .rows {
   display: grid;
@@ -246,23 +422,21 @@ section.block > h2 {
 .rows > a,
 .rows > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
-  padding: 0.8rem 0.25rem;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 0;
   border-bottom: 1px solid var(--line);
   color: inherit;
   text-decoration: none;
 }
 .rows > a:hover {
-  background: var(--surface);
+  color: inherit;
+  background: var(--panel);
 }
 .rows .grow {
   flex: 1 1 12rem;
   min-width: 0;
-}
-.rows > a,
-.rows > div {
-  flex-wrap: wrap;
 }
 /* Settings: what a group is on the left, its controls on the right. */
 .setting {
@@ -274,6 +448,7 @@ section.block > h2 {
 }
 .setting h2 {
   margin: 0 0 0.3rem;
+  font-size: 1.25rem;
 }
 .setting p {
   margin: 0;
@@ -282,8 +457,10 @@ section.block > h2 {
   .setting {
     grid-template-columns: 1fr;
   }
-  .stats > div {
-    padding-left: 0;
-    border-left: none;
+  h1 {
+    font-size: 1.9rem;
+  }
+  .stats .value {
+    font-size: 1.35rem;
   }
 }

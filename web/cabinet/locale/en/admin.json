@@ -47,5 +47,8 @@
   "active": "active: {count}",
   "no_problems": "No problems.",
   "node": "Node",
-  "region": "Region"
+  "region": "Region",
+  "group_people": "People",
+  "group_infrastructure": "Infrastructure",
+  "group_system": "System"
 }

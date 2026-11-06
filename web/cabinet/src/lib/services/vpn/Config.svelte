@@ -41,7 +41,7 @@
 <div class="config">
   <div class="head">
     <strong>{artifact.display_name ?? artifact.filename}</strong>
-    <button onclick={onclose}>{t('vpn.close')}</button>
+    <button class="bare close" onclick={onclose} aria-label={t('vpn.close')} title={t('vpn.close')}>×</button>
   </div>
   <p class="muted">{t(issuance.protocol === 'xray' ? 'vpn.import_xray' : 'vpn.import_awg')}</p>
   <div class="parts">
@@ -73,12 +73,11 @@
 </div>
 
 <style>
+  /* Opens under its server's row, marked by the accent on the left. */
   .config {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    padding: 1rem 1.25rem;
-    margin: 1rem 0;
+    border-left: 2px solid var(--accent);
+    background: var(--panel);
+    padding: 0.9rem 1.1rem 1.1rem;
   }
   .head {
     display: flex;
@@ -86,9 +85,17 @@
     gap: 1rem;
     justify-content: space-between;
   }
+  .close {
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+  .head + p {
+    margin: 0.25rem 0 0;
+    font-size: 13px;
+  }
   .parts {
     display: flex;
-    gap: 1.5rem;
+    gap: 0.5rem 1.75rem;
     flex-wrap: wrap;
   }
   .grow {
@@ -96,15 +103,18 @@
     min-width: 0;
   }
   .label {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.75rem 0 0.35rem;
+    margin: 0.9rem 0 0.4rem;
   }
   .qr .image {
-    width: 13rem;
+    width: 11rem;
     max-width: 100%;
     background: #fff;
-    border-radius: 6px;
+    padding: 0.5rem;
+    box-sizing: border-box;
     line-height: 0;
   }
   .qr :global(svg) {
@@ -112,12 +122,11 @@
     height: auto;
   }
   textarea {
-    font: 0.85rem ui-monospace, monospace;
+    background: var(--bg);
     width: 100%;
-    box-sizing: border-box;
     resize: vertical;
     word-break: break-all;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
   }
   .row button {
     max-width: 100%;

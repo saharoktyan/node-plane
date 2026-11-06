@@ -91,11 +91,9 @@ export function summary(id: string, lang: 'ru' | 'en'): Schemas['MemberProfileSu
     renewal: null, quota: { limit_bytes: 107374182400, used_bytes: 32212254720, period_end: '2026-12-01T00:00:00+00:00',
       on_exhausted: 'block', throttled_kbit: null },
     expires_at: '2026-12-06T00:00:00+00:00', created_at: '2026-10-01T00:00:00+00:00',
-    nodes: [
-      { key: 'de1', title: 'Frankfurt', flag: '🇩🇪', region: 'Europe', protocols: ['xray', 'awg'] },
-      { key: 'fi1', title: 'Helsinki', flag: '🇫🇮', region: 'Europe', protocols: ['xray'] }
-    ],
-    node_count: 2, protocol_count: 3, xray_count: 2, awg_count: 1, issued_count: 4,
+    nodes: SERVERS.map(({ key, title, flag, region }, index) =>
+      ({ key, title, flag, region, protocols: index % 4 === 3 ? ['xray'] : ['xray', 'awg'] })),
+    node_count: SERVERS.length, protocol_count: 3, xray_count: 2, awg_count: 1, issued_count: 4,
     last_issued_at: '2026-11-01T10:00:00+00:00'
   };
 }
@@ -175,10 +173,24 @@ export function profile(id: string): Schemas['ProfileOutput'] {
     frozen: false, expires_at: '2026-12-06T00:00:00+00:00', desired_revision: 7, deleting: false };
 }
 
-export const availableNodes: Schemas['AvailableNode'][] = [
-  { key: 'de1', title: 'Frankfurt', flag: '🇩🇪', region: 'Europe',
-    protocols: [{ kind: 'xray', transports: ['tcp', 'xhttp'] }, { kind: 'awg', transports: ['vpn', 'conf'] }] }
-];
+// Enough servers for the list's pages; Singapore is out of service now.
+const SERVERS = ([
+  ['de1', 'Frankfurt', '🇩🇪', 'Europe'], ['de2', 'Frankfurt 2', '🇩🇪', 'Europe'], ['nl1', 'Amsterdam', '🇳🇱', 'Europe'],
+  ['fi1', 'Helsinki', '🇫🇮', 'Europe'], ['se1', 'Stockholm', '🇸🇪', 'Europe'], ['pl1', 'Warsaw', '🇵🇱', 'Europe'],
+  ['fr1', 'Paris', '🇫🇷', 'Europe'], ['gb1', 'London', '🇬🇧', 'Europe'], ['at1', 'Vienna', '🇦🇹', 'Europe'],
+  ['ch1', 'Zurich', '🇨🇭', 'Europe'], ['es1', 'Madrid', '🇪🇸', 'Europe'], ['it1', 'Milan', '🇮🇹', 'Europe'],
+  ['lv1', 'Riga', '🇱🇻', 'Europe'], ['lt1', 'Vilnius', '🇱🇹', 'Europe'], ['ee1', 'Tallinn', '🇪🇪', 'Europe'],
+  ['rs1', 'Belgrade', '🇷🇸', 'Europe'], ['tr1', 'Istanbul', '🇹🇷', 'Asia'], ['am1', 'Yerevan', '🇦🇲', 'Asia'],
+  ['ge1', 'Tbilisi', '🇬🇪', 'Asia'], ['kz1', 'Almaty', '🇰🇿', 'Asia'], ['ae1', 'Dubai', '🇦🇪', 'Asia'],
+  ['jp1', 'Tokyo', '🇯🇵', 'Asia'], ['sg1', 'Singapore', '🇸🇬', 'Asia'], ['us1', 'Ashburn', '🇺🇸', 'America'],
+  ['us2', 'New York', '🇺🇸', 'America'], ['us3', 'Los Angeles', '🇺🇸', 'America'], ['ca1', 'Toronto', '🇨🇦', 'America'],
+  ['br1', 'São Paulo', '🇧🇷', 'America'], ['hk1', 'Hong Kong', '🇭🇰', 'Asia'], ['au1', 'Sydney', '🇦🇺', 'Oceania']
+] as const).map(([key, title, flag, region]) => ({ key, title, flag, region }));
+
+export const availableNodes: Schemas['AvailableNode'][] = SERVERS.filter((server) => server.key !== 'sg1')
+  .map((server) => ({ ...server, protocols: SERVERS.indexOf(server) % 4 === 3
+    ? [{ kind: 'xray', transports: ['tcp'] }]
+    : [{ kind: 'xray', transports: ['tcp', 'xhttp'] }, { kind: 'awg', transports: ['vpn', 'conf'] }] }));
 
 export function issuance(body: Schemas['ConfigIssuanceInput']): Schemas['ConfigIssuanceOutput'] {
   return { id: `i-${body.node_key}-${body.protocol}-${body.transport}`, profile_id: VPN_ID, node_key: body.node_key,

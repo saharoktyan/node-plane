@@ -18,7 +18,7 @@
   <div class="inner">
     <div class="head">
       <h2>{title}</h2>
-      <button class="close" onclick={() => dialog.close()} aria-label={t('vpn.close')}>×</button>
+      <button class="bare close" onclick={() => dialog.close()} aria-label={t('vpn.close')}>×</button>
     </div>
     {@render children()}
   </div>
@@ -26,18 +26,19 @@
 
 <style>
   dialog {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
+    border: none;
+    border-top: 2px solid var(--text);
+    background: var(--bg);
     color: var(--text);
     padding: 0;
-    width: min(32rem, calc(100vw - 2rem));
+    width: min(34rem, calc(100vw - 2rem));
+    box-shadow: 0 18px 48px rgb(0 0 0 / 0.22);
   }
   dialog::backdrop {
-    background: rgb(0 0 0 / 0.4);
+    background: rgb(0 0 0 / 0.45);
   }
   .inner {
-    padding: 1.1rem 1.25rem 1.25rem;
+    padding: 1.25rem 1.5rem 1.5rem;
   }
   .head {
     display: flex;
@@ -49,11 +50,11 @@
     margin: 0 0 0.75rem;
   }
   .close {
-    border: none;
-    background: none;
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     line-height: 1;
-    padding: 0 0.25rem;
-    color: var(--muted);
+    margin: -0.4rem -0.6rem 0 0;
+  }
+  .close:hover {
+    color: var(--text);
   }
 </style>

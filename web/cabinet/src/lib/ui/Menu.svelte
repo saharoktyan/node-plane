@@ -28,7 +28,7 @@
 </script>
 
 <div class="menu" bind:this={root}>
-  <button class="trigger" aria-label={label} aria-haspopup="menu" aria-expanded={open}
+  <button class="bare trigger" aria-label={label} aria-haspopup="menu" aria-expanded={open}
     onclick={() => (open = !open)}>⋯</button>
   {#if open}
     <div class="list" role="menu">
@@ -44,17 +44,11 @@
     position: relative;
   }
   .trigger {
-    border: none;
-    background: none;
     font-size: 1.25rem;
     line-height: 1;
-    padding: 0.3rem 0.6rem;
-    border-radius: 8px;
-    color: var(--muted);
   }
   .trigger:hover,
   .trigger[aria-expanded='true'] {
-    background: var(--surface);
     color: var(--text);
   }
   .list {
@@ -62,28 +56,27 @@
     right: 0;
     top: calc(100% + 0.25rem);
     z-index: 5;
-    min-width: 12rem;
+    min-width: 13rem;
     display: grid;
-    padding: 0.3rem;
-    background: var(--surface);
+    padding: 0.35rem 0;
+    background: var(--bg);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+    border-top: 2px solid var(--text);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 0.16);
   }
   .list button {
-    border: none;
-    background: none;
+    text-decoration: none;
+    font-weight: 400;
     text-align: left;
-    padding: 0.5rem 0.7rem;
-    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
     white-space: nowrap;
   }
   .list button:hover {
-    background: var(--bg);
+    background: var(--panel);
   }
   .list button.danger {
-    margin-top: 0.25rem;
+    margin-top: 0.35rem;
     border-top: 1px solid var(--line);
-    border-radius: 0 0 6px 6px;
+    padding-top: 0.65rem;
   }
 </style>

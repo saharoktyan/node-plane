@@ -7,5 +7,6 @@
   "expand": "Expand the panel",
   "collapse": "Collapse the panel",
   "menu": "Menu",
-  "actions": "Actions"
+  "actions": "Actions",
+  "attention": "Needs attention"
 }
