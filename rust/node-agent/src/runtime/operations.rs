@@ -6,7 +6,6 @@ use serde_json::Value;
 use tonic::Status;
 
 use crate::agent::v1::{BackendNodeActionRequest, RuntimeCommandResponse};
-use crate::host::metrics as host_metrics;
 use crate::intents::leases::System;
 use crate::intents::operation::{self, Node};
 use crate::protocols::traffic;
@@ -31,7 +30,20 @@ impl AgentState {
             return Err(Status::failed_precondition("agent node identity mismatch"));
         }
         if req.action == "host_metrics" {
-            let mut metrics = host_metrics::resources();
+            // The cheap reading: memory, load, CPU, disk and network counters.
+            let mut metrics = crate::intents::operation::host_metrics(std::path::Path::new(
+                &self.config.runtime_root,
+            ));
+            if let (Some(resources), Some(network)) = (
+                metrics.as_object_mut(),
+                crate::host::network::counters().as_object(),
+            ) {
+                resources.extend(
+                    network
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+            }
             if let (Some(resources), Some(cpu)) =
                 (metrics.as_object_mut(), self.cpu_metrics().as_object())
             {

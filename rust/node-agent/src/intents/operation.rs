@@ -347,7 +347,7 @@ pub(crate) fn run(
 }
 
 /// Host resources the controller shows; a missing reading stays unknown.
-fn host_metrics(root: &Path) -> Value {
+pub(crate) fn host_metrics(root: &Path) -> Value {
     let mut metrics = crate::host::metrics::resources();
     let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     let path = std::ffi::CString::new(root.as_os_str().as_encoded_bytes()).unwrap_or_default();

@@ -20,7 +20,7 @@ from .authorization import (
     ADMIN_PERMISSIONS, require_permission, resolve_actor,
 )
 from .credentials import CredentialService
-from . import relay_policy
+from . import charts, relay_policy
 from .announcements import AnnouncementService
 from .alerts import AlertService
 from .identity import IdentityService
@@ -732,6 +732,96 @@ class AdminOverviewOutput(BaseModel):
     tasks: dict[str, int] = Field(default_factory=dict)
     backup: dict = Field(default_factory=dict)
     updates: dict = Field(default_factory=dict)
+
+
+class NodeMetricPoint(BaseModel):
+    at: str
+    cpu_percent: float | None = None
+    load1: float | None = None
+    cpus: int | None = None
+    ram_percent: float | None = None
+    disk_free_percent: float | None = None
+    # Bits per second over all physical interfaces.
+    net_rx_bps: float | None = None
+    net_tx_bps: float | None = None
+
+
+class NodeMetricSeries(BaseModel):
+    key: str
+    title: str
+    flag: str = ''
+    region: str = ''
+    latest: NodeMetricPoint | None = None
+    points: list[NodeMetricPoint]
+
+
+class NodeMetricsOutput(BaseModel):
+    range: Literal['24h', '7d', '30d']
+    # '5m' readings for a day, '1h' averages for longer.
+    resolution: Literal['5m', '1h']
+    nodes: list[NodeMetricSeries]
+
+
+class OnlineNode(BaseModel):
+    key: str
+    title: str
+    flag: str = ''
+    devices: int
+
+
+class VpnOnline(BaseModel):
+    accounts: int
+    devices: int
+    protocols: dict[str, int]
+    nodes: list[OnlineNode]
+
+
+class VpnTrafficDay(BaseModel):
+    day: str
+    bytes: int
+    # Bytes per node key.
+    nodes: dict[str, int]
+
+
+class VpnExpiring(BaseModel):
+    # Profiles ending in each of the next four weeks.
+    weeks: list[int]
+    renewals_pending: int
+
+
+class VpnTopProfile(BaseModel):
+    profile_id: UUID
+    display_name: str
+    bytes: int
+    devices: int
+
+
+class VpnActivityOutput(BaseModel):
+    online: VpnOnline
+    days: list[VpnTrafficDay]
+    # This month's bytes per protocol.
+    protocols: dict[str, int]
+    expiring: VpnExpiring
+    top: list[VpnTopProfile]
+
+
+class MemberTrafficDay(BaseModel):
+    day: str
+    uplink_bytes: int
+    downlink_bytes: int
+
+
+class MemberTrafficServer(BaseModel):
+    node_key: str
+    title: str
+    flag: str = ''
+    protocol: Literal['awg', 'xray']
+    bytes: int
+
+
+class MemberTrafficHistory(BaseModel):
+    days: list[MemberTrafficDay]
+    servers: list[MemberTrafficServer]
 
 
 class UpdatePreferencesInput(BaseModel):
@@ -2485,6 +2575,18 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.get('/api/v1/admin/overview', response_model=AdminOverviewOutput)
     def administration_overview(current=Depends(actor)):
         return {'version': APP_VERSION, **admin_overview.get(current)}
+
+    @app.get('/api/v1/admin/metrics/nodes', response_model=NodeMetricsOutput)
+    def node_metrics_history(current=Depends(actor), range: Literal['24h', '7d', '30d'] = '24h'):
+        return charts.node_history(db, current, range)
+
+    @app.get('/api/v1/admin/metrics/vpn', response_model=VpnActivityOutput)
+    def vpn_metrics(current=Depends(actor)):
+        return charts.vpn_activity(db, current)
+
+    @app.get('/api/v1/me/profiles/{profile_id}/history', response_model=MemberTrafficHistory)
+    def own_profile_history(profile_id: UUID, current=Depends(actor), days: Annotated[int, Query(ge=7, le=90)] = 30):
+        return charts.member_history(db, current, str(profile_id), days)
 
     @app.get('/api/v1/profiles/{profile_id}', response_model=ProfileOutput)
     def profile(profile_id: UUID, response: Response, current=Depends(actor)):

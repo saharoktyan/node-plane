@@ -3,4 +3,5 @@ pub(crate) mod authorized_keys;
 pub(crate) mod docker;
 pub(crate) mod hardening;
 pub(crate) mod metrics;
+pub(crate) mod network;
 pub(crate) mod ports;

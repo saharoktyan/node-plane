@@ -134,6 +134,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/metrics/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Metrics History */
+        get: operations["node_metrics_history_api_v1_admin_metrics_nodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/metrics/vpn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vpn Metrics */
+        get: operations["vpn_metrics_api_v1_admin_metrics_vpn_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/overview": {
         parameters: {
             query?: never;
@@ -894,6 +928,23 @@ export interface paths {
         };
         /** Own Profiles */
         get: operations["own_profiles_api_v1_me_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/profiles/{profile_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Own Profile History */
+        get: operations["own_profile_history_api_v1_me_profiles__profile_id__history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4349,6 +4400,41 @@ export interface components {
             /** Xray Count */
             xray_count: number;
         };
+        /** MemberTrafficDay */
+        MemberTrafficDay: {
+            /** Day */
+            day: string;
+            /** Downlink Bytes */
+            downlink_bytes: number;
+            /** Uplink Bytes */
+            uplink_bytes: number;
+        };
+        /** MemberTrafficHistory */
+        MemberTrafficHistory: {
+            /** Days */
+            days: components["schemas"]["MemberTrafficDay"][];
+            /** Servers */
+            servers: components["schemas"]["MemberTrafficServer"][];
+        };
+        /** MemberTrafficServer */
+        MemberTrafficServer: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Flag
+             * @default
+             */
+            flag: string;
+            /** Node Key */
+            node_key: string;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "awg" | "xray";
+            /** Title */
+            title: string;
+        };
         /** MergeCode */
         MergeCode: {
             /** Code */
@@ -4523,6 +4609,60 @@ export interface components {
             /** Verification Target */
             verification_target: string | null;
         };
+        /** NodeMetricPoint */
+        NodeMetricPoint: {
+            /** At */
+            at: string;
+            /** Cpu Percent */
+            cpu_percent?: number | null;
+            /** Cpus */
+            cpus?: number | null;
+            /** Disk Free Percent */
+            disk_free_percent?: number | null;
+            /** Load1 */
+            load1?: number | null;
+            /** Net Rx Bps */
+            net_rx_bps?: number | null;
+            /** Net Tx Bps */
+            net_tx_bps?: number | null;
+            /** Ram Percent */
+            ram_percent?: number | null;
+        };
+        /** NodeMetricSeries */
+        NodeMetricSeries: {
+            /**
+             * Flag
+             * @default
+             */
+            flag: string;
+            /** Key */
+            key: string;
+            latest?: components["schemas"]["NodeMetricPoint"] | null;
+            /** Points */
+            points: components["schemas"]["NodeMetricPoint"][];
+            /**
+             * Region
+             * @default
+             */
+            region: string;
+            /** Title */
+            title: string;
+        };
+        /** NodeMetricsOutput */
+        NodeMetricsOutput: {
+            /** Nodes */
+            nodes: components["schemas"]["NodeMetricSeries"][];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "24h" | "7d" | "30d";
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "5m" | "1h";
+        };
         /** NodePage */
         NodePage: {
             /** Items */
@@ -4696,6 +4836,20 @@ export interface components {
             status: "current" | "waiting" | "unknown";
             /** Total Bytes */
             total_bytes: number | null;
+        };
+        /** OnlineNode */
+        OnlineNode: {
+            /** Devices */
+            devices: number;
+            /**
+             * Flag
+             * @default
+             */
+            flag: string;
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
         };
         /** OperationOutput */
         OperationOutput: {
@@ -5633,6 +5787,39 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** VpnActivityOutput */
+        VpnActivityOutput: {
+            /** Days */
+            days: components["schemas"]["VpnTrafficDay"][];
+            expiring: components["schemas"]["VpnExpiring"];
+            online: components["schemas"]["VpnOnline"];
+            /** Protocols */
+            protocols: {
+                [key: string]: number;
+            };
+            /** Top */
+            top: components["schemas"]["VpnTopProfile"][];
+        };
+        /** VpnExpiring */
+        VpnExpiring: {
+            /** Renewals Pending */
+            renewals_pending: number;
+            /** Weeks */
+            weeks: number[];
+        };
+        /** VpnOnline */
+        VpnOnline: {
+            /** Accounts */
+            accounts: number;
+            /** Devices */
+            devices: number;
+            /** Nodes */
+            nodes: components["schemas"]["OnlineNode"][];
+            /** Protocols */
+            protocols: {
+                [key: string]: number;
+            };
+        };
         /** VpnPolicyChangeInput */
         VpnPolicyChangeInput: {
             /** Key */
@@ -5650,6 +5837,31 @@ export interface components {
         VpnPolicyInput: {
             /** Changes */
             changes: components["schemas"]["VpnPolicyChangeInput"][];
+        };
+        /** VpnTopProfile */
+        VpnTopProfile: {
+            /** Bytes */
+            bytes: number;
+            /** Devices */
+            devices: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Profile Id
+             * Format: uuid
+             */
+            profile_id: string;
+        };
+        /** VpnTrafficDay */
+        VpnTrafficDay: {
+            /** Bytes */
+            bytes: number;
+            /** Day */
+            day: string;
+            /** Nodes */
+            nodes: {
+                [key: string]: number;
+            };
         };
         /** WebAuthnOptions */
         WebAuthnOptions: {
@@ -6025,6 +6237,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminAccountOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    node_metrics_history_api_v1_admin_metrics_nodes_get: {
+        parameters: {
+            query?: {
+                range?: "24h" | "7d" | "30d";
+            };
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeMetricsOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vpn_metrics_api_v1_admin_metrics_vpn_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VpnActivityOutput"];
                 };
             };
             /** @description Validation Error */
@@ -7598,6 +7874,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfilePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    own_profile_history_api_v1_me_profiles__profile_id__history_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberTrafficHistory"];
                 };
             };
             /** @description Validation Error */

@@ -358,6 +358,12 @@ class Worker:
         except Exception:
             import logging
             logging.getLogger(__name__).warning('Alert monitor requires attention')
+        from .node_metrics import NodeMetrics
+        try:
+            NodeMetrics(self.executor.db, GrpcIntentDriver(self.channel, timeout=5)).scheduled()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('Node metrics history requires attention')
         from .quotas import QuotaService
         try:
             # Before traffic: a finished period closes before new usage accrues.

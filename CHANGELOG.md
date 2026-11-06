@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- History for charts (migration r0049). Traffic is kept per day for each
+  profile, node and protocol, and a device that moved traffic in the last
+  five minutes counts as online. Every five minutes the controller reads
+  each node's CPU, load, memory, free disk and network rate (the agent's
+  `host_metrics` now reports disk and the byte counters of the physical
+  interfaces); readings are kept a week and hourly averages a month. New
+  endpoints: `GET /api/v1/admin/metrics/nodes?range=24h|7d|30d`,
+  `GET /api/v1/admin/metrics/vpn` (online, traffic per day by node,
+  protocols, expiring profiles, the month's heaviest users) and
+  `GET /api/v1/me/profiles/{id}/history?days=` for a member's own traffic
+  per day and per server. None of it is restored from a backup.
+
 - Announcements can have a title (migration r0048): one line in each
   language, asked before the text in the bot and Workstation and skipped
   with **No title**. It heads the message in Telegram and names it in the

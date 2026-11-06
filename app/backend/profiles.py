@@ -144,6 +144,8 @@ class ProfileRepository:
         SystemSettingsService(self.db).initialize_schema()
         from .traffic import TrafficService
         TrafficService(self.db).initialize_schema()
+        from .node_metrics import NodeMetrics
+        NodeMetrics(self.db).initialize_schema()
         from .connection_limits import ConnectionLimits
         ConnectionLimits(self.db).initialize_schema()
         from .speed_limits import SpeedLimits

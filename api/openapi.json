@@ -3396,6 +3396,90 @@
         "title": "MemberProfileSummary",
         "type": "object"
       },
+      "MemberTrafficDay": {
+        "properties": {
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "downlink_bytes": {
+            "title": "Downlink Bytes",
+            "type": "integer"
+          },
+          "uplink_bytes": {
+            "title": "Uplink Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "uplink_bytes",
+          "downlink_bytes"
+        ],
+        "title": "MemberTrafficDay",
+        "type": "object"
+      },
+      "MemberTrafficHistory": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/MemberTrafficDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/MemberTrafficServer"
+            },
+            "title": "Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "days",
+          "servers"
+        ],
+        "title": "MemberTrafficHistory",
+        "type": "object"
+      },
+      "MemberTrafficServer": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "flag": {
+            "default": "",
+            "title": "Flag",
+            "type": "string"
+          },
+          "node_key": {
+            "title": "Node Key",
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              "awg",
+              "xray"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "title",
+          "protocol",
+          "bytes"
+        ],
+        "title": "MemberTrafficServer",
+        "type": "object"
+      },
       "MergeCode": {
         "properties": {
           "code": {
@@ -3979,6 +4063,177 @@
         "title": "NodeMaintenanceOutput",
         "type": "object"
       },
+      "NodeMetricPoint": {
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cpu_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Percent"
+          },
+          "cpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpus"
+          },
+          "disk_free_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Percent"
+          },
+          "load1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load1"
+          },
+          "net_rx_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Rx Bps"
+          },
+          "net_tx_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Tx Bps"
+          },
+          "ram_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ram Percent"
+          }
+        },
+        "required": [
+          "at"
+        ],
+        "title": "NodeMetricPoint",
+        "type": "object"
+      },
+      "NodeMetricSeries": {
+        "properties": {
+          "flag": {
+            "default": "",
+            "title": "Flag",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeMetricPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/NodeMetricPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "region": {
+            "default": "",
+            "title": "Region",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "points"
+        ],
+        "title": "NodeMetricSeries",
+        "type": "object"
+      },
+      "NodeMetricsOutput": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeMetricSeries"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "range": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Range",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "5m",
+              "1h"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "range",
+          "resolution",
+          "nodes"
+        ],
+        "title": "NodeMetricsOutput",
+        "type": "object"
+      },
       "NodePage": {
         "properties": {
           "items": {
@@ -4530,6 +4785,34 @@
           "items"
         ],
         "title": "NodeTrafficSummary",
+        "type": "object"
+      },
+      "OnlineNode": {
+        "properties": {
+          "devices": {
+            "title": "Devices",
+            "type": "integer"
+          },
+          "flag": {
+            "default": "",
+            "title": "Flag",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "devices"
+        ],
+        "title": "OnlineNode",
         "type": "object"
       },
       "OperationOutput": {
@@ -7385,6 +7668,101 @@
         "title": "VersionOutput",
         "type": "object"
       },
+      "VpnActivityOutput": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/VpnTrafficDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "expiring": {
+            "$ref": "#/components/schemas/VpnExpiring"
+          },
+          "online": {
+            "$ref": "#/components/schemas/VpnOnline"
+          },
+          "protocols": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Protocols",
+            "type": "object"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/VpnTopProfile"
+            },
+            "title": "Top",
+            "type": "array"
+          }
+        },
+        "required": [
+          "online",
+          "days",
+          "protocols",
+          "expiring",
+          "top"
+        ],
+        "title": "VpnActivityOutput",
+        "type": "object"
+      },
+      "VpnExpiring": {
+        "properties": {
+          "renewals_pending": {
+            "title": "Renewals Pending",
+            "type": "integer"
+          },
+          "weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "weeks",
+          "renewals_pending"
+        ],
+        "title": "VpnExpiring",
+        "type": "object"
+      },
+      "VpnOnline": {
+        "properties": {
+          "accounts": {
+            "title": "Accounts",
+            "type": "integer"
+          },
+          "devices": {
+            "title": "Devices",
+            "type": "integer"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "protocols": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Protocols",
+            "type": "object"
+          }
+        },
+        "required": [
+          "accounts",
+          "devices",
+          "protocols",
+          "nodes"
+        ],
+        "title": "VpnOnline",
+        "type": "object"
+      },
       "VpnPolicyChangeInput": {
         "additionalProperties": false,
         "properties": {
@@ -7450,6 +7828,61 @@
           "changes"
         ],
         "title": "VpnPolicyInput",
+        "type": "object"
+      },
+      "VpnTopProfile": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "devices": {
+            "title": "Devices",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "profile_id": {
+            "format": "uuid",
+            "title": "Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "display_name",
+          "bytes",
+          "devices"
+        ],
+        "title": "VpnTopProfile",
+        "type": "object"
+      },
+      "VpnTrafficDay": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "nodes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Nodes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "day",
+          "bytes",
+          "nodes"
+        ],
+        "title": "VpnTrafficDay",
         "type": "object"
       },
       "WebAuthnOptions": {
@@ -8322,6 +8755,123 @@
           }
         ],
         "summary": "End Account Sessions"
+      }
+    },
+    "/api/v1/admin/metrics/nodes": {
+      "get": {
+        "operationId": "node_metrics_history_api_v1_admin_metrics_nodes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "title": "Range",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeMetricsOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Node Metrics History"
+      }
+    },
+    "/api/v1/admin/metrics/vpn": {
+      "get": {
+        "operationId": "vpn_metrics_api_v1_admin_metrics_vpn_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpnActivityOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Vpn Metrics"
       }
     },
     "/api/v1/admin/overview": {
@@ -10884,6 +11434,79 @@
           }
         ],
         "summary": "Own Profiles"
+      }
+    },
+    "/api/v1/me/profiles/{profile_id}/history": {
+      "get": {
+        "operationId": "own_profile_history_api_v1_me_profiles__profile_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 90,
+              "minimum": 7,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberTrafficHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Own Profile History"
       }
     },
     "/api/v1/me/profiles/{profile_id}/renewal": {

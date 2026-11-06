@@ -226,6 +226,52 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual(summary.json()['traffic']['nodes'][0]['downlink_bytes'], 250)
         self.assertEqual(summary.json()['traffic']['month'], datetime.now(timezone.utc).strftime('%Y-%m'))
 
+    def test_traffic_is_kept_per_day_and_marks_the_device_active(self):
+        self.collect()
+        peer = lambda: self.db.connection.execute('SELECT last_active_at FROM backend_traffic_peers').fetchone()
+        # The baseline moves nothing: the device is not active yet.
+        self.assertIsNone(peer()['last_active_at'])
+        self.assertIsNone(self.db.connection.execute('SELECT * FROM backend_traffic_daily').fetchone())
+        self.driver.up, self.driver.down = 1100, 2250
+        self.collect()
+        self.driver.up, self.driver.down = 1150, 2300
+        self.collect()
+        day = self.db.connection.execute('SELECT * FROM backend_traffic_daily').fetchone()
+        self.assertEqual((day['day'], day['profile_id'], day['uplink_bytes'], day['downlink_bytes']),
+                         (datetime.now(timezone.utc).strftime('%Y-%m-%d'), self.profile_id, 150, 300))
+        self.assertIsNotNone(peer()['last_active_at'])
+
+    def test_charts_read_the_history(self):
+        from dataclasses import replace
+        from backend import charts
+        from backend.authorization import AccessDenied, MEMBER_PERMISSIONS
+        owner = Actor(Principal('test', PrincipalKind.SERVICE, MEMBER_PERMISSIONS), self.admin)
+        self.collect()
+        self.driver.up, self.driver.down = 1100, 2250
+        self.collect()
+        activity = charts.vpn_activity(self.db, self.actor, days=7)
+        self.assertEqual((activity['online']['accounts'], activity['online']['devices']), (1, 1))
+        self.assertEqual(activity['days'][-1]['bytes'], 350)
+        self.assertEqual(len(activity['days']), 7)
+        self.assertEqual(activity['top'][0]['bytes'], 350)
+        self.assertEqual(sum(activity['protocols'].values()), 350)
+        history = charts.member_history(self.db, owner, self.profile_id, days=30)
+        self.assertEqual((history['days'][-1]['uplink_bytes'], history['days'][-1]['downlink_bytes']), (100, 250))
+        self.assertEqual(history['servers'][0]['bytes'], 350)
+        # Someone else's profile is not found.
+        stranger = Actor(owner.principal, replace(self.admin, id='someone-else'))
+        with self.assertRaises(AccessDenied):
+            charts.member_history(self.db, stranger, self.profile_id)
+        self.assertEqual(charts.node_history(self.db, self.actor, '7d')['resolution'], '1h')
+        with self.assertRaises(AccessDenied):
+            charts.node_history(self.db, self.actor, '1y')
+        # The same over HTTP, with the response models.
+        headers = {**self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}
+        for path in ('/api/v1/admin/metrics/nodes?range=30d', '/api/v1/admin/metrics/vpn',
+                     f'/api/v1/me/profiles/{self.profile_id}/history?days=7'):
+            self.assertEqual(self.client.get(path, headers=headers).status_code, 200, path)
+        self.assertEqual(self.client.get('/api/v1/admin/metrics/nodes?range=1y', headers=headers).status_code, 422)
+
     def test_restart_reset_in_each_direction_and_new_epoch(self):
         self.collect()
         self.driver.up, self.driver.down = 50, 2200

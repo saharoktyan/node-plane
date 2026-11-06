@@ -92,6 +92,8 @@ class TrafficService:
                 (datetime.now(timezone.utc).strftime('%Y-%m'),))
             from db.migration_revisions.r0037_traffic_inbounds import add_columns
             add_columns(conn)
+            from db.migration_revisions.r0049_metrics_history import traffic_history
+            traffic_history(conn)
 
     @staticmethod
     def _enabled(conn):
@@ -376,6 +378,14 @@ class TrafficService:
             return
         from .quotas import accrue
         accrue(conn, key[0], *increments)
+        if any(increments):
+            # The day's share, for charts; days follow UTC like the months.
+            conn.execute('''INSERT INTO backend_traffic_daily
+                (day,profile_id,node_key,protocol,uplink_bytes,downlink_bytes) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(day,profile_id,node_key,protocol) DO UPDATE SET
+                    uplink_bytes=backend_traffic_daily.uplink_bytes+excluded.uplink_bytes,
+                    downlink_bytes=backend_traffic_daily.downlink_bytes+excluded.downlink_bytes''',
+                (timestamp[:10], *key, *increments))
         node_before = conn.execute('''SELECT period_month,inbounds_json FROM backend_node_traffic
             WHERE node_key=? AND protocol=?''', (key[1], key[2])).fetchone()
         conn.execute('''INSERT INTO backend_node_traffic
@@ -394,10 +404,11 @@ class TrafficService:
                     by_inbound), key[1], key[2]))
         peer_status = 'current'
         conn.execute('''UPDATE backend_traffic_peers SET epoch=?,identity=?,last_uplink=?,last_downlink=?,
-            last_inbounds_json=?,last_sample_at=?,status='current'
+            last_inbounds_json=?,last_sample_at=?,status='current',
+            last_active_at=CASE WHEN ? THEN ? ELSE last_active_at END
             WHERE profile_id=? AND node_key=? AND protocol=? AND device_id=?''',
             (observation['epoch'],observation['identity'],up,down,json.dumps(observed, sort_keys=True),
-             timestamp,*peer_key))
+             timestamp,any(increments),timestamp,*peer_key))
         peers = conn.execute('''SELECT b.status,b.last_sample_at FROM backend_devices d
             LEFT JOIN backend_traffic_peers b ON b.device_id=d.id AND b.node_key=? AND b.protocol=?
             WHERE d.profile_id=? AND d.status='active' AND (?='awg' OR EXISTS (

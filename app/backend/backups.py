@@ -97,6 +97,9 @@ CLEAR = (
     "backend_traffic_peers",
     "backend_traffic_usage",
     "backend_node_traffic",
+    # Chart history starts again after a restore (r0049).
+    "backend_traffic_daily",
+    "backend_node_metrics",
     "backend_alert_deliveries",
     "backend_alert_events",
     "backend_alert_state",
