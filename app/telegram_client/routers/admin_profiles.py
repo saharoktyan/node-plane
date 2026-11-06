@@ -322,6 +322,8 @@ async def accounts_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
              + tr(locale, 'status.' + account['status']),
         callback_data=AccountCallback(account_id=account['id']).pack())]
         for account in page['items']]
+    from .invites import accounts_row
+    rows.append(accounts_row(locale))
     rows.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'accounts.title'),
         (tr(locale, 'accounts.choose'),) if page['items'] else (tr(locale, 'accounts.empty'),), embedded_buttons=True, navigation=True),

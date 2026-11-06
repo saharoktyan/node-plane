@@ -498,6 +498,58 @@ impl App {
                 }
                 None
             }
+            Control::AccessInviteNew => {
+                self.access_command(crate::access::Command::InviteTemplates);
+                None
+            }
+            Control::AccessInviteTemplate(index) => {
+                let mut body = serde_json::json!({ "vpn": index > 0 });
+                if index > 1
+                    && let Some(id) = self
+                        .access
+                        .invite_templates
+                        .as_ref()
+                        .and_then(|tariffs| tariffs.get(index - 2))
+                        .and_then(|tariff| tariff["id"].as_str())
+                {
+                    body["tariff_id"] = id.into();
+                }
+                self.access_command(crate::access::Command::InviteCreate {
+                    body,
+                    key: uuid::Uuid::new_v4(),
+                });
+                None
+            }
+            Control::AccessInviteRevoke => {
+                if let Some(id) = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|card| card["id"].as_str())
+                {
+                    let command = crate::access::Command::InviteRevoke {
+                        id: id.to_owned(),
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
+            Control::AccessInviteAccount => {
+                if let Some(id) = self
+                    .access
+                    .card
+                    .as_ref()
+                    .and_then(|card| card.get("_account").unwrap_or(card)["id"].as_str())
+                {
+                    let command = crate::access::Command::InviteCreate {
+                        body: serde_json::json!({ "account_id": id }),
+                        key: uuid::Uuid::new_v4(),
+                    };
+                    self.access_command(command);
+                }
+                None
+            }
             Control::AccessRemovePasskeys => {
                 self.access.passkeys_confirm = true;
                 self.access.selected = 0;
@@ -681,6 +733,7 @@ impl App {
                     || self.access.login_input.take().is_some()
                     || self.access.password_input.take().is_some()
                     || std::mem::take(&mut self.access.passkeys_confirm)
+                    || self.access.invite_templates.take().is_some()
                     || self.access.editor.take().is_some()
                     || self.access.profile_action.take().is_some()
                     || self.access.account_action.take().is_some()
@@ -807,6 +860,10 @@ impl App {
                         | Control::AccessPasswordSave
                         | Control::AccessEndSessions
                         | Control::AccessRemovePasskeys
+                        | Control::AccessInviteNew
+                        | Control::AccessInviteTemplate(_)
+                        | Control::AccessInviteRevoke
+                        | Control::AccessInviteAccount
                         | Control::AccessRemovePasskeysConfirm
                         | Control::AccessDeviceItem(_)
                         | Control::AccessDeviceNew

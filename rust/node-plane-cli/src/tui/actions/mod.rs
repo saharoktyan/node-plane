@@ -321,6 +321,10 @@ impl App {
             | Control::AccessPasswordSave
             | Control::AccessEndSessions
             | Control::AccessRemovePasskeys
+            | Control::AccessInviteNew
+            | Control::AccessInviteTemplate(..)
+            | Control::AccessInviteRevoke
+            | Control::AccessInviteAccount
             | Control::AccessRemovePasskeysConfirm
             | Control::AccessAccountConfirm
             | Control::AccessProfileAction(..)

@@ -276,6 +276,12 @@ pub(super) enum Control {
     AccessPasswordSave,
     /// Sign the open account out on every device.
     AccessEndSessions,
+    /// Invites: choose a new one's template (0 nothing, 1 VPN, then the
+    /// tariffs), revoke the open one, or make the open account's sign-in link.
+    AccessInviteNew,
+    AccessInviteTemplate(usize),
+    AccessInviteRevoke,
+    AccessInviteAccount,
     /// Remove the open account's passkeys: ask, then confirm.
     AccessRemovePasskeys,
     AccessRemovePasskeysConfirm,

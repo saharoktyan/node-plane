@@ -55,6 +55,18 @@
   in the bot); administrators see the count and remove all with
   `DELETE /api/v1/accounts/{id}/passkeys` in the bot and Workstation.
   Backups keep passkeys.
+- Invites (migration r0043): `POST /api/v1/invites` makes a one-time link
+  for 1–30 days (7 by default). A `new` invite registers an account without
+  a request and applies its template, a VPN profile with the default access
+  and optionally a tariff, on behalf of its author with the author's rights
+  at that moment. An `account` invite lets an existing account set its login
+  and password and sign in, also to recover a lost password; it is never
+  made through the Telegram adapter. Used through `POST /api/v1/invites/
+  preview` and `/accept` in the web cabinet (a session of method `invite`)
+  or `/accept/telegram` in the bot (`t.me/<bot>?start=inv_…`). Wrong tokens
+  count toward the sign-in limit by address. In the bot: Accounts → Invite
+  and Invites; in Workstation: the Invites tab and Sign-in link on an
+  account card. A restore voids invites.
 - Driver setup during installation no longer stops on an administrator name
   with spaces, prepares the agent CA even when the controller has no node of
   its own (its first agent enrolls by token), and restarts the backend after

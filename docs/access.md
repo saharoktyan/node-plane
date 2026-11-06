@@ -119,6 +119,14 @@ In Workstation, **Role** on an account card picks the role. Any administrator ma
 
 Expiry and revocation remove runtime authorization and close established VLESS connections. Nodes whose Xray container still runs the upstream image, deployed before this release, only block new connections until the container is redeployed. See [Temporary configurations](temporary-configs.md) for short-lived access.
 
+## Invites
+
+An invite is a one-time link that registers someone without a request. In the bot, **Accounts → Invite** asks what the new account gets: nothing yet, VPN with the default access, or VPN with a tariff (its access and term). The link is `t.me/<bot>?start=inv_…`; when the person opens it, the bot creates their account with their Telegram and offers to set a login. With a relay, the same invite also has a web cabinet link, where the person picks a login and a password or passkey. In Workstation, invites have their own **Invites** tab: **New invite**, and **Revoke** on an active one. A link works once and for 7 days, and is shown only when it is made.
+
+The template is applied with the rights its author has when the link is used: if the author is blocked or loses the right to manage profiles, the invite stops working. Invites give member rights only; assign staff roles afterwards.
+
+**Sign-in link** on an account card in Workstation makes an invite for that account: with it, the person sets a login and password in the web cabinet, for the first time or after losing the password (a new password ends the other sessions). Such a link signs in as the account, so it is never made through Telegram. Restoring a backup voids all invites.
+
 ## Login
 
 An account can have a login: the name it will sign in to the web cabinet with. A login is 3–32 Latin letters, digits, `_`, `.` or `-`, starts with a letter or digit, and is unique regardless of case; names such as `admin`, `root` and `support` are reserved. Everything else refers to the account itself, so changing a login breaks nothing.

@@ -4097,6 +4097,24 @@ CATALOG['en'].update({
     'sessions.remove_passkeys_confirm': 'Remove every passkey of this account? It will sign in with a password '
                                         'or Telegram until it adds a new one in the web cabinet.',
     'sessions.confirm_remove': 'Remove',
+    'invite.title': 'Invite', 'invite.list': 'Invites', 'invite.create': 'Invite',
+    'invite.choose': 'What does the new account get? The link works once and for 7 days; '
+                     'the person opens it in Telegram and gets an account right away, without a request.',
+    'invite.template.none': 'Nothing yet', 'invite.template.vpn': 'VPN',
+    'invite.template.tariff': 'VPN · {title}', 'invite.template.vpn_tariff': 'VPN with a tariff',
+    'invite.template.account': 'Sign-in of an account',
+    'invite.ready': 'Send this link to the person. It works once, until {date}:',
+    'invite.cabinet': 'Or in the web cabinet:',
+    'invite.revoke': 'Revoke', 'invite.revoke_item': 'Revoke #{index}', 'invite.revoked': 'Invite revoked.',
+    'invite.item': '{template} — until {date}', 'invite.empty': 'No active invites.',
+    'invite.welcome_title': 'Welcome', 'invite.continue': 'Continue',
+    'invite.welcome': 'Your account is ready. Set a login to sign in to the web cabinet later.',
+    'invite.error.invite_invalid': 'This invite link is used, revoked or expired. Ask for a new one.',
+    'invite.error.invite_already_registered': 'You already have an account; the invite is for someone new.',
+    'invite.error.invite_not_for_telegram': 'This link is for the web cabinet.',
+    'invite.error.invite_creator_unavailable': 'The person who made this invite can no longer give access. Ask for a new one.',
+    'invite.error.invite_limit': 'Too many active invites. Revoke some first.',
+    'invite.error.sign_in_rate_limited': 'Too many attempts. Try again in 15 minutes.',
 })
 CATALOG['ru'].update({
     'sessions.title': 'Вход и сессии',
@@ -4114,4 +4132,22 @@ CATALOG['ru'].update({
     'sessions.remove_passkeys_confirm': 'Удалить все passkeys этого аккаунта? Входить он сможет по паролю '
                                         'или через Telegram, пока не добавит новый в веб-кабинете.',
     'sessions.confirm_remove': 'Удалить',
+    'invite.title': 'Приглашение', 'invite.list': 'Приглашения', 'invite.create': 'Пригласить',
+    'invite.choose': 'Что получит новый аккаунт? Ссылка одноразовая и действует 7 дней; '
+                     'человек открывает её в Telegram и сразу получает аккаунт, без заявки.',
+    'invite.template.none': 'Пока ничего', 'invite.template.vpn': 'VPN',
+    'invite.template.tariff': 'VPN · {title}', 'invite.template.vpn_tariff': 'VPN с тарифом',
+    'invite.template.account': 'Вход в аккаунт',
+    'invite.ready': 'Отправьте эту ссылку человеку. Она одноразовая и действует до {date}:',
+    'invite.cabinet': 'Или в веб-кабинете:',
+    'invite.revoke': 'Отозвать', 'invite.revoke_item': 'Отозвать №{index}', 'invite.revoked': 'Приглашение отозвано.',
+    'invite.item': '{template} — до {date}', 'invite.empty': 'Активных приглашений нет.',
+    'invite.welcome_title': 'Добро пожаловать', 'invite.continue': 'Продолжить',
+    'invite.welcome': 'Аккаунт готов. Задайте логин, чтобы потом входить в веб-кабинет.',
+    'invite.error.invite_invalid': 'Ссылка уже использована, отозвана или истекла. Попросите новую.',
+    'invite.error.invite_already_registered': 'У вас уже есть аккаунт, а приглашение — для нового человека.',
+    'invite.error.invite_not_for_telegram': 'Эта ссылка — для веб-кабинета.',
+    'invite.error.invite_creator_unavailable': 'Автор приглашения больше не может выдавать доступ. Попросите новое.',
+    'invite.error.invite_limit': 'Слишком много активных приглашений. Сначала отзовите лишние.',
+    'invite.error.sign_in_rate_limited': 'Слишком много попыток. Попробуйте через 15 минут.',
 })

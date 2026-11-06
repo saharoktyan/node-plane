@@ -8,14 +8,16 @@ pub enum Tab {
     #[default]
     Profiles,
     Requests,
+    Invites,
 }
 impl Tab {
-    pub const ALL: [Self; 2] = [Self::Profiles, Self::Requests];
+    pub const ALL: [Self; 3] = [Self::Profiles, Self::Requests, Self::Invites];
     pub fn label(self) -> &'static str {
         match self {
             Self::Accounts => "Accounts",
             Self::Profiles => "Profiles",
             Self::Requests => "Requests",
+            Self::Invites => "Invites",
         }
     }
     pub fn root(self) -> &'static str {
@@ -23,6 +25,7 @@ impl Tab {
             Self::Accounts => "/api/v1/accounts",
             Self::Profiles => "/api/v1/profiles",
             Self::Requests => "/api/v1/access-requests",
+            Self::Invites => "/api/v1/invites",
         }
     }
 }
@@ -56,6 +59,17 @@ pub enum Command {
     },
     /// Removes every passkey of the account.
     RemovePasskeys {
+        id: String,
+        key: Uuid,
+    },
+    /// The tariffs a new invite can carry.
+    InviteTemplates,
+    /// A new invite: `account_id` for an account's sign-in, else a new account.
+    InviteCreate {
+        body: Value,
+        key: Uuid,
+    },
+    InviteRevoke {
         id: String,
         key: Uuid,
     },
@@ -130,6 +144,19 @@ impl Command {
             Self::EndSessions { id, key } => (
                 hyper::Method::DELETE,
                 format!("/api/v1/accounts/{id}/sessions"),
+                None,
+                Some(*key),
+            ),
+            Self::InviteTemplates => (hyper::Method::GET, "/api/v1/tariffs".into(), None, None),
+            Self::InviteCreate { body, key } => (
+                hyper::Method::POST,
+                "/api/v1/invites".into(),
+                Some(body.clone()),
+                Some(*key),
+            ),
+            Self::InviteRevoke { id, key } => (
+                hyper::Method::DELETE,
+                format!("/api/v1/invites/{id}"),
                 None,
                 Some(*key),
             ),
@@ -738,6 +765,8 @@ pub struct Browser {
     pub password_field: usize,
     /// Removing the open account's passkeys waits for confirmation.
     pub passkeys_confirm: bool,
+    /// The template choice of a new invite, with the tariffs it can carry.
+    pub invite_templates: Option<Vec<Value>>,
     pub profile: Option<Uuid>,
     pub tab: Tab,
     pub items: Vec<Value>,
@@ -915,6 +944,15 @@ impl Browser {
                     };
                 }
             }
+            Command::InviteTemplates => {
+                self.invite_templates =
+                    Some(value["items"].as_array().cloned().unwrap_or_default());
+            }
+            Command::InviteCreate { .. } | Command::InviteRevoke { .. } => {
+                self.invite_templates = None;
+                self.tab = Tab::Invites;
+                self.card = Some(value);
+            }
             Command::SetPassword { .. } => {
                 self.password_input = None;
                 if let Some(card) = &mut self.card {
@@ -1036,7 +1074,32 @@ pub fn text(value: &Value) -> String {
         }
     })
 }
+/// What an invite gives, as its card and list show it.
+pub fn invite_template(item: &Value) -> &'static str {
+    if item["kind"] == "account" {
+        "Sign-in of an account"
+    } else if item["vpn"] != true {
+        "New account, no access yet"
+    } else if item["tariff_id"].is_string() {
+        "New account with VPN and a tariff"
+    } else {
+        "New account with VPN"
+    }
+}
+
 pub fn label(tab: Tab, item: &Value) -> String {
+    if tab == Tab::Invites {
+        let until = text(&item["expires_at"]);
+        let mut parts = vec![
+            invite_template(item).to_owned(),
+            text(&item["status"]),
+            format!("until {}", until.get(..10).unwrap_or(&until)),
+        ];
+        if let Some(note) = item["note"].as_str().filter(|note| !note.is_empty()) {
+            parts.push(note.to_owned());
+        }
+        return parts.join(" · ");
+    }
     if item["_account_only"] == true {
         return format!("{} · No VPN access", text(&item["display_name"]));
     }

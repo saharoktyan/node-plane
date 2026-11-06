@@ -225,6 +225,81 @@ class PasskeyPage(BaseModel):
     items: list[PasskeyOutput]
 
 
+class InviteInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    # An existing account's invite to set its login and password; otherwise a new account.
+    account_id: UUID | None = None
+    # Give the new account a VPN profile with the default access.
+    vpn: StrictBool = False
+    # And this tariff's access and term (needs `vpn`).
+    tariff_id: UUID | None = None
+    days: StrictInt = Field(default=7, ge=1, le=30)
+    note: StrictStr | None = Field(default=None, max_length=128)
+
+
+class InviteOutput(BaseModel):
+    id: str
+    kind: Literal['new', 'account']
+    account_id: str | None
+    vpn: bool
+    tariff_id: str | None
+    note: str
+    created_by: str
+    created_at: str
+    expires_at: str
+    used_at: str | None
+    used_account_id: str | None
+    status: Literal['active', 'used', 'expired', 'revoked']
+
+
+class CreatedInvite(InviteOutput):
+    # Shown only once. In the bot: `https://t.me/<bot>?start=<token>`.
+    token: str
+    cabinet_link: str | None
+
+
+class InvitePage(BaseModel):
+    items: list[InviteOutput]
+
+
+class InviteTokenInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    token: StrictStr = Field(max_length=64)
+
+
+class InvitePreview(BaseModel):
+    kind: Literal['new', 'account']
+    expires_at: str
+    vpn: bool
+    tariff: str | None
+    # An `account` invite's current login and whether a password is set.
+    login: str | None
+    has_password: bool
+
+
+class InviteAcceptInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    token: StrictStr = Field(max_length=64)
+    login: StrictStr | None = Field(default=None, max_length=64)
+    password: StrictStr | None = Field(default=None, max_length=256)
+    device: StrictStr | None = Field(default=None, max_length=256)
+
+
+class InviteTelegramInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    token: StrictStr = Field(max_length=64)
+    login: StrictStr | None = Field(default=None, max_length=64)
+
+
+class AcceptedInvite(BaseModel):
+    account: dict[str, Any]
+    session: SessionTokens
+
+
+class AcceptedTelegramInvite(BaseModel):
+    account: dict[str, Any]
+
+
 class AccountPreferencesInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     locale: Literal['ru', 'en'] | None = None
@@ -1611,6 +1686,54 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
         with db.transaction() as conn:
             passkeys.remove(conn, current.account.id, passkey_id)
         return Response(status_code=204)
+
+    @app.post('/api/v1/invites', response_model=CreatedInvite, status_code=201)
+    def create_invite(body: InviteInput, current=Depends(actor)):
+        """A one-time link: a new account with a template, or an account's own sign-in."""
+        from . import invites
+        return invites.create(db, current, account_id=body.account_id, vpn=body.vpn, tariff_id=body.tariff_id,
+                              days=body.days, note=body.note)
+
+    @app.get('/api/v1/invites', response_model=InvitePage)
+    def list_invites(current=Depends(actor)):
+        from . import invites
+        return {'items': invites.listed(db, current)}
+
+    @app.get('/api/v1/invites/{invite_id}', response_model=InviteOutput)
+    def get_invite(invite_id: str, current=Depends(actor)):
+        from . import invites
+        return invites.get(db, current, invite_id)
+
+    @app.delete('/api/v1/invites/{invite_id}', response_model=InviteOutput)
+    def revoke_invite(invite_id: str, current=Depends(actor)):
+        from . import invites
+        return invites.revoke(db, current, invite_id)
+
+    @app.post('/api/v1/invites/preview', response_model=InvitePreview)
+    def preview_invite(body: InviteTokenInput, request: Request):
+        """What an invite does, for the page that uses it."""
+        from . import invites
+        return invites.preview(db, body.token, source=client_source(request))
+
+    @app.post('/api/v1/invites/accept', response_model=AcceptedInvite, status_code=201)
+    def accept_invite(body: InviteAcceptInput, request: Request):
+        """Use an invite in the web cabinet and sign in."""
+        from . import invites
+        return invites.accept(db, body.token, login=body.login, password=body.password,
+                              device=body.device or header(request, 'User-Agent'), source=client_source(request))
+
+    @app.post('/api/v1/invites/accept/telegram', response_model=AcceptedTelegramInvite, status_code=201)
+    def accept_invite_telegram(body: InviteTelegramInput, request: Request, current=Depends(session)):
+        """Use a `new` invite in the bot; the account comes with the visitor's Telegram."""
+        from . import invites
+        from .telegram_visitors import TelegramVisitor
+        if not isinstance(current, TelegramVisitor):
+            if current.principal.kind != PrincipalKind.ADAPTER:
+                raise AccessDenied('invite_not_for_telegram', 409)
+            raise AccessDenied('invite_already_registered', 409)
+        current.require('account.self.preferences.write')
+        return invites.accept_telegram(db, body.token, current.subject, login=body.login,
+                                       source='telegram:' + current.subject)
 
     @app.put('/api/v1/me/login', response_model=MeOutput)
     def set_my_login(body: LoginInput, current=Depends(actor)):

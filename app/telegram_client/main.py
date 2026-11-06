@@ -25,6 +25,7 @@ from .routers import admin_node_policies
 from .routers import admin_relay
 from .routers import account_login
 from .routers import account_sessions
+from .routers import invites
 from .routers import admin_installation_defaults
 from .routers import navigation
 from .routers import quick_start
@@ -79,6 +80,7 @@ async def main() -> None:
             dispatcher.include_router(admin_relay.router)
             dispatcher.include_router(account_login.router)
             dispatcher.include_router(account_sessions.router)
+            dispatcher.include_router(invites.router)
             dispatcher.include_router(admin_recovery.router)
             dispatcher.include_router(admin_updates.router)
             dispatcher.include_router(admin_backups.router)

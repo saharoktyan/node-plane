@@ -168,6 +168,9 @@ def parent_path(callback, locale, data):
             return (*parent_path('admin_node:' + key, locale, data),
                     Breadcrumb(tr(locale, 'node_tools.last_operation'), callback))
         return servers
+    if callback in {'inv:new', 'inv:list'}:
+        return (*parent_path('accounts', locale, data),
+                Breadcrumb(tr(locale, 'invite.title' if callback == 'inv:new' else 'invite.list'), callback))
     if prefix == 'account' and len(pieces) == 2:
         return (*parent_path('accounts', locale, data),
                 Breadcrumb(tr(locale, 'navigation.account'), callback))

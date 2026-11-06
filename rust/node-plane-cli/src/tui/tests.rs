@@ -9693,6 +9693,78 @@ fn the_own_account_sets_its_password_and_any_account_is_signed_out() {
 }
 
 #[test]
+fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    assert!(crate::access::Tab::ALL.contains(&crate::access::Tab::Invites));
+    app.access.tab = crate::access::Tab::Invites;
+    app.access.items = vec![serde_json::json!(
+        {"id":"i1","kind":"new","vpn":true,"tariff_id":null,"status":"active",
+         "expires_at":"2026-11-13T00:00:00+00:00","note":"Dana"}
+    )];
+    assert_eq!(
+        crate::access::label(crate::access::Tab::Invites, &app.access.items[0]),
+        "New account with VPN · active · until 2026-11-13 · Dana"
+    );
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.access_controls().contains(&Control::AccessInviteNew));
+    app.activate(Control::AccessInviteNew);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(
+            crate::access::Command::InviteTemplates
+        ))
+    ));
+    app.access.apply(
+        crate::access::Command::InviteTemplates,
+        serde_json::json!({"items":[{"id":"t1","title":"Month"}]}),
+    );
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessInviteTemplate(2))
+    );
+    app.activate(Control::AccessInviteTemplate(2));
+    let Some(crate::nodes::Command::Access(crate::access::Command::InviteCreate { body, key })) =
+        app.nodes_requested.take()
+    else {
+        panic!("the invite is made");
+    };
+    assert_eq!(body, serde_json::json!({"vpn":true,"tariff_id":"t1"}));
+    app.access.apply(
+        crate::access::Command::InviteCreate { body, key },
+        serde_json::json!({"id":"i2","kind":"new","vpn":true,"tariff_id":"t1","status":"active",
+            "expires_at":"2026-11-13T00:00:00+00:00","note":"","token":"inv_tok",
+            "cabinet_link":"https://cab.example/invite#inv_tok"}),
+    );
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    let screen = format!("{:?}", terminal.backend().buffer());
+    assert!(screen.contains("https://cab.example/invite#inv_tok"));
+    assert!(screen.contains("start=inv_tok"));
+    app.activate(Control::AccessInviteRevoke);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(crate::access::Command::InviteRevoke { id, .. })) if id == "i2"
+    ));
+    app.access.tab = crate::access::Tab::Accounts;
+    app.access.card = Some(serde_json::json!(
+        {"id":"acc", "role":"member", "status":"approved", "revision":1, "has_password":false, "sessions":0}
+    ));
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessInviteAccount)
+    );
+    app.activate(Control::AccessInviteAccount);
+    assert!(matches!(
+        app.nodes_requested.take(),
+        Some(crate::nodes::Command::Access(crate::access::Command::InviteCreate { body, .. }))
+            if body == serde_json::json!({"account_id":"acc"})
+    ));
+}
+
+#[test]
 fn the_relay_page_opens_from_settings_and_from_the_node_card_and_returns_there() {
     use crate::controller::Command;
     let mut app = test_profile_app();

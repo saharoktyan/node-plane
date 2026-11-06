@@ -120,6 +120,9 @@ async def start_cmd(message: Message, bot: Bot, backend: BackendClient,
             language_code=message.from_user.language_code)
         account = await backend.me(message.from_user.id)
         await state.update_data(locale=normalize_locale(account.get('locale') or account.get('language_code')))
+        from .invites import redeem, token_of
+        if token := token_of(message):
+            return await redeem(message, bot, backend, state, token)
         if not account.get('locale_selected'):
             await show_language_picker(message.chat.id, message.from_user.id, bot, backend, state)
         else:

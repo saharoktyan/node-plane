@@ -797,8 +797,16 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 let account = card.get("_account").unwrap_or(card);
                 count += 1 + usize::from(account["role"] != "admin");
                 if app.access.tab == Tab::Accounts {
-                    count += 1;
+                    // Edit access, Login, Sign-in link, the own Password, End
+                    // sessions and Remove passkeys while there are any.
+                    count += 3
+                        + usize::from(app.own_account() == account["id"].as_str())
+                        + usize::from(account["sessions"].as_u64().unwrap_or(0) > 0)
+                        + usize::from(account["passkeys"].as_u64().unwrap_or(0) > 0);
                 }
+            }
+            if app.access.tab == Tab::Invites && card["status"] == "active" {
+                count += 1;
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
                 // Edit, Limits, Tariff, Renewal while requested, Traffic when collected,
@@ -814,6 +822,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             count
         };
         count.div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
+    } else if let Some(tariffs) = &app.access.invite_templates {
+        // Nothing, VPN, the tariffs and Cancel.
+        (tariffs.len().min(20) + 3).div_ceil(if inner.width >= 32 { 2 } else { 1 }) as u16 * 3
     } else if app.access.filtered().len() <= usize::from(inner.height.saturating_sub(9) / 3).max(1)
     {
         3
@@ -998,7 +1009,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
         return;
     }
-    let tabs = Layout::horizontal([Constraint::Fill(1); 2]).split(sections[0]);
+    let tabs = Layout::horizontal([Constraint::Fill(1); Tab::ALL.len()]).split(sections[0]);
     if app.access.card.is_none() && !app.access.creating_profile {
         for (index, tab) in Tab::ALL.into_iter().enumerate() {
             draw_button(
@@ -1062,6 +1073,24 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         ] {
             if !(card[key].is_null() || app.access.tab == Tab::Requests && key == "status") {
                 lines.push(Line::from(format!("{title}: {}", text(&card[key]))));
+            }
+        }
+        if app.access.tab == Tab::Invites {
+            lines.push(Line::from(crate::access::invite_template(card)));
+            if let Some(token) = card["token"].as_str() {
+                lines.push(Line::from(
+                    "Send this to the person; it is shown only now and works once.",
+                ));
+                if let Some(link) = card["cabinet_link"].as_str() {
+                    lines.push(Line::from(format!("Web cabinet: {link}")));
+                }
+                if card["kind"] == "new" {
+                    lines.push(Line::from(format!(
+                        "Telegram: t.me/<bot>?start={token}, or send the bot /start {token}"
+                    )));
+                } else {
+                    lines.push(Line::from(format!("Token: {token}")));
+                }
             }
         }
         if app.access.tab == Tab::Accounts && card["has_password"].is_boolean() {
@@ -1217,6 +1246,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     if account["passkeys"].as_u64().unwrap_or(0) > 0 {
                         buttons.push(("Remove passkeys", Control::AccessRemovePasskeys));
                     }
+                    buttons.push(("Sign-in link", Control::AccessInviteAccount));
                 }
                 if account["role"] != "admin" {
                     buttons.push((
@@ -1256,6 +1286,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     buttons.push(("Delete", Control::AccessProfileAction(true)));
                 }
             }
+            if app.access.tab == Tab::Invites && card["status"] == "active" {
+                buttons.push(("Revoke", Control::AccessInviteRevoke));
+            }
             if app.access.tab == Tab::Requests && card["status"] == "pending" {
                 buttons.extend([
                     ("Approve", Control::AccessDecision(true)),
@@ -1277,6 +1310,26 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             Paragraph::new(lines).wrap(Wrap { trim: false }),
             sections[1],
         );
+    } else if let Some(tariffs) = &app.access.invite_templates {
+        frame.render_widget(
+            Paragraph::new(
+                "What does the new account get? The invite works once and for 7 days. \
+                 A tariff gives VPN with the tariff's access and term.",
+            )
+            .wrap(Wrap { trim: false }),
+            sections[1],
+        );
+        buttons = vec![
+            ("Nothing yet", Control::AccessInviteTemplate(0)),
+            ("VPN", Control::AccessInviteTemplate(1)),
+        ];
+        for (index, tariff) in tariffs.iter().enumerate().take(20) {
+            buttons.push((
+                tariff["title"].as_str().unwrap_or("Tariff"),
+                Control::AccessInviteTemplate(index + 2),
+            ));
+        }
+        buttons.push(("Cancel", Control::AccessBack));
     } else {
         let content =
             Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[1]);
@@ -1337,6 +1390,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         }
         if app.access.tab == Tab::Profiles {
             buttons.push(("New profile", Control::AccessNew));
+        }
+        if app.access.tab == Tab::Invites {
+            buttons.push(("New invite", Control::AccessInviteNew));
         }
         if page > 0 {
             buttons.push(("Previous page", Control::AccessPage(false)));
