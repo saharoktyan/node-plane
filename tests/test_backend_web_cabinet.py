@@ -43,8 +43,10 @@ class WebCabinetTests(unittest.TestCase):
         self.build.mkdir()
         (self.build / 'index.html').write_text('<html></html>')
         self.settings = Path(temporary.name) / 'cabinet-local.json'
+        self.local = Path(temporary.name) / 'served'
         environment = patch.dict(os.environ, {'NODE_PLANE_CABINET_DIR': str(self.build),
-                                              'NODE_PLANE_CABINET_LOCAL_SETTINGS': str(self.settings)})
+                                              'NODE_PLANE_CABINET_LOCAL_SETTINGS': str(self.settings),
+                                              'NODE_PLANE_CABINET_LOCAL_ROOT': str(self.local)})
         environment.start()
         self.addCleanup(environment.stop)
 
@@ -93,7 +95,16 @@ class WebCabinetTests(unittest.TestCase):
         self.assertEqual(cabinet['url'], 'https://cab.home.example')
         self.cabinet.run_one()
         self.assertEqual(json.loads(self.settings.read_text()),
-                         {'listen': '0.0.0.0:8090', 'root': str(self.build), 'version': web_cabinet.APP_SEMVER})
+                         {'listen': '0.0.0.0:8090', 'root': str(self.local / 'current'),
+                          'version': web_cabinet.APP_SEMVER})
+        # A copy anyone may read, switched to whole.
+        served = self.local / 'current' / 'index.html'
+        self.assertEqual((served.read_text(), served.stat().st_mode & 0o777), ('<html></html>', 0o644))
+        self.assertEqual(os.readlink(self.local / 'current'), web_cabinet.APP_SEMVER)
+        (self.local / 'old').mkdir()
+        self.cabinet.recover()
+        self.cabinet.run_one()
+        self.assertEqual(sorted(p.name for p in self.local.iterdir()), sorted(['current', web_cabinet.APP_SEMVER]))
         self.assertEqual(self.driver.calls, [])
         with self.db.connect() as conn:
             self.assertEqual(relying_party(conn), ('cab.home.example', 'https://cab.home.example'))
@@ -102,7 +113,7 @@ class WebCabinetTests(unittest.TestCase):
         self.refused('cabinet_mode_change', lambda: self.cabinet.configure(self.actor, 'relay'))
         self.cabinet.remove(self.actor)
         self.cabinet.run_one()
-        self.assertFalse(self.settings.exists())
+        self.assertFalse(self.settings.exists() or self.local.exists())
         self.cabinet.configure(self.actor, 'relay')
 
     def test_needs_the_build_and_retries_an_absent_agent(self):

@@ -878,6 +878,10 @@ EOF
   if [[ $DRIVER_BIN_CHANGED -eq 1 || $DRIVER_UNIT_CHANGED -eq 1 ]]; then
     sudo systemctl restart node-plane-driver
   fi
+  # The controller's own cabinet server runs from the same binary.
+  if [[ $DRIVER_BIN_CHANGED -eq 1 ]]; then
+    sudo systemctl try-restart node-plane-cabinet.service 2>/dev/null || true
+  fi
   sudo systemctl status node-plane-driver --no-pager || true
 }
 

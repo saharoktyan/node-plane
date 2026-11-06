@@ -18,7 +18,7 @@ use axum::{
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
-use node_plane_relay::{keys, link, serve, tls};
+use node_plane_relay::{keys, link, local, serve, tls};
 use ring::signature::Ed25519KeyPair;
 use serde_json::{Value, json};
 
@@ -188,6 +188,62 @@ async fn the_cabinet_is_served_beside_the_api() {
             &json!("controller_unavailable")
         )
     );
+}
+
+#[tokio::test]
+async fn the_controller_serves_the_cabinet_itself_under_the_relays_rules() {
+    let pair = Pair::new();
+    let cabinet = pair.dir.join("cabinet");
+    std::fs::create_dir_all(&cabinet).unwrap();
+    std::fs::write(cabinet.join("index.html"), "<html>cabinet</html>").unwrap();
+    let api = listen(fake_api()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = local::router(format!("http://{api}"), cabinet);
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let (status, headers, body) = call(
+        Request::post(format!("http://{address}/api/v1/me?x=1"))
+            .header("authorization", "Bearer t")
+            .header("x-node-plane-via", "forged")
+            .header("x-node-plane-telegram-user-id", "1")
+            .body(Full::from("hi"))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        (body["uri"].as_str(), body["body"].as_str()),
+        (Some("/api/v1/me?x=1"), Some("hi"))
+    );
+    // The relay's mark, once, and the client's address; nothing forged.
+    assert_eq!(body["via_count"], 1);
+    assert_eq!(body["headers"]["x-node-plane-via"], "relay");
+    assert_eq!(body["headers"]["x-node-plane-client"], "127.0.0.1");
+    assert!(
+        body["headers"]
+            .get("x-node-plane-telegram-user-id")
+            .is_none()
+    );
+    assert_eq!(body["headers"]["authorization"], "Bearer t");
+    assert!(headers.get("set-cookie").is_none() && headers.get("x-node-plane-secret").is_none());
+    let client = Client::builder(TokioExecutor::new()).build_http();
+    let page = client
+        .request(
+            Request::get(format!("http://{address}/admin"))
+                .body(Full::<Bytes>::default())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = page.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"<html>cabinet</html>");
 }
 
 #[tokio::test]

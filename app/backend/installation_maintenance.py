@@ -20,6 +20,7 @@ UNITS = (
     "node-plane-telegram.service",
     "node-plane-backend-worker.timer",
     "node-plane-backend-worker.service",
+    "node-plane-cabinet.service",
     "node-plane-backend.service",
     "node-plane-driver.service",
     "node-plane.service",
@@ -195,6 +196,10 @@ class InstallationMaintenance:
             if path.exists() and unit == "node-plane-backend-worker.timer":
                 if "Unit=node-plane-backend-worker.service" not in path.read_text():
                     raise AccessDenied("installation_manifest_mismatch", 409)
+            elif path.exists() and unit == "node-plane-cabinet.service":
+                # It names no installation path: it reads only its settings.
+                if "/usr/local/bin/node-plane-driver cabinet-local" not in path.read_text():
+                    raise AccessDenied("installation_manifest_mismatch", 409)
             elif path.exists():
                 text = path.read_text()
                 if (
@@ -232,6 +237,9 @@ class InstallationMaintenance:
             lines.append("rm -f -- " + shlex.quote("/etc/systemd/system/" + unit))
         lines += [
             "rm -f -- /usr/local/bin/node-plane-driver",
+            # The cabinet the controller served: its settings and its copy.
+            "rm -f -- /etc/node-plane/cabinet-local.json",
+            "rm -rf -- /var/lib/node-plane-cabinet-local",
             "systemctl daemon-reload",
             "systemctl reset-failed " + " ".join(shlex.quote(unit) for unit in UNITS) + " >/dev/null 2>&1 || true",
             "systemctl reset-failed node-plane-lease-expiry.service node-plane-lease-expiry.timer >/dev/null 2>&1 || true",

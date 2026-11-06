@@ -84,7 +84,7 @@ fn report(config: &Config, connected: bool, error: String) {
     status.error = error;
 }
 
-type Http = Client<HttpConnector, Full<Bytes>>;
+pub(crate) type Http = Client<HttpConnector, Full<Bytes>>;
 
 /// Keeps the link up for good, reconnecting with backoff.
 pub async fn run(config: Config) {
@@ -194,7 +194,7 @@ pub async fn session(config: &Config, established: &mut bool) -> Result<(), Stri
 
 /// Performs one relayed request. The relay is not trusted to have filtered
 /// it: only `/api/v1/*` and the allowed headers go through, plus the mark.
-async fn forward(
+pub(crate) async fn forward(
     http: &Http,
     api: &str,
     request: proto::Request,

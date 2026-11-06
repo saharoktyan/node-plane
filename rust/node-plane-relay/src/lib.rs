@@ -3,7 +3,8 @@
 //! `serve` runs on a public server: it answers `/api/v1/*` by passing each
 //! request over the link the controller holds open to it. `link` runs on the
 //! controller: it dials the relay, performs the requests against the local
-//! API and sends the responses back. With the cabinet's built files `serve`
+//! API and sends the responses back. `local` serves the cabinet from the
+//! controller itself, under the same rules. With the cabinet's built files `serve`
 //! also hands them out (`cabinet`), on the same domain as the API. The relay
 //! has no powers of its own; the controller's API checks every request (see
 //! `relay-design.md`).
@@ -13,6 +14,8 @@ pub mod headers;
 pub mod keys;
 #[cfg(feature = "link")]
 pub mod link;
+#[cfg(all(feature = "serve", feature = "link"))]
+pub mod local;
 #[cfg(feature = "serve")]
 pub mod serve;
 #[cfg(feature = "serve")]

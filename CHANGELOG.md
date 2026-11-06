@@ -26,6 +26,12 @@
   whole into `/var/lib/node-plane-cabinet/` before switching to it, and has
   the relay serve it (`/etc/node-plane/relay-cabinet.env`, read by the
   relay's unit). The agent's API takes messages up to 48 MiB for this.
+- The controller can serve the web cabinet itself, without a relay: the new
+  unit `node-plane-cabinet` (`node-plane-driver cabinet-local`, a throwaway
+  user in a sandbox) follows `/etc/node-plane/cabinet-local.json`, which the
+  worker writes, and listens there; it hands out a copy of the cabinet in
+  `/var/lib/node-plane-cabinet-local/` and passes `/api/v1/*` to the API under
+  the relay's rules. Removing the installation removes both.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

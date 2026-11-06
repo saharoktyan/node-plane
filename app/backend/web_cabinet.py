@@ -2,8 +2,10 @@
 
 The relay only carries requests to the API; the cabinet is the app people
 open. It is served either by the relay's node, on the relay's domain beside
-the API (`relay`), or by the controller's own server (`local`), which then
-listens on the network. Its files are the controller's build, so they
+the API (`relay`), or by the controller's own server (`local`, the unit
+`node-plane-cabinet`), which then listens on the network. For that server
+the worker copies the files where an unprivileged user can read them and
+writes its settings; the server follows them. Its files are the controller's build, so they
 update with the controller: the worker applies them again when it starts.
 The cabinet's public address is the passkeys' domain and where invite links
 lead.
@@ -14,9 +16,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 from urllib.parse import urlsplit
 
-from config import APP_ROOT, APP_SEMVER, SHARED_ROOT
+from config import APP_ROOT, APP_SEMVER
 from .authorization import CABINET_PERMISSION, AccessDenied, require_permission
 
 MODES = ('relay', 'local')
@@ -32,7 +35,13 @@ def build_dir():
 
 def local_settings_path():
     """Where the worker tells the controller's own cabinet server what to do."""
-    return Path(os.environ.get('NODE_PLANE_CABINET_LOCAL_SETTINGS') or f'{SHARED_ROOT}/cabinet-local.json')
+    return Path(os.environ.get('NODE_PLANE_CABINET_LOCAL_SETTINGS') or '/etc/node-plane/cabinet-local.json')
+
+
+def local_root():
+    """The files the controller's own server hands out, one directory per
+    version and `current`."""
+    return Path(os.environ.get('NODE_PLANE_CABINET_LOCAL_ROOT') or '/var/lib/node-plane-cabinet-local')
 
 
 def available():
@@ -111,15 +120,48 @@ def public(row, conn):
             'version': APP_SEMVER, 'error_code': row['error_code'], 'updated_at': row['updated_at']}
 
 
+def _copy_local(version):
+    """The build copied whole under the local root, then made `current`;
+    the version served before goes. Readable by anyone, like the cabinet."""
+    root = local_root()
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o755)
+    target = root / version
+    current = root / 'current'
+    if not (current.is_symlink() and os.readlink(current) == version and (target / 'index.html').is_file()):
+        staging = root / f'.{version}.tmp'
+        shutil.rmtree(staging, ignore_errors=True)
+        shutil.copytree(build_dir(), staging, symlinks=False)
+        for path in [staging, *staging.rglob('*')]:
+            path.chmod(0o755 if path.is_dir() else 0o644)
+        shutil.rmtree(target, ignore_errors=True)
+        staging.rename(target)
+        link = root / '.current.tmp'
+        link.unlink(missing_ok=True)
+        link.symlink_to(version)
+        link.replace(current)
+    for entry in root.iterdir():
+        if entry.name in (version, 'current'):
+            continue
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+    return current
+
+
 def _write_local(settings):
-    """The local server's settings, replaced at once; None removes them."""
+    """The local server's settings, replaced at once; None removes them
+    and the files."""
     path = local_settings_path()
     if settings is None:
         path.unlink(missing_ok=True)
+        shutil.rmtree(local_root(), ignore_errors=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_text(json.dumps(settings, sort_keys=True) + '\n')
+    temporary.chmod(0o644)
     temporary.replace(path)
 
 
@@ -194,7 +236,7 @@ class WebCabinetService:
     def _apply(self, row):
         if row['mode'] == 'local':
             _write_local(None if row['status'] == 'removing' else
-                         {'listen': row['listen'], 'root': str(build_dir()), 'version': APP_SEMVER})
+                         {'listen': row['listen'], 'root': str(_copy_local(APP_SEMVER)), 'version': APP_SEMVER})
         elif row['status'] == 'removing':
             self.driver.remove_cabinet(row['node_key'])
         else:

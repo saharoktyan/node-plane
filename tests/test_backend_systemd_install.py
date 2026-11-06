@@ -48,6 +48,11 @@ class BackendSystemdInstallTests(unittest.TestCase):
             api = (rendered / "node-plane-backend.service").read_text()
             worker = (rendered / "node-plane-backend-worker.service").read_text()
             self.assertFalse((rendered / "node-plane-backend-worker.timer").exists())
+            cabinet = (rendered / "node-plane-cabinet.service").read_text()
+            self.assertIn("ExecStart=/usr/local/bin/node-plane-driver cabinet-local", cabinet)
+            # It faces the network: a throwaway user in a sandbox.
+            self.assertIn("DynamicUser=yes", cabinet)
+            self.assertIn("ProtectSystem=strict", cabinet)
             self.assertIn(f"EnvironmentFile={shared}/.env", api)
             self.assertIn(
                 "uvicorn backend.http_api:application --factory --host 127.0.0.1", api

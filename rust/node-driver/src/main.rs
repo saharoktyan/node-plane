@@ -1324,6 +1324,20 @@ fn authorize_local(request: Request<()>) -> Result<Request<()>, Status> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `node-plane-driver cabinet-local`: the web cabinet served by the
+    // controller itself, as the worker's settings file says (see
+    // node_plane_relay::local). Its own unit, apart from the driver's.
+    if env::args().nth(1).as_deref() == Some("cabinet-local") {
+        let settings = env::var("NODE_PLANE_CABINET_LOCAL_SETTINGS")
+            .unwrap_or_else(|_| "/etc/node-plane/cabinet-local.json".to_string());
+        let api =
+            env::var("NODE_PLANE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+        tokio::select! {
+            () = node_plane_relay::local::run(settings.into(), api) => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+        return Ok(());
+    }
     let addr: SocketAddr = env::var("NODE_DRIVER_LISTEN_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;

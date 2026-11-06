@@ -30,6 +30,7 @@ stack_files() {
       /etc/systemd/system/node-plane-backend.service \
       /etc/systemd/system/node-plane-backend-worker.service \
       /etc/systemd/system/node-plane-backend-worker.timer \
+      /etc/systemd/system/node-plane-cabinet.service \
       /etc/systemd/system/node-plane-telegram.service "$STACK_ENV_FILE"
 }
 

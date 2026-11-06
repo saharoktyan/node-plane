@@ -131,3 +131,14 @@ class InstallationMaintenanceTests(unittest.TestCase):
         (self.units / "node-plane-backend.service").write_text("ExecStart=/other/app")
         with self.assertRaises(AccessDenied):
             self.host.prepare_uninstall(self.host.deployment(), str(uuid4()))
+
+    def test_the_cabinet_unit_is_known_by_its_command(self):
+        (self.units / "node-plane-cabinet.service").write_text("ExecStart=/other/app")
+        with self.assertRaises(AccessDenied):
+            self.host.prepare_uninstall(self.host.deployment(), str(uuid4()))
+        (self.units / "node-plane-cabinet.service").write_text(
+            "ExecStart=/usr/local/bin/node-plane-driver cabinet-local\n")
+        plan = self.host.prepare_uninstall(self.host.deployment(), str(uuid4()))
+        text = Path(plan["script"]).read_text()
+        self.assertIn("systemctl disable --now node-plane-cabinet.service", text)
+        self.assertIn("rm -rf -- /var/lib/node-plane-cabinet-local", text)

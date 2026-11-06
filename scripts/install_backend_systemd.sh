@@ -76,6 +76,52 @@ TimeoutStopSec=1h
 WantedBy=multi-user.target
 EOF
 
+# The web cabinet served by the controller itself: idle until the worker's
+# settings ask for it (see app/backend/web_cabinet.py). It faces the network,
+# so it runs as a throwaway user that may read the copied files and bind its
+# port, and little else.
+cat > "${render_dir}/node-plane-cabinet.service" <<EOF
+[Unit]
+Description=Node Plane web cabinet (served by the controller)
+After=network-online.target node-plane-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NODE_PLANE_CABINET_LOCAL_SETTINGS=/etc/node-plane/cabinet-local.json
+Environment=NODE_PLANE_API_URL=http://127.0.0.1:8080
+ExecStart=/usr/local/bin/node-plane-driver cabinet-local
+Restart=always
+RestartSec=3
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 python3 - "$base_dir" "$shared_dir" "${render_dir}/.node-plane-installation.json" <<'PYMARKER'
 import json, os, pathlib, re, sys
 base, shared, output = map(pathlib.Path, sys.argv[1:])
@@ -100,12 +146,14 @@ fi
 install -m 0600 "${render_dir}/.node-plane-installation.json" "${base_dir}/.node-plane-installation.json"
 install -m 0644 "${render_dir}/node-plane-backend.service" /etc/systemd/system/
 install -m 0644 "${render_dir}/node-plane-backend-worker.service" /etc/systemd/system/
+install -m 0644 "${render_dir}/node-plane-cabinet.service" /etc/systemd/system/
 systemctl disable --now node-plane-backend-worker.timer 2>/dev/null || true
 rm -f /etc/systemd/system/node-plane-backend-worker.timer
 systemctl daemon-reload
-systemctl enable node-plane-backend.service node-plane-backend-worker.service
+systemctl enable node-plane-backend.service node-plane-backend-worker.service node-plane-cabinet.service
 systemctl restart node-plane-backend.service
 systemctl restart node-plane-backend-worker.service
+systemctl restart node-plane-cabinet.service || true
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   if "${current_dir}/.venv/bin/python" -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/health/ready", timeout=2).read()' >/dev/null 2>&1; then
     exit 0
