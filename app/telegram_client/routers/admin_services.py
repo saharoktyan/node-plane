@@ -51,6 +51,8 @@ async def show_services(query, bot, backend, state):
     buttons = []
     if any(item['service'] == 'relay' for item in items):
         buttons.append([InlineKeyboardButton(text=tr(locale, 'relay.title'), callback_data='relay:v:v')])
+    if any(item['service'] == 'web_cabinet' for item in items):
+        buttons.append([InlineKeyboardButton(text=tr(locale, 'cabinet.title'), callback_data='cab:v:v')])
     buttons.append([InlineKeyboardButton(text=tr(locale, 'back'), callback_data='admin_menu')])
     await render(bot, query.message.chat.id, Screen(tr(locale, 'services.title'), sections=tuple(sections),
                  embedded_buttons=True, navigation=True), buttons, state, query.message.message_id)

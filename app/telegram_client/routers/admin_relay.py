@@ -18,7 +18,7 @@ RELAY = '/api/v1/relay'
 TLS_MODES = ('acme', 'files', 'proxy')
 # Typed fields by their callback letter.
 FIELDS = {'d': 'domain', 'o': 'port', 'c': 'acme_contact', 'r': 'certificate_path', 'k': 'key_path'}
-ERRORS = {'relay_node_without_agent', 'relay_port_in_use', 'relay_exists_on_another_node', 'relay_removing',
+ERRORS = {'relay_serves_cabinet', 'relay_node_without_agent', 'relay_port_in_use', 'relay_exists_on_another_node', 'relay_removing',
           'agent_unavailable', 'relay_apply_failed', 'relay_domain_invalid', 'relay_port_invalid',
           'relay_acme_needs_port_443', 'relay_acme_contact_invalid', 'relay_certificate_path_invalid',
           'relay_tls_invalid'}

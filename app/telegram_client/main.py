@@ -23,6 +23,7 @@ from .routers import admin_tariffs
 from .routers import admin_renewals
 from .routers import admin_node_policies
 from .routers import admin_relay
+from .routers import admin_cabinet
 from .routers import account_login
 from .routers import account_sessions
 from .routers import invites
@@ -82,6 +83,7 @@ async def main() -> None:
             dispatcher.include_router(admin_renewals.router)
             dispatcher.include_router(admin_node_policies.router)
             dispatcher.include_router(admin_relay.router)
+            dispatcher.include_router(admin_cabinet.router)
             dispatcher.include_router(account_login.router)
             dispatcher.include_router(account_sessions.router)
             dispatcher.include_router(invites.router)

@@ -28,6 +28,7 @@ impl App {
         if self.activate_localized(control)
             || self.activate_tariff(control)
             || self.activate_relay(control)
+            || self.activate_cabinet(control)
         {
             return None;
         }
@@ -587,7 +588,7 @@ impl App {
                     return None;
                 }
                 if let Some((key, input)) = self.controller.defaults_input.clone() {
-                    if self.relay_input(key, &input) {
+                    if self.relay_input(key, &input) || self.cabinet_input(key, &input) {
                         return None;
                     }
                     if key == "quota_anchor" {
@@ -1262,7 +1263,7 @@ impl App {
                     return None;
                 }
                 if self.controller.defaults_input.is_none()
-                    && (self.relay_back() || self.tariff_back())
+                    && (self.relay_back() || self.cabinet_back() || self.tariff_back())
                 {
                     return None;
                 }
@@ -1528,6 +1529,9 @@ impl App {
         self.controller.relay_nodes = None;
         self.controller.relay_origin = None;
         self.controller.relay_confirm_remove = false;
+        self.controller.cabinet = None;
+        self.controller.cabinet_draft = None;
+        self.controller.cabinet_confirm_remove = false;
         self.controller.alerts = None;
         self.controller.workstation_audit = None;
         self.controller.recovery_history = None;
@@ -1656,6 +1660,9 @@ impl App {
         }
         if self.relay_view_open() {
             return self.relay_view().1.into_iter().map(|(_, c)| c).collect();
+        }
+        if self.cabinet_view_open() {
+            return self.cabinet_view().1.into_iter().map(|(_, c)| c).collect();
         }
         if self.tariff_view_open() {
             return self.tariff_view().1.into_iter().map(|(_, c)| c).collect();
@@ -1910,6 +1917,7 @@ impl App {
                 ("Telegram".into(), Control::ControllerTelegram),
                 ("SSH key".into(), Control::ControllerSshKey),
                 ("Relay".into(), Control::ControllerRelay),
+                ("Web cabinet".into(), Control::ControllerCabinet),
                 ("New installation".into(), Control::ControllerNew),
             ],
             Some(Policies) if self.controller.scope.is_some() => self.scoped_policy_controls(),
@@ -2081,6 +2089,9 @@ impl App {
                 let mut items = Vec::new();
                 if crate::services::has(catalog, "relay") {
                     items.push(("Relay".into(), Control::ControllerRelay));
+                }
+                if crate::services::has(catalog, "web_cabinet") {
+                    items.push(("Web cabinet".into(), Control::ControllerCabinet));
                 }
                 if crate::services::has(catalog, "telegram_bot") {
                     items.push(("Telegram".into(), Control::ControllerTelegram));

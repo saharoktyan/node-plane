@@ -25,6 +25,8 @@ impl App {
         self.controller.relay_draft = None;
         self.controller.relay_nodes = None;
         self.controller.relay_confirm_remove = false;
+        self.controller.cabinet = None;
+        self.controller.cabinet_draft = None;
         let origin_is_node = origin.is_some();
         self.controller.relay_origin = origin;
         self.controller.selected = 0;

@@ -1,4 +1,5 @@
 mod access;
+mod cabinet;
 mod controller;
 mod localized;
 mod nodes;
@@ -405,6 +406,13 @@ impl App {
             | Control::ControllerRelaySave
             | Control::ControllerRelayRemove
             | Control::ControllerRelayRefresh
+            | Control::ControllerCabinet
+            | Control::ControllerCabinetRelay
+            | Control::ControllerCabinetLocal
+            | Control::ControllerCabinetField(_)
+            | Control::ControllerCabinetSave
+            | Control::ControllerCabinetRemove
+            | Control::ControllerCabinetRefresh
             | Control::ControllerPolicies
             | Control::ControllerScopedPolicy(..)
             | Control::ControllerQuotaReset

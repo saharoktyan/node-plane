@@ -10243,3 +10243,97 @@ fn settings_services_lists_the_catalog_and_its_pages_return_there() {
     assert!(app.controller_section == Some(ControllerSection::Services));
     assert!(app.controller.relay.is_none());
 }
+
+#[test]
+fn the_web_cabinet_page_serves_it_on_the_relay_or_the_controller() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.open_controller();
+    app.activate(Control::ControllerSection(ControllerSection::Installation));
+    assert!(
+        app.controller_root_controls(false)
+            .iter()
+            .any(|(_, control)| *control == Control::ControllerCabinet)
+    );
+    app.activate(Control::ControllerCabinet);
+    assert!(matches!(scoped_request(&mut app), Command::Cabinet));
+    // Without a relay the page leads there, and the controller can serve it.
+    app.controller.apply(
+        Command::Cabinet,
+        serde_json::json!({"cabinet": null, "available": true, "relay_node_key": null}),
+    );
+    let (text, controls) = app.cabinet_view();
+    assert!(
+        text.starts_with("Settings › Basic › Web cabinet\n")
+            && text.contains("set up the relay first")
+    );
+    assert!(
+        controls.iter().map(|(_, c)| *c).collect::<Vec<_>>()
+            == [
+                Control::ControllerRelay,
+                Control::ControllerCabinetLocal,
+                Control::ControllerCabinetRefresh,
+                Control::ControllerBack
+            ]
+    );
+    app.activate(Control::ControllerCabinetLocal);
+    app.activate(Control::ControllerCabinetSave);
+    assert_eq!(app.error, "Enter the address people open the cabinet at.");
+    app.activate(Control::ControllerCabinetField("listen"));
+    app.controller.defaults_input.as_mut().unwrap().1 = "0.0.0.0:8080".into();
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(app.error.contains("8080 is the API's"));
+    app.controller.defaults_input.as_mut().unwrap().1 = "0.0.0.0:9000".into();
+    app.activate(Control::ControllerDefaultsInputApply);
+    app.activate(Control::ControllerCabinetField("public_url"));
+    app.controller.defaults_input.as_mut().unwrap().1 = "https://panel.example.com".into();
+    app.activate(Control::ControllerDefaultsInputApply);
+    assert!(app.controller.defaults_input.is_none());
+    app.activate(Control::ControllerCabinetSave);
+    assert!(
+        matches!(scoped_request(&mut app), Command::CabinetSave(body)
+        if body == serde_json::json!({"mode":"local","listen":"0.0.0.0:9000","public_url":"https://panel.example.com"}))
+    );
+    app.controller.apply(
+        Command::CabinetSave(serde_json::json!({})),
+        serde_json::json!({"cabinet": {"mode":"local","listen":"0.0.0.0:9000","public_url":"https://panel.example.com",
+            "url":"https://panel.example.com","status":"applying","version":"0.4.0","applied_version":null,"error_code":null}}),
+    );
+    assert!(app.controller.cabinet_draft.is_none());
+    let (text, controls) = app.cabinet_view();
+    assert!(
+        text.contains("Served by: the controller, on 0.0.0.0:9000")
+            && text.contains("Status: Applying")
+    );
+    assert!(text.contains("listens on the network"));
+    assert!(controls[0] == ("Change settings".into(), Control::ControllerCabinetLocal));
+    // Stopping needs a second press.
+    app.activate(Control::ControllerCabinetRemove);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::ControllerCabinetRemove);
+    assert!(matches!(scoped_request(&mut app), Command::CabinetRemove));
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.cabinet.is_none());
+    assert!(app.controller_section == Some(ControllerSection::Installation));
+
+    // With a relay it is served there in one step.
+    app.activate(Control::ControllerCabinet);
+    scoped_request(&mut app);
+    app.controller.apply(
+        Command::Cabinet,
+        serde_json::json!({"cabinet": null, "available": true, "relay_node_key": "de1"}),
+    );
+    assert!(app.cabinet_view().1[0].1 == Control::ControllerCabinetRelay);
+    app.activate(Control::ControllerCabinetRelay);
+    assert!(
+        matches!(scoped_request(&mut app), Command::CabinetSave(body)
+        if body == serde_json::json!({"mode":"relay"}))
+    );
+    // A release without the build offers nothing to set up.
+    app.controller.apply(
+        Command::Cabinet,
+        serde_json::json!({"cabinet": null, "available": false, "relay_node_key": "de1"}),
+    );
+    let (text, controls) = app.cabinet_view();
+    assert!(text.contains("no web cabinet build") && controls.len() == 2);
+}

@@ -32,6 +32,11 @@
   worker writes, and listens there; it hands out a copy of the cabinet in
   `/var/lib/node-plane-cabinet-local/` and passes `/api/v1/*` to the API under
   the relay's rules. Removing the installation removes both.
+- The bot and Workstation manage the web cabinet: Services › Web cabinet
+  and Settings (Maintenance in the bot, Basic in Workstation). They show
+  its address, where it is served from, its state and version, and serve it
+  on the relay's node in one step or from the controller with the address
+  to listen on and the public address; stopping asks first.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

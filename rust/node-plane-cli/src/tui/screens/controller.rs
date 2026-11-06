@@ -843,6 +843,8 @@ pub(in crate::tui) fn draw_controller(
             "relay_acme_contact" => "Relay · email for Let's Encrypt notices; may be empty".into(),
             "relay_certificate_path" => "Relay · certificate chain (PEM) path on the node, readable by node-plane-relay".into(),
             "relay_key_path" => "Relay · private key (PEM) path on the node, readable by node-plane-relay".into(),
+            "cabinet_listen" => "Web cabinet · address and port the controller listens on, such as 0.0.0.0:8090".into(),
+            "cabinet_public_url" => "Web cabinet · the address people open it at, such as https://panel.example.com".into(),
             _ => format!("Installation defaults · {key}"),
         };
         controls.push(("Value".into(), Control::ControllerDefaultsInput));
@@ -866,6 +868,8 @@ pub(in crate::tui) fn draw_controller(
         controls.push(("Cancel".into(), Control::ControllerBack));
     } else if app.relay_view_open() {
         (text, controls) = app.relay_view();
+    } else if app.cabinet_view_open() {
+        (text, controls) = app.cabinet_view();
     } else if app.tariff_view_open() {
         (text, controls) = app.tariff_view();
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
@@ -2018,8 +2022,8 @@ pub(in crate::tui) fn defaults_input_changed(state: &crate::controller::Browser)
     let Some((key, input)) = &state.defaults_input else {
         return false;
     };
-    if key.starts_with("relay_") {
-        // The relay page checks each field; an empty contact clears it.
+    if key.starts_with("relay_") || key.starts_with("cabinet_") {
+        // These pages check each field; an empty relay contact clears it.
         return true;
     }
     if key.starts_with("backup_")

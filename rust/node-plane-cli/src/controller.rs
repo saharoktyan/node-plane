@@ -95,6 +95,11 @@ pub enum Command {
     /// Sets the relay up or changes it (`PUT /api/v1/relay`).
     RelaySave(Value),
     RelayRemove,
+    /// The web cabinet: where it is served from, and whether this release has it.
+    Cabinet,
+    /// Serves the cabinet or changes where (`PUT /api/v1/web-cabinet`).
+    CabinetSave(Value),
+    CabinetRemove,
     Backups,
     BackupCatalog(usize),
     BackupDetail(Uuid),
@@ -193,6 +198,14 @@ impl Command {
                 None,
             ),
             Self::RelayRemove => (Method::DELETE, "/api/v1/relay".into(), None, None),
+            Self::Cabinet => (Method::GET, "/api/v1/web-cabinet".into(), None, None),
+            Self::CabinetSave(body) => (
+                Method::PUT,
+                "/api/v1/web-cabinet".into(),
+                Some(body.clone()),
+                None,
+            ),
+            Self::CabinetRemove => (Method::DELETE, "/api/v1/web-cabinet".into(), None, None),
             Self::Tariffs | Self::TariffChoices(_) => {
                 (Method::GET, "/api/v1/tariffs".into(), None, None)
             }
@@ -564,6 +577,11 @@ pub struct Browser {
     pub relay_origin: Option<(String, String)>,
     /// Removal waits for a second press.
     pub relay_confirm_remove: bool,
+    /// The web cabinet page: `{"cabinet": …, "available": …, "relay_node_key": …}`.
+    pub cabinet: Option<Value>,
+    /// The controller's own server being set up or changed.
+    pub cabinet_draft: Option<crate::cabinet::Draft>,
+    pub cabinet_confirm_remove: bool,
     pub notice: String,
     pub defaults_advanced: bool,
     pub text_confirmation: bool,
@@ -672,6 +690,24 @@ impl Browser {
                     self.selected = 0;
                 }
                 self.relay = Some(value);
+                self.defaults_input = None;
+            }
+            Command::Cabinet | Command::CabinetSave(_) | Command::CabinetRemove => {
+                // A late answer after the page was left.
+                if self.cabinet.is_none() {
+                    return;
+                }
+                if !matches!(command, Command::Cabinet) {
+                    self.cabinet_draft = None;
+                    self.cabinet_confirm_remove = false;
+                    self.selected = 0;
+                    // A change answers with the cabinet alone; the page keeps the rest.
+                    let mut page = self.cabinet.take().unwrap_or_default();
+                    page["cabinet"] = value["cabinet"].clone();
+                    self.cabinet = Some(page);
+                } else {
+                    self.cabinet = Some(value);
+                }
                 self.defaults_input = None;
             }
             Command::Services => self.services = Some(value),

@@ -1,6 +1,7 @@
 mod access;
 mod audit;
 mod backend;
+mod cabinet;
 mod config;
 mod connections;
 mod controller;

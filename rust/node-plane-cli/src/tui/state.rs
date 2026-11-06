@@ -174,6 +174,16 @@ pub(super) enum Control {
     ControllerRelaySave,
     ControllerRelayRemove,
     ControllerRelayRefresh,
+    /// The web cabinet, from Settings › Basic or Services.
+    ControllerCabinet,
+    /// Serve the cabinet on the relay's node.
+    ControllerCabinetRelay,
+    /// Serve it from the controller, or change that server's settings.
+    ControllerCabinetLocal,
+    ControllerCabinetField(&'static str),
+    ControllerCabinetSave,
+    ControllerCabinetRemove,
+    ControllerCabinetRefresh,
     ControllerPolicyToggle(&'static str),
     ControllerDefaultsToggle(&'static str),
     ControllerDefaultsPreset,
