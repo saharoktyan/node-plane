@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The relay can serve the web cabinet beside the API, on the same domain:
+  given the cabinet's built files (`NODE_PLANE_RELAY_CABINET_DIR`) it answers
+  every path outside the API with them, the app's page for a path without a
+  file; hashed assets are cached for a year, the page is checked each time.
+  The page runs only its own scripts (a content policy with their hashes)
+  and may be framed only by Telegram, for the Mini App. Without the files the
+  relay answers only the API, as before.
+
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last
   five minutes counts as online. Every five minutes the controller reads

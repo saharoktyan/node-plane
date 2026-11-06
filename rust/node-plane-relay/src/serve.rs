@@ -1,4 +1,5 @@
-//! The public side: `/api/v1/*` over the controller's link, and `/health`.
+//! The public side: `/api/v1/*` over the controller's link, `/health`, and
+//! the web cabinet's files when the node has them.
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -25,7 +26,7 @@ use tonic::{Status, Streaming, server::NamedService};
 use uuid::Uuid;
 
 use crate::{
-    LINK_KEY, LINK_NONCE, headers, keys,
+    LINK_KEY, LINK_NONCE, cabinet, headers, keys,
     proto::{
         self, LinkMessage, RelayMessage, link_message,
         link_server::{Link, LinkServer},
@@ -62,6 +63,8 @@ pub struct Config {
     /// `status.json`: whether the controller is attached, for the agent.
     pub state_dir: PathBuf,
     pub limits: Limits,
+    /// The web cabinet's built files; without them only the API answers.
+    pub cabinet: Option<PathBuf>,
 }
 
 /// How long the controller has to answer the challenge.
@@ -79,6 +82,7 @@ struct Inner {
     key: Ed25519KeyPair,
     state_dir: PathBuf,
     limits: Limits,
+    cabinet: Option<PathBuf>,
     current: Mutex<Option<Arc<Connection>>>,
     generations: AtomicU64,
     ids: AtomicU64,
@@ -93,6 +97,7 @@ pub fn router(config: Config) -> Router {
         key: config.key,
         state_dir: config.state_dir,
         limits: config.limits,
+        cabinet: config.cabinet,
         current: Mutex::new(None),
         generations: AtomicU64::new(0),
         ids: AtomicU64::new(0),
@@ -104,7 +109,7 @@ pub fn router(config: Config) -> Router {
         .route("/health", get(health))
         .route("/api/v1/*rest", any(forward))
         .route_service(&attach, link)
-        .fallback(not_found)
+        .fallback(elsewhere)
         .with_state(hub)
 }
 
@@ -253,8 +258,12 @@ async fn health(State(hub): State<Hub>) -> Response {
     Json(serde_json::json!({"status": "ok", "link": link})).into_response()
 }
 
-async fn not_found() -> Response {
-    failure(StatusCode::NOT_FOUND, codes::NOT_FOUND)
+/// Any other path: the cabinet when the node has it, otherwise not found.
+async fn elsewhere(State(hub): State<Hub>, request: Request) -> Response {
+    match &hub.0.cabinet {
+        Some(root) => cabinet::respond(root, request.method(), request.uri().path()).await,
+        None => failure(StatusCode::NOT_FOUND, codes::NOT_FOUND),
+    }
 }
 
 /// The client's address: the peer, or behind a reverse proxy on this host the
@@ -407,6 +416,10 @@ pub async fn from_env() -> Result<(), String> {
         key,
         state_dir: state,
         limits: Limits::default(),
+        cabinet: env::var("NODE_PLANE_RELAY_CABINET_DIR")
+            .ok()
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from),
     });
     tls::serve(listener, router, tls).await
 }

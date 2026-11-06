@@ -106,6 +106,7 @@ async fn relay(pair: &Pair, limits: serve::Limits) -> SocketAddr {
         key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
         state_dir: pair.dir.clone(),
         limits,
+        cabinet: None,
     }))
     .await
 }
@@ -151,6 +152,42 @@ async fn wait_for_link(relay: SocketAddr, state: &str) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("the link never became {state}");
+}
+
+#[tokio::test]
+async fn the_cabinet_is_served_beside_the_api() {
+    let pair = Pair::new();
+    let cabinet = pair.dir.join("cabinet");
+    std::fs::create_dir_all(&cabinet).unwrap();
+    std::fs::write(cabinet.join("index.html"), "<html>cabinet</html>").unwrap();
+    let relay = listen(serve::router(serve::Config {
+        key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
+        state_dir: pair.dir.clone(),
+        limits: serve::Limits::default(),
+        cabinet: Some(cabinet),
+    }))
+    .await;
+    let client = Client::builder(TokioExecutor::new()).build_http();
+    let page = client
+        .request(
+            Request::get(format!("http://{relay}/vpn"))
+                .body(Full::<Bytes>::default())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let body = page.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"<html>cabinet</html>");
+    // The API still goes to the controller, not to the app.
+    let (status, _, body) = get_json(relay, "/api/v1/me").await;
+    assert_eq!(
+        (status, &body["error"]["code"]),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!("controller_unavailable")
+        )
+    );
 }
 
 #[tokio::test]
@@ -491,6 +528,7 @@ async fn the_relay_serves_tls_from_files() {
         key: keys::load_or_create(&pair.dir.join("relay.key")).unwrap(),
         state_dir: pair.dir.clone(),
         limits: serve::Limits::default(),
+        cabinet: None,
     });
     let mode = tls::Mode::Files {
         certificate: pair.dir.join("tls.crt"),

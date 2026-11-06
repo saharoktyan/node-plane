@@ -10,7 +10,9 @@ serve     NODE_PLANE_RELAY_LISTEN (default 127.0.0.1:8443),
           NODE_PLANE_RELAY_TLS: proxy (default), files
           (NODE_PLANE_RELAY_TLS_CERT, NODE_PLANE_RELAY_TLS_KEY) or acme
           (NODE_PLANE_RELAY_DOMAIN, NODE_PLANE_RELAY_ACME_CONTACT,
-          NODE_PLANE_RELAY_ACME_STAGING=1; certificates in STATE_DIR/acme)
+          NODE_PLANE_RELAY_ACME_STAGING=1; certificates in STATE_DIR/acme),
+          NODE_PLANE_RELAY_CABINET_DIR (the web cabinet's built files,
+          served beside the API; without it only the API answers)
 link      NODE_PLANE_RELAY_URL, NODE_PLANE_RELAY_KEY (the relay's key, hex),
           NODE_PLANE_RELAY_LINK_KEY_FILE (created when missing),
           NODE_PLANE_API_URL (default http://127.0.0.1:8080),
