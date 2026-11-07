@@ -20,6 +20,8 @@ impl App {
         self.controller.cabinet = Some(serde_json::json!({"loading": true}));
         self.controller.cabinet_draft = None;
         self.controller.cabinet_confirm_remove = false;
+        self.controller.bot_placement = None;
+        self.controller.bot_nodes = None;
         self.controller.selected = 0;
         self.controller_viewport.set(0);
         if self.controller_section != Some(ControllerSection::Services) {

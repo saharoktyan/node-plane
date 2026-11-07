@@ -35,7 +35,7 @@ class ServicesTests(IsolatedAsyncioTestCase):
         self.assertLess(text.index('System'), text.index('Built-in'))
         for value in ('Relay', 'Telegram bot', 'VPN', '3'):
             self.assertIn(value, text)
-        self.assertEqual([row[0].callback_data for row in rows], ['relay:v:v', 'admin_menu'])
+        self.assertEqual([row[0].callback_data for row in rows], ['relay:v:v', 'tgb:v:v', 'admin_menu'])
         self.assertEqual([c.label for c in screen_parents(screen, rows, 'en', self.data)], ['Admin'])
 
     def test_the_relay_opened_from_services_goes_back_there(self):

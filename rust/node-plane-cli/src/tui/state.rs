@@ -184,6 +184,15 @@ pub(super) enum Control {
     ControllerCabinetSave,
     ControllerCabinetRemove,
     ControllerCabinetRefresh,
+    /// Where the Telegram bot runs, from Settings › Basic or Services.
+    ControllerBotPlacement,
+    /// Lists the nodes to move the bot to.
+    ControllerBotPick,
+    ControllerBotNode(usize),
+    /// Applies the bot on its node again after a failure.
+    ControllerBotRetry,
+    ControllerBotReturn,
+    ControllerBotRefresh,
     ControllerPolicyToggle(&'static str),
     ControllerDefaultsToggle(&'static str),
     ControllerDefaultsPreset,

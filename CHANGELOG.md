@@ -79,6 +79,12 @@
   there, the bot cannot be turned off from there, and a new token or
   release reaches the node. The bot waits at most 25 seconds for deliveries,
   within the relay's limit.
+- The bot and Workstation move the Telegram bot to a node and back: the bot's
+  **Services → Telegram bot** or **System settings → Telegram bot**,
+  Workstation's **Settings → Basic → Telegram bot location** (also under
+  **Services**) show where it runs and its state, run it on a node with an
+  agent once the relay is set up, try again after a failure, and bring it
+  back to the controller after asking.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

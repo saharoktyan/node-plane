@@ -100,6 +100,14 @@ pub enum Command {
     /// Serves the cabinet or changes where (`PUT /api/v1/web-cabinet`).
     CabinetSave(Value),
     CabinetRemove,
+    /// Where the Telegram bot runs: the controller or a node.
+    BotPlacement,
+    /// The nodes the bot can run on: those with an agent.
+    BotNodes,
+    /// Runs the bot on a node (`PUT /api/v1/telegram-bot/placement`).
+    BotPlace(String),
+    /// Brings the bot back to the controller.
+    BotReturn,
     Backups,
     BackupCatalog(usize),
     BackupDetail(Uuid),
@@ -206,6 +214,30 @@ impl Command {
                 None,
             ),
             Self::CabinetRemove => (Method::DELETE, "/api/v1/web-cabinet".into(), None, None),
+            Self::BotPlacement => (
+                Method::GET,
+                "/api/v1/telegram-bot/placement".into(),
+                None,
+                None,
+            ),
+            Self::BotNodes => (
+                Method::GET,
+                "/api/v1/nodes?stage=node&limit=100".into(),
+                None,
+                None,
+            ),
+            Self::BotPlace(node_key) => (
+                Method::PUT,
+                "/api/v1/telegram-bot/placement".into(),
+                Some(serde_json::json!({"node_key": node_key})),
+                None,
+            ),
+            Self::BotReturn => (
+                Method::DELETE,
+                "/api/v1/telegram-bot/placement".into(),
+                None,
+                None,
+            ),
             Self::Tariffs | Self::TariffChoices(_) => {
                 (Method::GET, "/api/v1/tariffs".into(), None, None)
             }
@@ -582,6 +614,11 @@ pub struct Browser {
     /// The controller's own server being set up or changed.
     pub cabinet_draft: Option<crate::cabinet::Draft>,
     pub cabinet_confirm_remove: bool,
+    /// Where the Telegram bot runs: `{"placement": …, "relay_node_key": …}`.
+    pub bot_placement: Option<Value>,
+    /// The nodes to pick from while moving the bot; None when not picking.
+    pub bot_nodes: Option<Value>,
+    pub bot_confirm_return: bool,
     pub notice: String,
     pub defaults_advanced: bool,
     pub text_confirmation: bool,
@@ -704,6 +741,23 @@ impl Browser {
                 }
                 self.cabinet = Some(value);
                 self.defaults_input = None;
+            }
+            Command::BotPlacement | Command::BotPlace(_) | Command::BotReturn => {
+                if self.bot_placement.is_none() {
+                    return;
+                }
+                if !matches!(command, Command::BotPlacement) {
+                    self.bot_nodes = None;
+                    self.bot_confirm_return = false;
+                    self.selected = 0;
+                }
+                self.bot_placement = Some(value);
+            }
+            Command::BotNodes => {
+                if self.bot_placement.is_some() {
+                    self.bot_nodes = Some(value);
+                    self.selected = 0;
+                }
             }
             Command::Services => self.services = Some(value),
             Command::RelayNodes => {

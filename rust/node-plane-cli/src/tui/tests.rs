@@ -10240,7 +10240,7 @@ fn settings_services_lists_the_catalog_and_its_pages_return_there() {
             .iter()
             .map(|(label, _)| label.as_str())
             .collect::<Vec<_>>(),
-        ["Relay", "Telegram", "Back"]
+        ["Relay", "Telegram", "Telegram bot location", "Back"]
     );
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     terminal
@@ -10356,4 +10356,61 @@ fn the_web_cabinet_page_serves_it_on_the_relay_or_the_controller() {
     );
     let (text, controls) = app.cabinet_view();
     assert!(text.contains("no web cabinet build") && controls.len() == 2);
+}
+
+#[test]
+fn the_telegram_bot_moves_to_a_node_and_back() {
+    use crate::controller::Command;
+    let mut app = test_profile_app();
+    app.open_controller();
+    app.activate(Control::ControllerSection(ControllerSection::Installation));
+    app.activate(Control::ControllerBotPlacement);
+    assert!(matches!(scoped_request(&mut app), Command::BotPlacement));
+    // Without a relay the page leads there.
+    app.controller.apply(
+        Command::BotPlacement,
+        serde_json::json!({"placement": null, "telegram_enabled": true, "relay_node_key": null}),
+    );
+    let (text, controls) = app.bot_placement_view();
+    assert!(text.starts_with("Settings › Basic › Telegram bot location\n"));
+    assert!(text.contains("Runs on: the controller") && text.contains("set up the relay first"));
+    assert!(controls[0].1 == Control::ControllerRelay);
+    app.controller.apply(
+        Command::BotPlacement,
+        serde_json::json!({"placement": null, "telegram_enabled": true, "relay_node_key": "de1"}),
+    );
+    assert!(app.bot_placement_view().1[0].1 == Control::ControllerBotPick);
+    app.activate(Control::ControllerBotPick);
+    assert!(matches!(scoped_request(&mut app), Command::BotNodes));
+    app.controller.apply(
+        Command::BotNodes,
+        serde_json::json!({"items": [{"key":"de1","title":"Frankfurt","stage":"node"},
+            {"key":"nl1","title":"Amsterdam","stage":"invitation"}]}),
+    );
+    let (_, controls) = app.bot_placement_view();
+    assert!(
+        controls.iter().map(|(_, c)| *c).collect::<Vec<_>>()
+            == [Control::ControllerBotNode(0), Control::ControllerBack]
+    );
+    app.activate(Control::ControllerBotNode(0));
+    assert!(matches!(scoped_request(&mut app), Command::BotPlace(key) if key == "de1"));
+    app.controller.apply(
+        Command::BotPlace("de1".into()),
+        serde_json::json!({"placement": {"node_key":"de1","status":"failed","version":"0.5.0",
+            "applied_version":null,"error_code":"bot_install_failed"}, "relay_node_key": "de1"}),
+    );
+    assert!(app.controller.bot_nodes.is_none());
+    let (text, controls) = app.bot_placement_view();
+    assert!(text.contains("Runs on: de1") && text.contains("Last error: bot_install_failed"));
+    assert!(controls[0].1 == Control::ControllerBotRetry);
+    app.activate(Control::ControllerBotRetry);
+    assert!(matches!(scoped_request(&mut app), Command::BotPlace(key) if key == "de1"));
+    // Coming back needs a second press.
+    app.activate(Control::ControllerBotReturn);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::ControllerBotReturn);
+    assert!(matches!(scoped_request(&mut app), Command::BotReturn));
+    app.activate(Control::ControllerBack);
+    assert!(app.controller.bot_placement.is_none());
+    assert!(app.controller_section == Some(ControllerSection::Installation));
 }

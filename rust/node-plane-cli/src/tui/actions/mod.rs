@@ -1,4 +1,5 @@
 mod access;
+mod bot_placement;
 mod cabinet;
 mod controller;
 mod localized;
@@ -415,6 +416,12 @@ impl App {
             | Control::ControllerCabinetSave
             | Control::ControllerCabinetRemove
             | Control::ControllerCabinetRefresh
+            | Control::ControllerBotPlacement
+            | Control::ControllerBotPick
+            | Control::ControllerBotNode(_)
+            | Control::ControllerBotRetry
+            | Control::ControllerBotReturn
+            | Control::ControllerBotRefresh
             | Control::ControllerPolicies
             | Control::ControllerScopedPolicy(..)
             | Control::ControllerQuotaReset

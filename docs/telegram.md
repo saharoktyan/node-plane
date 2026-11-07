@@ -36,6 +36,12 @@ In a server card, **Probe** reads the agent and Docker state, selected protocol 
 
 Temporary configurations are available in administrator settings. They have their own list and revocation actions; see [Temporary configurations](temporary-configs.md).
 
+## Where the bot runs
+
+The controller runs the bot itself until you move it. In the bot's **Admin → Services → Telegram bot** or **System settings → Telegram bot**, or Workstation's **Settings → Basic → Telegram bot location** (also under **Services**), choose **Run on a node** and a node with an agent. The bot then runs on that node and reaches the controller through the relay, so the controller needs neither a public address nor access to Telegram: set up the relay first, and let the node reach PyPI, where it installs the bot's packages. The controller sends the node its release's bot and token, and stops its own bot once the node runs it; open screens may need to be opened again. The bot on the node updates with the controller, and a new token reaches it too.
+
+**Back to the controller** removes the bot from the node, revokes its key and starts the controller's bot again. Bring the bot back before you turn it off, remove the relay or remove its node. Moving the bot is not available through the relay for other clients; the bot on a node manages it like any other setting.
+
 ## Diagnostics
 
 Controller diagnostics checks release files, environment keys, PostgreSQL, published migration checksums, systemd services, backend readiness and blocked maintenance jobs. **Server diagnostics** opens live checks for five servers per page: agent connectivity/version, Docker, selected protocol containers/configuration structure, pending settings, runtime version and host resource pressure. A failure on one server preserves results for the others. Disabled servers are marked as skipped. Each page states how many registered servers it covers; it is not a fleet-wide health certificate. Open a check for its explanation or the server card for recovery.

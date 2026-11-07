@@ -29,6 +29,7 @@ impl App {
             || self.activate_tariff(control)
             || self.activate_relay(control)
             || self.activate_cabinet(control)
+            || self.activate_bot_placement(control)
         {
             return None;
         }
@@ -1263,7 +1264,10 @@ impl App {
                     return None;
                 }
                 if self.controller.defaults_input.is_none()
-                    && (self.relay_back() || self.cabinet_back() || self.tariff_back())
+                    && (self.relay_back()
+                        || self.cabinet_back()
+                        || self.bot_placement_back()
+                        || self.tariff_back())
                 {
                     return None;
                 }
@@ -1532,6 +1536,9 @@ impl App {
         self.controller.cabinet = None;
         self.controller.cabinet_draft = None;
         self.controller.cabinet_confirm_remove = false;
+        self.controller.bot_placement = None;
+        self.controller.bot_nodes = None;
+        self.controller.bot_confirm_return = false;
         self.controller.alerts = None;
         self.controller.workstation_audit = None;
         self.controller.recovery_history = None;
@@ -1663,6 +1670,14 @@ impl App {
         }
         if self.cabinet_view_open() {
             return self.cabinet_view().1.into_iter().map(|(_, c)| c).collect();
+        }
+        if self.bot_placement_view_open() {
+            return self
+                .bot_placement_view()
+                .1
+                .into_iter()
+                .map(|(_, c)| c)
+                .collect();
         }
         if self.tariff_view_open() {
             return self.tariff_view().1.into_iter().map(|(_, c)| c).collect();
@@ -1918,6 +1933,10 @@ impl App {
                 ("SSH key".into(), Control::ControllerSshKey),
                 ("Relay".into(), Control::ControllerRelay),
                 ("Web cabinet".into(), Control::ControllerCabinet),
+                (
+                    "Telegram bot location".into(),
+                    Control::ControllerBotPlacement,
+                ),
                 ("New installation".into(), Control::ControllerNew),
             ],
             Some(Policies) if self.controller.scope.is_some() => self.scoped_policy_controls(),
@@ -2095,6 +2114,10 @@ impl App {
                 }
                 if crate::services::has(catalog, "telegram_bot") {
                     items.push(("Telegram".into(), Control::ControllerTelegram));
+                    items.push((
+                        "Telegram bot location".into(),
+                        Control::ControllerBotPlacement,
+                    ));
                 }
                 items
             }

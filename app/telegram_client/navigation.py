@@ -166,6 +166,11 @@ def parent_path(callback, locale, data):
         action, where = parse(callback)
         view = (*parent_path(back_callback(where), locale, data), Breadcrumb(tr(locale, 'cabinet.title'), 'cab:v:' + where))
         return view if action in {'v', 'rm'} else (*view, Breadcrumb(tr(locale, 'cabinet.local_title'), 'cab:e:' + where))
+    if callback.startswith('tgb:'):
+        from .routers.admin_telegram_bot import back_callback, parse
+        action, where = parse(callback)
+        view = (*parent_path(back_callback(where), locale, data), Breadcrumb(tr(locale, 'tgbot.title'), 'tgb:v:' + where))
+        return view if action in {'v', 'rm'} else (*view, Breadcrumb(tr(locale, 'tgbot.move'), 'tgb:n:' + where))
     pieces = callback.split(':')
     prefix = pieces[0]
     if prefix == 'node_job' and len(pieces) == 2:

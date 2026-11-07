@@ -870,6 +870,8 @@ pub(in crate::tui) fn draw_controller(
         (text, controls) = app.relay_view();
     } else if app.cabinet_view_open() {
         (text, controls) = app.cabinet_view();
+    } else if app.bot_placement_view_open() {
+        (text, controls) = app.bot_placement_view();
     } else if app.tariff_view_open() {
         (text, controls) = app.tariff_view();
     } else if let Some(value) = state.policies.as_ref().filter(|_| app.requests_settings) {
