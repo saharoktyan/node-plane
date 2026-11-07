@@ -1446,18 +1446,18 @@ async fn execute_inner(
                         value["_telegram_bot"] = backend::request(session, &credential, Method::GET,
                             "/api/v1/invites/telegram-bot", None, None).await?;
                     }
-                    if let crate::access::Command::List(tab) = &command {
+                    if matches!(&command, crate::access::Command::List(_) | crate::access::Command::WithoutAccess) {
                         let mut cursors = BTreeSet::new();
                         while let Some(cursor) = value["next_cursor"].as_str().map(str::to_owned) {
                             ensure!(cursors.insert(cursor.clone()), "Access pagination did not advance");
                             let next = backend::request(session, &credential, Method::GET,
-                                &format!("{}?limit=100&cursor={}", tab.root(), encode(&cursor)), None, None).await?;
+                                &format!("{path}&cursor={}", encode(&cursor)), None, None).await?;
                             let extra = next["items"].as_array().context("Missing access records")?;
                             let items = value["items"].as_array_mut().context("Missing access records")?;
                             ensure!(items.len() + extra.len() <= 20_000, "Too many access records");
                             items.extend(extra.iter().cloned()); value["next_cursor"] = next["next_cursor"].clone();
                         }
-                        if *tab == crate::access::Tab::Profiles {
+                        if matches!(&command, crate::access::Command::List(crate::access::Tab::Profiles)) {
                             let mut accounts = backend::request(session, &credential, Method::GET, "/api/v1/accounts?limit=100&access=all", None, None).await?;
                             let mut cursors = BTreeSet::new();
                             while let Some(cursor) = accounts["next_cursor"].as_str().map(str::to_owned) {

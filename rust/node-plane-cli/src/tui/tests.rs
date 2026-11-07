@@ -659,7 +659,7 @@ fn active_access_tab_retains_colored_label_without_focus_outline() {
     use crate::access::Tab;
     let mut app = test_profile_app();
     app.screen = Screen::Access;
-    app.access.tab = crate::access::Tab::Profiles;
+    app.access.tab = crate::access::Tab::Accounts;
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     terminal
         .draw(|frame| app.hits = draw_content(frame, &app))
@@ -678,7 +678,7 @@ fn active_access_tab_retains_colored_label_without_focus_outline() {
         let tab = app
             .hits
             .iter()
-            .find(|h| h.control == Control::AccessTab(Tab::Profiles))
+            .find(|h| h.control == Control::AccessTab(Tab::Accounts))
             .unwrap();
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(tab.area.x, tab.area.y)].fg, Color::White);
@@ -5075,7 +5075,7 @@ fn returning_from_controller_section_restores_opener_and_scroll() {
 }
 
 #[test]
-fn access_return_and_async_refresh_keep_selected_profile() {
+fn access_return_and_async_refresh_keep_selected_account() {
     let mut app = test_profile_app();
     app.screen = Screen::Access;
     app.access.items = vec![
@@ -5094,13 +5094,13 @@ fn access_return_and_async_refresh_keep_selected_profile() {
     app.access.selected = index;
     app.remember_navigation_focus(Some(Control::AccessItem(1)));
     app.event(Event::Nodes(crate::nodes::Update::Access(
-        crate::access::Command::Card(crate::access::Tab::Profiles, "two".into()),
+        crate::access::Command::Card(crate::access::Tab::Accounts, "two".into()),
         serde_json::json!({"id":"two"}),
     )));
     app.activate(Control::AccessBack);
     assert_eq!(app.access.selected, index);
     app.event(Event::Nodes(crate::nodes::Update::Access(
-        crate::access::Command::List(crate::access::Tab::Profiles),
+        crate::access::Command::List(crate::access::Tab::Accounts),
         serde_json::json!({"items":[{"id":"one"},{"id":"two"}]}),
     )));
     assert_eq!(app.access.selected, index);
@@ -6233,6 +6233,73 @@ fn external_removal_clears_cached_installation_and_stops_polling() {
     assert!(app.controller.poll().is_none());
     app.activate(Control::ControllerDefaults);
     assert!(app.nodes_requested.is_none());
+}
+
+#[test]
+fn negative_probe_forgets_saved_installation_without_claiming_external_removal() {
+    let mut app = test_profile_app();
+    let directory = tempfile::tempdir().unwrap();
+    app.state_dir = directory.path().into();
+    app.remember_installed();
+    let profile = app.form.saved.as_ref().unwrap().id;
+    app.controller.overview = Some(serde_json::json!({"counts":{}}));
+    app.event(Event::Nodes(crate::nodes::Update::Controller(
+        Some(profile),
+        crate::controller::Command::Probe,
+        serde_json::json!({"installed":false,"backend_ready":false}),
+    )));
+    assert!(!app.controller_ready());
+    assert!(!app.has_installation());
+    assert!(!app.form.saved.as_ref().unwrap().installed);
+    assert!(!app.connections.installations[0].installed);
+    assert!(
+        !crate::connections::Connections::load(directory.path())
+            .unwrap()
+            .installations[0]
+            .installed
+    );
+    assert!(app.controller.overview.is_none());
+    assert!(!app.controller.removed);
+    app.activate(Control::Action(Action::Install));
+    assert!(matches!(app.screen, Screen::Form));
+}
+
+#[test]
+fn failed_controller_overview_stops_loading_and_offers_retry() {
+    let mut app = test_profile_app();
+    app.open_controller();
+    app.nodes_requested = None;
+    app.nodes_busy = true;
+    app.nodes_background = true;
+    app.event(Event::Finished(Err(
+        "Controller authorization: workstation_unavailable.".into(),
+    )));
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal
+        .draw(|frame| app.hits = draw_content(frame, &app))
+        .unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(!text.contains("Loading installation…"));
+    assert!(text.contains("Installation details could not be loaded."));
+    assert!(app.error.contains("workstation_unavailable"));
+    assert!(
+        app.controller_controls()
+            .contains(&Control::ControllerRefresh)
+    );
+    app.activate(Control::ControllerRefresh);
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Controller(
+            _,
+            crate::controller::Command::Overview
+        ))
+    ));
 }
 
 #[test]
@@ -9906,6 +9973,127 @@ fn the_own_account_sets_its_password_and_any_account_is_signed_out() {
 }
 
 #[test]
+fn account_opens_its_vpn_profile_and_back_restores_account_sign_in_actions() {
+    let mut app = test_profile_app();
+    app.screen = Screen::Access;
+    assert_eq!(app.access.tab, crate::access::Tab::Accounts);
+    assert!(!crate::access::Tab::ALL.contains(&crate::access::Tab::Profiles));
+    let account = serde_json::json!({
+        "id":"account-id", "role":"admin", "status":"approved", "revision":2,
+        "has_password":false, "display_name":"Owner", "profile_id":"vpn-profile-id"
+    });
+    app.access.card = Some(account.clone());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.access_controls().contains(&Control::AccessVpnProfile));
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessInviteAccount)
+    );
+    app.activate(Control::AccessVpnProfile);
+    let Some(crate::nodes::Command::Access(command)) = app.nodes_requested.take() else {
+        panic!("load the account's VPN profile");
+    };
+    assert!(
+        matches!(&command, crate::access::Command::Card(crate::access::Tab::Profiles, id)
+        if id == "vpn-profile-id")
+    );
+    app.access.apply(
+        command,
+        serde_json::json!({
+            "id":"vpn-profile-id", "owner_account_id":"account-id", "frozen":false,
+            "_account":account
+        }),
+    );
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(
+        !app.access_controls()
+            .contains(&Control::AccessInviteAccount)
+    );
+    app.activate(Control::AccessInviteAccount);
+    assert!(app.nodes_requested.is_none());
+    app.activate(Control::AccessBack);
+    let Some(crate::nodes::Command::Access(command)) = app.nodes_requested.take() else {
+        panic!("load the profile owner's account");
+    };
+    assert!(
+        matches!(&command, crate::access::Command::Card(crate::access::Tab::Accounts, id)
+        if id == "account-id")
+    );
+    app.access.apply(command, account);
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(app.access_controls().contains(&Control::AccessLogin));
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessInviteAccount)
+    );
+    app.activate(Control::AccessInviteAccount);
+    let Some(crate::nodes::Command::Access(crate::access::Command::InviteCreate { body, .. })) =
+        app.nodes_requested.take()
+    else {
+        panic!("create an existing-account sign-in link");
+    };
+    assert_eq!(body, serde_json::json!({"account_id":"account-id"}));
+}
+
+#[test]
+fn accounts_include_people_without_vpn_and_create_a_profile_for_the_open_account() {
+    use crate::access::{Command, Tab};
+    let mut app = test_profile_app();
+    app.open_access();
+    let Some(crate::nodes::Command::Access(command @ Command::List(Tab::Accounts))) =
+        app.nodes_requested.take()
+    else {
+        panic!("open Accounts");
+    };
+    assert_eq!(command.request().1, "/api/v1/accounts?limit=100&access=all");
+    app.access.apply(command, serde_json::json!({"items":[
+        {"id":"empty-account", "login":"kim", "role":"member", "status":"approved", "profile_id":null}
+    ]}));
+    app.activate(Control::AccessItem(0));
+    let Some(crate::nodes::Command::Access(command @ Command::Card(Tab::Accounts, _))) =
+        app.nodes_requested.take()
+    else {
+        panic!("open an account without VPN");
+    };
+    app.access.apply(command, app.access.items[0].clone());
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+    terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
+    assert!(!app.access_controls().contains(&Control::AccessVpnProfile));
+    assert!(app.access_controls().contains(&Control::AccessEdit));
+    assert!(
+        app.access_controls()
+            .contains(&Control::AccessInviteAccount)
+    );
+    app.activate(Control::AccessEdit);
+    let Some(crate::nodes::Command::Access(command @ Command::EditContext { .. })) =
+        app.nodes_requested.take()
+    else {
+        panic!("create a VPN profile");
+    };
+    assert!(
+        matches!(&command, Command::EditContext { id: None, owner: Some(owner) }
+        if owner == "empty-account")
+    );
+    app.access.apply(
+        command,
+        serde_json::json!({"owner_account":{"id":"empty-account"}}),
+    );
+    app.activate(Control::AccessWizardBack);
+    assert!(app.access.editor.is_none());
+    assert!(app.nodes_requested.is_none());
+    assert_eq!(app.access.tab, Tab::Accounts);
+    assert_eq!(app.access.card.as_ref().unwrap()["id"], "empty-account");
+    app.access.card = None;
+    app.access.without_access = true;
+    app.activate(Control::AccessRefresh);
+    assert!(matches!(
+        app.nodes_requested,
+        Some(crate::nodes::Command::Access(Command::WithoutAccess))
+    ));
+}
+
+#[test]
 fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
     let mut app = test_profile_app();
     app.screen = Screen::Access;
@@ -9987,6 +10175,11 @@ fn invites_are_made_with_a_template_revoked_and_made_for_an_accounts_sign_in() {
     assert!(screen.contains("https://cab.example/invite#inv_tok"));
     assert!(screen.contains("t.me/np_bot?start=inv_tok"));
     assert!(screen.contains("while the bot is @np_bot"));
+    assert!(app.access_controls().contains(&Control::AccessInviteCopy));
+    assert_eq!(
+        crate::access::invite_cabinet_link(app.access.card.as_ref().unwrap()),
+        Some("https://cab.example/invite#inv_tok")
+    );
     app.activate(Control::AccessInviteRevoke);
     assert!(matches!(
         app.nodes_requested.take(),
@@ -10069,12 +10262,12 @@ fn registration_settings_and_accounts_without_access() {
         serde_json::json!({"items":[{"id":"acc","login":"kim","role":"member","status":"approved"}]}),
     );
     assert_eq!(
-        crate::access::label(crate::access::Tab::Profiles, &app.access.items[0]),
-        "kim · No VPN access"
+        crate::access::label(crate::access::Tab::Accounts, &app.access.items[0]),
+        "kim · member"
     );
     terminal.draw(|frame| app.hits = draw(frame, &app)).unwrap();
     let controls = app.access_controls();
-    assert!(controls.contains(&Control::AccessTab(crate::access::Tab::Profiles)));
+    assert!(controls.contains(&Control::AccessTab(crate::access::Tab::Accounts)));
     assert!(!controls.contains(&Control::AccessWithoutAccess));
 }
 

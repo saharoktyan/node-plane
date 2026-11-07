@@ -272,7 +272,7 @@ impl App {
                 _ => text.push_str("\n\nThe proxy on the node answers on 443 for the domain and passes HTTP/2 (h2c) to the relay's port on 127.0.0.1."),
             }
             if draft.tls == "acme" {
-                text.push_str("\n\nLet's Encrypt checks the domain on port 443: point the domain at the node, and keep 443 free of Xray there.");
+                text.push_str("\n\nLet's Encrypt needs direct access to the node on port 443 for certificate issuance and renewal. Point the domain at the node and keep 443 free of Xray. In Cloudflare, use DNS only (grey cloud); proxying blocks this check. Behind a TLS reverse proxy, use certificate files or the reverse proxy TLS mode instead.");
             }
             controls.push(("Save".into(), Control::ControllerRelaySave));
             controls.push(("Cancel".into(), Control::ControllerBack));

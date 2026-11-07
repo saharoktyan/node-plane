@@ -281,6 +281,7 @@ pub(super) enum Control {
     AccessDecision(bool),
     AccessConfirm,
     AccessEdit,
+    AccessVpnProfile,
     AccessNew,
     AccessIdentity,
     AccessProvisionNext,
@@ -312,6 +313,7 @@ pub(super) enum Control {
     AccessInviteTemplate(usize),
     AccessInviteRevoke,
     AccessInviteAccount,
+    AccessInviteCopy,
     /// Approve the open merge, keeping the main (`true`) or other VPN
     /// profile when both have one; or reject it.
     AccessMerge(Option<bool>),

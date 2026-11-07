@@ -94,6 +94,22 @@ impl App {
                 }
                 None
             }
+            Control::AccessVpnProfile => {
+                if let Some(id) = self
+                    .access
+                    .card
+                    .as_ref()
+                    .filter(|_| self.access.tab == crate::access::Tab::Accounts)
+                    .and_then(|card| card["profile_id"].as_str())
+                    .map(str::to_owned)
+                {
+                    self.access_command(crate::access::Command::Card(
+                        crate::access::Tab::Profiles,
+                        id,
+                    ));
+                }
+                None
+            }
             Control::AccessEdit => {
                 if let Some(id) = self
                     .access
@@ -130,6 +146,12 @@ impl App {
                     .as_ref()
                     .is_some_and(|editor| editor.creation_step == Some(0))
                 {
+                    if self.access.tab == crate::access::Tab::Accounts && self.access.card.is_some()
+                    {
+                        self.access.editor = None;
+                        self.access.selected = 0;
+                        return None;
+                    }
                     self.access.profile_draft = self.access.editor.take();
                     self.access.creating_profile = true;
                     self.access.tab = crate::access::Tab::Accounts;
@@ -600,6 +622,26 @@ impl App {
                 });
                 None
             }
+            Control::AccessInviteCopy => {
+                if self.access.tab == crate::access::Tab::Invites
+                    && let Some(link) = self
+                        .access
+                        .card
+                        .as_ref()
+                        .and_then(crate::access::invite_cabinet_link)
+                        .map(str::to_owned)
+                {
+                    let copied = self.copy_text(link, "Link copied.");
+                    self.access.notice = if copied {
+                        "Link copied."
+                    } else {
+                        "Clipboard unavailable. Copy the displayed link manually."
+                    }
+                    .into();
+                    self.prompt_notice.clear();
+                }
+                None
+            }
             Control::AccessInviteRevoke => {
                 if let Some(id) = self
                     .access
@@ -615,7 +657,7 @@ impl App {
                 }
                 None
             }
-            Control::AccessInviteAccount => {
+            Control::AccessInviteAccount if self.access.tab == crate::access::Tab::Accounts => {
                 if let Some(id) = self
                     .access
                     .card
@@ -782,7 +824,11 @@ impl App {
                     .as_ref()
                     .and_then(|v| v["id"].as_str())
                     .map(|id| crate::access::Command::Card(self.access.tab, id.into()))
-                    .unwrap_or(crate::access::Command::List(self.access.tab));
+                    .unwrap_or(if self.access.without_access {
+                        crate::access::Command::WithoutAccess
+                    } else {
+                        crate::access::Command::List(self.access.tab)
+                    });
                 self.access_command(command);
                 None
             }
@@ -797,7 +843,7 @@ impl App {
                 if self.access.creating_profile {
                     self.access.creating_profile = false;
                     self.access.profile_draft = None;
-                    self.access.tab = crate::access::Tab::Profiles;
+                    self.access.tab = crate::access::Tab::Accounts;
                     self.access.notice.clear();
                     self.access_command(crate::access::Command::List(self.access.tab));
                     return None;
@@ -836,9 +882,27 @@ impl App {
                     return None;
                 }
                 if self.access.decision.take().is_none() {
+                    if self.access.tab == crate::access::Tab::Profiles
+                        && let Some(owner) = self
+                            .access
+                            .card
+                            .as_ref()
+                            .and_then(|card| {
+                                card["owner_account_id"]
+                                    .as_str()
+                                    .or_else(|| card["_account"]["id"].as_str())
+                            })
+                            .map(str::to_owned)
+                    {
+                        self.access_command(crate::access::Command::Card(
+                            crate::access::Tab::Accounts,
+                            owner,
+                        ));
+                        return None;
+                    }
                     self.access.card = None;
-                    if self.access.tab == crate::access::Tab::Accounts {
-                        self.access.tab = crate::access::Tab::Profiles;
+                    if self.access.tab == crate::access::Tab::Profiles {
+                        self.access.tab = crate::access::Tab::Accounts;
                     }
                     self.access_command(crate::access::Command::List(self.access.tab));
                 }
@@ -902,6 +966,7 @@ impl App {
         self.access.account_action = None;
         self.access.traffic = None;
         self.access.owner_filter = None;
+        self.access.tab = crate::access::Tab::Accounts;
         self.screen = Screen::Access;
         self.quick_focus = false;
         self.access_command(crate::access::Command::List(self.access.tab));
@@ -938,6 +1003,7 @@ impl App {
                         | Control::AccessDecision(_)
                         | Control::AccessConfirm
                         | Control::AccessEdit
+                        | Control::AccessVpnProfile
                         | Control::AccessNew
                         | Control::AccessWizardNext
                         | Control::AccessWizardBack
@@ -958,6 +1024,7 @@ impl App {
                         | Control::AccessInviteTemplate(_)
                         | Control::AccessInviteRevoke
                         | Control::AccessInviteAccount
+                        | Control::AccessInviteCopy
                         | Control::AccessBotUsername
                         | Control::AccessRegistration
                         | Control::AccessMerge(_)

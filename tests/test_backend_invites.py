@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import unittest
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from backend import invites, logins, sessions
 from backend.authorization import AccessDenied, Principal, PrincipalKind, resolve_actor
@@ -40,6 +42,17 @@ class InviteTests(unittest.TestCase):
     def profile(self, account_id):
         with self.db.connect() as conn:
             return conn.execute('SELECT * FROM backend_profiles WHERE owner_account_id=?', (account_id,)).fetchone()
+
+    def test_new_and_existing_account_links_use_the_fragment_route(self):
+        with patch('backend.web_cabinet.origin', return_value='https://cab.example.com'):
+            for options in ({'vpn': True}, {'account_id': self.admin.id}):
+                created = invites.create(self.db, self.admin_actor(), **options)
+                link = urlsplit(created['cabinet_link'])
+                self.assertEqual(link.path, '/invite')
+                self.assertEqual(link.fragment, created['token'])
+                self.assertNotIn(created['token'], link.path + link.query)
+                preview = invites.preview(self.db, link.fragment, source='10.0.0.1')
+                self.assertEqual(preview['kind'], created['kind'])
 
     def test_the_bots_username_is_needed_for_its_link(self):
         with self.db.transaction() as conn:

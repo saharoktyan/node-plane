@@ -4,15 +4,15 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub enum Tab {
-    Accounts,
     #[default]
+    Accounts,
     Profiles,
     Requests,
     Invites,
     Merges,
 }
 impl Tab {
-    pub const ALL: [Self; 4] = [Self::Profiles, Self::Requests, Self::Invites, Self::Merges];
+    pub const ALL: [Self; 4] = [Self::Accounts, Self::Requests, Self::Invites, Self::Merges];
     pub fn label(self) -> &'static str {
         match self {
             Self::Accounts => "Accounts",
@@ -286,7 +286,15 @@ impl Command {
             ),
             Self::List(tab) => (
                 hyper::Method::GET,
-                format!("{}?limit=100", tab.root()),
+                format!(
+                    "{}?limit=100{}",
+                    tab.root(),
+                    if *tab == Tab::Accounts {
+                        "&access=all"
+                    } else {
+                        ""
+                    }
+                ),
                 None,
                 None,
             ),
@@ -838,7 +846,7 @@ pub struct Browser {
     pub bot_username_input: Option<String>,
     /// The registration settings page, while open.
     pub registration: Option<Value>,
-    /// The Profiles tab lists the accounts without access instead.
+    /// The Accounts tab lists only accounts without access instead.
     pub without_access: bool,
     pub profile: Option<Uuid>,
     pub tab: Tab,
@@ -926,15 +934,15 @@ impl Browser {
         match command {
             Command::Provision { .. } => {
                 self.provision = None;
-                self.tab = Tab::Profiles;
-                let mut profile = value["profile"].clone();
-                profile["_account"] = value["account"].clone();
-                self.card = Some(profile);
+                self.tab = Tab::Accounts;
+                let mut account = value["account"].clone();
+                account["profile_id"] = value["profile"]["id"].clone();
+                self.card = Some(account);
                 self.result = Some(
                     if value["created"] == false {
-                        "Profile already exists. Open it to manage access."
+                        "Account already exists. Open it to manage sign-in and VPN access."
                     } else {
-                        "Profile is ready. Open it to configure access."
+                        "Account is ready. Open it to manage sign-in and VPN access."
                     }
                     .into(),
                 );
@@ -1121,22 +1129,10 @@ impl Browser {
                 self.card = Some(value);
             }
             Command::WithoutAccess => {
-                self.tab = Tab::Profiles;
+                self.tab = Tab::Accounts;
                 self.card = None;
                 self.without_access = true;
-                self.items = value["items"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|account| {
-                        let mut item = account.clone();
-                        item["_account_only"] = true.into();
-                        if let Some(login) = account["login"].as_str() {
-                            item["display_name"] = login.into();
-                        }
-                        item
-                    })
-                    .collect();
+                self.items = value["items"].as_array().cloned().unwrap_or_default();
             }
             Command::Registration | Command::RegistrationUpdate { .. } => {
                 self.registration = Some(value);
@@ -1200,6 +1196,14 @@ pub fn text(value: &Value) -> String {
 /// Invites need the bot's username while Telegram is on.
 pub fn bot_username_missing(telegram_bot: &Value) -> bool {
     telegram_bot["telegram_enabled"] == true && !telegram_bot["username"].is_string()
+}
+
+/// The cabinet link shown once when an invite is created, including account sign-in links.
+pub fn invite_cabinet_link(invite: &Value) -> Option<&str> {
+    invite["token"].as_str()?;
+    invite["cabinet_link"]
+        .as_str()
+        .filter(|link| !link.is_empty())
 }
 
 pub fn bot_username_error(error: &str) -> String {
@@ -1365,6 +1369,7 @@ pub fn label(tab: Tab, item: &Value) -> String {
             let mut parts: Vec<String> = Vec::new();
             if let Some(name) = item["display_name"]
                 .as_str()
+                .or_else(|| item["login"].as_str())
                 .filter(|name| !name.is_empty() && Some(*name) != username.as_deref())
             {
                 parts.push(name.to_owned());
@@ -1514,6 +1519,7 @@ mod tests {
     #[test]
     fn role_change_updates_profile_revision_before_next_action() {
         let mut browser = Browser::default();
+        browser.tab = Tab::Profiles;
         browser.card = Some(json!({"id":"profile","desired_revision":1}));
         browser.items = vec![browser.card.clone().unwrap()];
         browser.apply(

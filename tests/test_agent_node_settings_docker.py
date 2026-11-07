@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 from uuid import uuid4
 
-from tests.test_runtime_docker import AGENT_BINARY
+from tests.test_runtime_docker import AGENT_BINARY, XRAY_IMAGE
 
 
 
@@ -46,15 +47,111 @@ class AgentNodeSettingsDockerTests(unittest.TestCase):
             'NODE_PLANE_NODE_ENV': str(self.env),
             'NODE_PLANE_PROFILE_JOURNAL': str(self.root / 'journal' / 'intents.sqlite3')}
 
-    def apply(self, settings):
+    def apply(self, settings, action='sync_env'):
         command = str(uuid4())
         intent = {'node_key': 'n1', 'command_id': command, 'revision': 1,
                   'protocols': ['awg', 'xray'], 'settings': settings}
-        result = subprocess.run([str(AGENT_BINARY), 'node-operation', 'sync_env', command, json.dumps(intent)],
+        result = subprocess.run([str(AGENT_BINARY), 'node-operation', action, command, json.dumps(intent)],
                                 env=self.environment, capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr)
         # The agent verified node.env and the configs before it succeeded.
         return json.loads(result.stdout)['result']
+
+    def fresh_image_fixture(self):
+        docker = self.root / 'bin' / 'docker'
+        docker.write_text(f'''#!{sys.executable}
+import json, sys
+from pathlib import Path
+root = Path({str(self.root)!r})
+args = sys.argv[1:]
+with (root / 'docker-calls').open('a') as log:
+    log.write(json.dumps(args) + '\\n')
+upstream = {XRAY_IMAGE!r}
+release = 'node-plane-xray:26.10.31-np.2'
+identity = 'sha256:' + 'a' * 64
+if args[:1] == ['pull']:
+    if (root / 'fail-pull').exists():
+        sys.exit('registry unavailable')
+    if args[1] != upstream:
+        sys.exit('The local release tag is not a published image')
+    (root / 'downloaded').touch()
+elif args[:2] == ['image', 'inspect']:
+    if args[-1] == 'custom/xray:test':
+        print(identity)
+        sys.exit(0)
+    if not (root / 'downloaded').exists() or args[-1] != upstream:
+        sys.exit('Image is not downloaded')
+    print(identity)
+elif args[:1] == ['tag']:
+    assert args[1:] == [identity, release]
+    (root / 'release-tag').touch()
+elif args[:2] == ['run', '--rm']:
+    if args[2] == 'custom/xray:test':
+        assert args[3:] == ['x25519']
+        print('PrivateKey: ' + 'A' * 43)
+        print('Password: ' + 'B' * 43)
+        sys.exit(0)
+    if not (root / 'release-tag').exists():
+        sys.exit("Unable to find image '" + release + "' locally")
+    assert args[2:] in ([release, 'x25519'], [release, 'x25519', '-i', 'A' * 43])
+    print('PrivateKey: ' + 'A' * 43)
+    print('Password: ' + 'B' * 43)
+elif args[:1] == ['inspect']:
+    print('true')
+elif args[:1] == ['exec']:
+    sys.exit('Container is not running')
+''')
+        docker.chmod(0o755)
+
+    def test_bootstrap_prepares_the_pinned_image_before_initializing_a_clean_runtime(self):
+        self.fresh_image_fixture()
+        self.apply({'public_host': 'node.example', 'xray_sni': 'www.example.com',
+                    'xray_tcp_port': 2443, 'xray_xhttp_port': 8443, 'xray_xhttp_path': '/assets',
+                    'awg_port': 51820, 'awg_interface': 'wg0'}, action='bootstrap')
+        self.assertTrue(self.xray.is_file())
+        self.assertTrue(self.awg.is_file())
+        calls = [json.loads(line) for line in (self.root / 'docker-calls').read_text().splitlines()]
+        pull = calls.index(['pull', XRAY_IMAGE])
+        keygen = calls.index(['run', '--rm', 'node-plane-xray:26.10.31-np.2', 'x25519'])
+        self.assertLess(pull, keygen)
+        self.assertNotIn(['pull', 'node-plane-xray:26.10.31-np.2'], calls)
+
+    def test_xray_initialization_stops_before_key_generation_when_the_pinned_pull_fails(self):
+        self.fresh_image_fixture()
+        (self.root / 'fail-pull').touch()
+        result = subprocess.run([str(AGENT_BINARY), 'xray-config', 'init', str(self.xray), 'node.example'],
+                                env=self.environment, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('registry unavailable', result.stderr)
+        self.assertFalse(self.xray.exists())
+        calls = [json.loads(line) for line in (self.root / 'docker-calls').read_text().splitlines()]
+        self.assertIn(['pull', XRAY_IMAGE], calls)
+        self.assertFalse(any(call[0] == 'run' for call in calls))
+
+    def test_xray_initialization_preserves_a_cached_custom_image(self):
+        self.fresh_image_fixture()
+        result = subprocess.run([str(AGENT_BINARY), 'xray-config', 'init', str(self.xray), 'node.example',
+                                 'www.example.com', '2443', '8443', '/assets', 'xtls-rprx-vision', 'custom/xray:test'],
+                                env=self.environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.xray.exists())
+        calls = [json.loads(line) for line in (self.root / 'docker-calls').read_text().splitlines()]
+        self.assertIn(['run', '--rm', 'custom/xray:test', 'x25519'], calls)
+        self.assertFalse(any(call[0] in {'pull', 'tag'} for call in calls))
+
+    def test_public_key_derivation_prepares_the_image_when_the_container_is_not_running(self):
+        self.fresh_image_fixture()
+        initialized = subprocess.run([str(AGENT_BINARY), 'xray-config', 'init', str(self.xray), 'node.example'],
+                                     env=self.environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        before = self.xray.read_bytes()
+        (self.root / 'downloaded').unlink()
+        (self.root / 'release-tag').unlink()
+        result = subprocess.run([str(AGENT_BINARY), 'xray-config', 'public', str(self.xray), 'node.example'],
+                                env=self.environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.xray.read_bytes(), before)
+        self.assertTrue((self.root / 'release-tag').exists())
 
     def test_real_settings_preserve_identities_and_update_protocol_parameters(self):
         data = {'outbounds': [{'protocol': 'freedom', 'tag': 'direct'}], 'inbounds': [

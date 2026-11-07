@@ -58,11 +58,8 @@ impl App {
                                     }
                                 } else {
                                     self.confirmed_installation = None;
-                                    if value["external_removal"] != true {
-                                        return;
-                                    }
                                     self.installed_profile = None;
-                                    self.error.clear();
+                                    self.controller_version = None;
                                     if let Some(saved) = &mut self.form.saved {
                                         saved.installed = false;
                                         if let Some(entry) = self
@@ -76,10 +73,13 @@ impl App {
                                     }
                                     self.controller = crate::controller::Browser {
                                         profile: self.form.saved.as_ref().map(|p| p.id),
-                                        removed: true,
+                                        removed: value["external_removal"] == true,
                                         ..Default::default()
                                     };
-                                    self.screen = Screen::Controller;
+                                    if value["external_removal"] == true {
+                                        self.error.clear();
+                                        self.screen = Screen::Controller;
+                                    }
                                     if let Err(error) = self.connections.save(&self.state_dir) {
                                         self.error = error.to_string();
                                     }

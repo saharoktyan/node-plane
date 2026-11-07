@@ -1,6 +1,6 @@
 """Node resources over time, for the overview's charts.
 
-Every five minutes the controller reads each enabled node's cheap host
+Every five minutes the controller reads each installed agent's cheap host
 metrics (memory, load, CPU, disk and network byte counters) and keeps a
 reading. Network counters become a rate between two readings; a smaller
 counter means the host restarted, so that interval has no rate. Readings
@@ -79,7 +79,7 @@ class NodeMetrics:
             if row and datetime.fromisoformat(json.loads(row['value'])) > now - INTERVAL:
                 return False
             nodes = [row['key'] for row in conn.execute(
-                f'SELECT n.key FROM backend_nodes n WHERE n.enabled=1 AND {AGENT_INSTALLED_SQL} ORDER BY n.key')]
+                f'SELECT n.key FROM backend_nodes n WHERE {AGENT_INSTALLED_SQL} ORDER BY n.key')]
         observed = []
         if nodes:
             with ThreadPoolExecutor(max_workers=min(4, len(nodes))) as pool:

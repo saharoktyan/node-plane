@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.0-alpha.5
+
+- Initializing Xray on a clean node prepares the digest-pinned release image
+  and its local tag before generating REALITY keys. It no longer tries to
+  pull the unpublished `node-plane-xray` local tag from Docker Hub; offline
+  public-key derivation prepares the image the same way.
+- The cabinet's Controller overview shows the release version without its
+  commit hash.
+- Node resource history is collected from installed agents even when their
+  nodes have no VPN protocols or VPN access is off. Agent-only nodes no longer
+  stay at **No readings yet** because the collector filtered by VPN state.
+- The cabinet opens the `/invite#…` links the controller actually issues for
+  invitations and existing-account sign-in. Tokens stay out of request URLs;
+  mock-generated links now use that same format.
+- Workstation shows **Copy sign-in link** with a newly created cabinet invite
+  or account sign-in link, without needing a browser association.
+- Workstation's Access starts with **Accounts**, including accounts without
+  VPN access. Open an account to manage Login and Sign-in link, then **VPN
+  profile** to manage its VPN access; Back returns to the account. The separate
+  Profiles tab is removed, and Sign-in link appears only on the account card.
+- Relay setup in the bot, Workstation and web cabinet explains that built-in
+  Let's Encrypt needs direct access on port 443 for issuance and renewal:
+  Cloudflare must use DNS only; TLS proxies need another certificate setup.
+- Workstation's API path guard accepts the services catalog, relay, web cabinet,
+  bot placement, tariffs, renewals, VPN policies and delivery status, and the
+  account's login; these requests no longer fail locally with
+  `invalid_backend_path`.
+- Workstation authorizes through the controller's own SSH helper, so connecting
+  to an older controller does not run new helper code against its old schema.
+  A failed installation check clears the saved installation flag; settings
+  stop showing a loading message after a failed request and offer a retry.
+
 ## 0.6.0-alpha.4
 
 - The relay can serve the web cabinet beside the API, on the same domain:

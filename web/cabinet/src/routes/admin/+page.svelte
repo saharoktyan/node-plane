@@ -145,7 +145,7 @@
       <div class="stats" use:tiles>
         <div>
           <div class="label">{t('admin.version_label')}</div>
-          <div class="value">{overview.version}</div>
+          <div class="value">{overview.version.split(' · ')[0]}</div>
           <div class="note" class:warn={updates?.available}>
             {updates?.available ? t('admin.update_to', { version: updates.latest_version ?? '' }) : t('admin.latest')}</div>
         </div>

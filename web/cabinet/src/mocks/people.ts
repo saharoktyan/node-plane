@@ -166,7 +166,7 @@ export const peopleHandlers = [
       status: 'active', created_at: now(), created_by: store().accounts[0]?.id ?? 'a', expires_at: later(body.days ?? 7),
       used_at: null, used_account_id: null };
     if (!body.account_id) store().invites.unshift(invite);
-    const created: Schemas['CreatedInvite'] = { ...invite, token, cabinet_link: `${location.origin}/i/${token}`,
+    const created: Schemas['CreatedInvite'] = { ...invite, token, cabinet_link: `${location.origin}/invite#${token}`,
       telegram_link: body.account_id ? null : `https://t.me/${store().bot.username}?start=${token}`,
       telegram_bot_username: body.account_id ? null : store().bot.username };
     return HttpResponse.json(created, { status: 201 });

@@ -176,8 +176,10 @@ Open **Settings → Documentation** to select a named guide with a short descrip
 
 Notes, announcements and manual AWG parameters support multiline input, automatic wrapping, a visible cursor and a scrollbar. Use arrows to move the cursor, Page Up/Down or the mouse wheel to scroll, and Tab to move to the dialog buttons. Backspace deletes text inside input fields and acts as Back/Cancel elsewhere.
 
-**Access → Profiles → New profile** asks for a Telegram ID or a known @username, or a name for a person without Telegram, and creates an account together with its default VPN profile. An account created by name has no Telegram login and gets its notifications in the Inbox. Open the resulting profile to configure access. An existing account reuses its profile. Only its owner can rename an administrator profile.
+**Access → Accounts** lists accounts with and without VPN access. Open an account for **Login**, **Sign-in link** and its sign-in settings, then **VPN profile** for devices, limits and server access. Back from the VPN profile returns to the account. An account without a VPN profile offers **Create VPN profile**. Sign-in link is available only on the account card.
+
+**New account** asks for a Telegram ID or a known @username, or a name for a person without Telegram, and creates an account together with its default VPN profile. An account created by name has no Telegram login and gets its notifications in the Inbox. An existing account reuses its profile. Only its owner can rename an administrator profile.
 
 Workstation Audit shows readable actions and profile identities, with **All / Errors** filters. Event details retain the API endpoint.
 
-Each account has one VPN profile, even before it receives server access. **Delete account** removes both; a later access request creates a new account and profile. **Freeze** pauses VPN access and **Block** restricts account access without deleting either entity. An administrator can rename only their own administrator profile.
+An account may exist without a VPN profile. Removing its VPN profile keeps the account; **Delete account** removes the account and its profiles. **Freeze** pauses VPN access and **Block** restricts account access without deleting either entity. An administrator can rename only their own administrator profile.

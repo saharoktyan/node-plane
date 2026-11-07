@@ -146,6 +146,11 @@ impl ApiError {
     }
 }
 
+// Use the controller's helper with its own repositories, scopes and schema.
+// Shipping the workstation's helper into an older release mixes incompatible
+// Python code and database layouts before that controller can even be updated.
+const AUTHORIZATION_SCRIPT: &str = "export NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app\nexec /opt/node-plane/current/.venv/bin/python -m backend.workstation_cli";
+
 pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value> {
     let _timing = crate::timings::Stage::new("authorization_helper");
     // Lookup and enrollment audit use the live credential's session, while their
@@ -168,15 +173,10 @@ pub async fn helper(session: &mut SshSession, mut input: Value) -> Result<Value>
     {
         input["session_id"] = json!(auth.session_id);
     }
-    let source = include_str!("../../../app/backend/workstation_cli.py");
-    let script = format!(
-        "export NODE_PLANE_APP_DIR=/opt/node-plane/current NODE_PLANE_SHARED_DIR=/opt/node-plane/shared PYTHONPATH=/opt/node-plane/current/app\nexec /opt/node-plane/current/.venv/bin/python -c {}",
-        shell_quote(source)
-    );
     let command = format!(
         "if [ \"$(id -u)\" = 0 ]; then /bin/bash -c {}; else sudo -n /bin/bash -c {}; fi",
-        shell_quote(&script),
-        shell_quote(&script)
+        shell_quote(AUTHORIZATION_SCRIPT),
+        shell_quote(AUTHORIZATION_SCRIPT)
     );
     let payload = serde_json::to_vec(&input)?;
     let mut output = Zeroizing::new(Vec::<u8>::new());
@@ -605,8 +605,18 @@ fn transport_error() -> ApiError {
 fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
     let resource = path.split('?').next().unwrap_or_default();
     if (resource == "/api/v1/me"
+        || resource == "/api/v1/me/login"
         || resource == "/api/v1/me/password"
+        || resource == "/api/v1/services"
+        || resource == "/api/v1/relay"
+        || resource == "/api/v1/web-cabinet"
+        || resource == "/api/v1/telegram-bot/placement"
+        || resource == "/api/v1/vpn-policies/installation"
+        || resource == "/api/v1/connection-limits/nodes"
+        || resource == "/api/v1/speed-limits/nodes"
         || resource == "/api/v1/tariffs"
+        || resource.starts_with("/api/v1/tariffs/")
+        || resource.starts_with("/api/v1/renewal-requests/")
         || resource == "/api/v1/invites"
         || resource == "/api/v1/merge-requests"
         || resource.starts_with("/api/v1/merge-requests/")
@@ -645,6 +655,63 @@ fn ensure_api_path(path: &str) -> std::result::Result<(), ApiError> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    #[cfg(unix)]
+    #[test]
+    fn authorization_runs_the_installed_controllers_helper_and_preserves_failures() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let directory = tempfile::tempdir().unwrap();
+        let release = directory.path().join("controller");
+        let package = release.join("app/backend");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("__init__.py"), "").unwrap();
+        // A controller with the old account layout has no display_name column.
+        // Its installed helper knows that layout and handles the same wire input.
+        std::fs::write(package.join("workstation_cli.py"), r#"import json, sqlite3, sys
+request = json.load(sys.stdin)
+db = sqlite3.connect(':memory:')
+db.execute('CREATE TABLE backend_accounts (id TEXT, role TEXT, status TEXT)')
+db.execute("INSERT INTO backend_accounts VALUES ('legacy-admin', 'admin', 'approved')")
+account = db.execute("SELECT id FROM backend_accounts WHERE role='admin' AND status='approved'").fetchone()[0]
+ok = request['action'] == 'authenticate'
+print(json.dumps({'version': 1, 'ok': ok, 'account_id': account,
+                 'session_id': request['session_id'], 'error': {'code': 'session_revoked'}}))
+sys.exit(0 if ok else 1)
+"#).unwrap();
+        let script = AUTHORIZATION_SCRIPT
+            .replace("/opt/node-plane/current/.venv/bin/python", "python3")
+            .replace("/opt/node-plane/current", release.to_str().unwrap());
+        for (action, success) in [("authenticate", true), ("revoke", false)] {
+            let mut child = Command::new("/bin/bash")
+                .args(["-c", &script])
+                .current_dir(directory.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let session_id = Uuid::new_v4();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(
+                    json!({"version":1,"action":action,"session_id":session_id})
+                        .to_string()
+                        .as_bytes(),
+                )
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert_eq!(output.status.success(), success, "{output:?}");
+            let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(response["account_id"], "legacy-admin");
+            assert_eq!(response["session_id"], session_id.to_string());
+            assert_eq!(response["ok"], success);
+            assert!(output.stderr.is_empty());
+        }
+    }
+
     #[test]
     fn administrator_identity_includes_known_username_and_supports_older_controllers() {
         assert_eq!(
@@ -832,6 +899,46 @@ mod tests {
         assert!(result.unwrap_err().status.is_none());
     }
     #[test]
+    fn workstation_service_commands_pass_the_transport_path_guard() {
+        use crate::controller::Command;
+        let id = Uuid::new_v4();
+        let commands = [
+            Command::Services,
+            Command::Relay,
+            Command::RelayNodes,
+            Command::RelaySave(json!({})),
+            Command::RelayRemove,
+            Command::Cabinet,
+            Command::CabinetSave(json!({})),
+            Command::CabinetRemove,
+            Command::BotPlacement,
+            Command::BotNodes,
+            Command::BotPlace("node".into()),
+            Command::BotReturn,
+            Command::Tariffs,
+            Command::Tariff(id),
+            Command::TariffCreate(json!({})),
+            Command::TariffSave(id, json!({}), 1),
+            Command::TariffDelete(id, 1),
+            Command::Renewal(id),
+            Command::RenewalApprove(id, 30, 1, Uuid::new_v4()),
+            Command::RenewalReject(id),
+        ];
+        for command in commands {
+            let (_, path, _, _) = command.request().unwrap();
+            assert!(ensure_api_path(&path).is_ok(), "{path}");
+        }
+        for path in [
+            "/api/v1/me/login",
+            "/api/v1/vpn-policies/installation",
+            "/api/v1/connection-limits/nodes",
+            "/api/v1/speed-limits/nodes",
+        ] {
+            assert!(ensure_api_path(path).is_ok(), "{path}");
+        }
+    }
+
+    #[test]
     fn api_never_targets_external_urls_or_delegates_telegram() {
         assert!(ensure_api_path("/api/v1/announcements").is_ok());
         assert!(ensure_api_path("/api/v1/announcements/preview").is_ok());
@@ -852,6 +959,13 @@ mod tests {
             "http://other.example/api/v1/system/updates",
             "/api/v1/integrations/telegram",
             "/api/v1/system/updates\r\nAuthorization: bad",
+            "/api/v1/services-other",
+            "/api/v1/relay/other",
+            "/api/v1/web-cabinet/other",
+            "/api/v1/telegram-bot/other",
+            "/api/v1/tariffs/../integrations/telegram",
+            "/api/v1/renewal-requests/%2e%2e/profiles",
+            "/api/v1/services#fragment",
         ] {
             assert!(ensure_api_path(value).is_err());
         }

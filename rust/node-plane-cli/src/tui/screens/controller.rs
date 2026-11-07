@@ -1398,7 +1398,11 @@ pub(in crate::tui) fn draw_controller(
                 text.push_str("\nMaintenance is unavailable for this installation.");
             }
         } else {
-            text.push_str("Loading installation…");
+            text.push_str(if app.nodes_busy || app.nodes_requested.is_some() {
+                "Loading installation…"
+            } else {
+                "Installation details could not be loaded."
+            });
         }
         if let Some(job) = &state.job {
             text.push_str(&format!(

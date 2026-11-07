@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
+import assert from 'node:assert/strict';
 
 const port = 5199;
 const base = `http://127.0.0.1:${port}`;
@@ -22,6 +23,36 @@ await new Promise((resolve, reject) => {
 const browser = await chromium.launch({ executablePath: process.env.NODE_PLANE_CHROMIUM ?? '/usr/bin/chromium' });
 const failures = [];
 try {
+  // Open the exact links returned by the API, rather than a hand-written route.
+  // Both new-person invites and existing-account sign-in use /invite#TOKEN.
+  for (const body of [{ vpn: true }, { account_id: 'a0-0000-4000-8000-000000000000' }]) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const requested = [];
+    page.on('request', (request) => requested.push(request.url()));
+    await page.goto(`${base}/login?lang=en`);
+    await page.waitForSelector('input[autocomplete=username]');
+    const invite = await page.evaluate(async (body) => {
+      const response = await fetch('/api/v1/invites', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer mock-access' },
+        body: JSON.stringify(body) });
+      if (!response.ok) throw new Error('Could not create fixture invite');
+      return response.json();
+    }, body);
+    assert.equal(new URL(invite.cabinet_link).pathname, '/invite');
+    assert.equal(new URL(invite.cabinet_link).hash, '#' + invite.token);
+    await page.goto(invite.cabinet_link);
+    await page.waitForSelector('input[autocomplete=username]');
+    assert.equal(new URL(page.url()).hash, '');
+    await page.fill('input[autocomplete=username]', 'invite-user');
+    await page.fill('input[type=password]', 'fixture-password');
+    await page.click('button.primary');
+    await page.waitForURL(`${base}/`);
+    assert(requested.every((url) => !url.includes(invite.token)), 'invite token leaked into a request URL');
+    await page.goto(`${base}/invite`);
+    await page.getByText('The invite is invalid or used.').waitFor();
+    await context.close();
+  }
   // A phone's width for the member: the side panel slides in over the page.
   for (const [scenario, role, lang, theme, width] of [['default', 'owner', 'ru', 'light', 1440],
     ['many', 'support', 'en', 'dark', 1440], ['empty', 'member', 'ru', 'dark', 390], ['errors', 'owner', 'en', 'light', 1100]]) {

@@ -12,6 +12,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use super::user_sync::{VISION, write_config};
+use crate::protocols::deploy::{Docker, fetch};
 use crate::runtime::images::Kind;
 
 const TCP_TAG: &str = "reality-tcp";
@@ -224,8 +225,9 @@ fn init(args: &[String]) -> Result<Value, String> {
         aside.push(format!(".dirbak.{stamp}"));
         fs::rename(config, aside).map_err(|err| err.to_string())?;
     }
-    let _ = docker(&["pull", &image]);
-    let output = docker(&["run", "--rm", &image, "x25519"])?;
+    let client = Docker::connect()?;
+    fetch(&client, Kind::Xray, &image)?;
+    let output = client.output(&["run", "--rm", &image, "x25519"])?;
     let (Some(private), Some(password)) = (private_key(&output), password(&output)) else {
         return Err("Could not parse xray x25519 output".into());
     };
@@ -276,14 +278,10 @@ pub(crate) fn public(
     let output = docker(&["exec", container, "xray", "x25519", "-i", private])
         // Offline synchronization starts the image once instead.
         .or_else(|_| {
-            docker(&[
-                "run",
-                "--rm",
-                &image_or_release(image),
-                "x25519",
-                "-i",
-                private,
-            ])
+            let image = image_or_release(image);
+            let client = Docker::connect()?;
+            fetch(&client, Kind::Xray, &image)?;
+            client.output(&["run", "--rm", &image, "x25519", "-i", private])
         })?;
     let password = password(&output).ok_or("Could not derive Reality password from private key")?;
     let first = |key: &str| reality[key][0].as_str().unwrap_or_default().to_string();

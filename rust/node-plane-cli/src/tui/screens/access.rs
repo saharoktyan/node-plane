@@ -558,7 +558,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         let block = section_block(if app.access.result.is_some() {
             " Result "
         } else {
-            " New profile "
+            " New account "
         });
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
@@ -573,8 +573,8 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 app,
                 rows[1],
                 &[(
-                    if result.starts_with("Profile ") {
-                        "Open profile"
+                    if result.starts_with("Account ") {
+                        "Open account"
                     } else if result.starts_with("Could not create profile:") {
                         "Cancel"
                     } else {
@@ -587,7 +587,7 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         } else if let Some(draft) = &app.access.provision {
             if draft.confirm {
                 frame.render_widget(
-                    Paragraph::new(format!("Create profile for {}?", draft.identity))
+                    Paragraph::new(format!("Create account for {}?", draft.identity))
                         .wrap(Wrap { trim: false }),
                     rows[0],
                 );
@@ -808,6 +808,10 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                 }
             }
             if app.access.tab == Tab::Invites && card["status"] == "active" {
+                count += 1;
+            }
+            if app.access.tab == Tab::Invites && crate::access::invite_cabinet_link(card).is_some()
+            {
                 count += 1;
             }
             if app.access.tab == Tab::Merges && card["status"] == "pending" {
@@ -1089,6 +1093,9 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
             lines.extend(crate::access::merge_lines(card).into_iter().map(Line::from));
         }
         if app.access.tab == Tab::Invites {
+            if crate::access::invite_cabinet_link(card).is_some() {
+                buttons.push(("Copy sign-in link", Control::AccessInviteCopy));
+            }
             lines.push(Line::from(crate::access::invite_template(card)));
             if let Some(token) = card["token"].as_str() {
                 lines.push(Line::from(
@@ -1292,7 +1299,11 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
                     ));
                 }
                 if app.access.tab == Tab::Accounts {
-                    buttons.push(("Edit access", Control::AccessEdit));
+                    if card["profile_id"].is_string() {
+                        buttons.push(("VPN profile", Control::AccessVpnProfile));
+                    } else {
+                        buttons.push(("Create VPN profile", Control::AccessEdit));
+                    }
                 }
             }
             if app.access.tab == Tab::Profiles && card["deleting"] != true {
@@ -1506,12 +1517,12 @@ pub(in crate::tui) fn draw_access(frame: &mut Frame, app: &App, area: Rect, hits
         if app.access.creating_profile {
             buttons.push(("Cancel", Control::AccessBack));
         }
-        if app.access.tab == Tab::Profiles && !app.access.without_access {
-            buttons.push(("New profile", Control::AccessNew));
+        if app.access.tab == Tab::Accounts && !app.access.without_access {
+            buttons.push(("New account", Control::AccessNew));
             buttons.push(("Without access", Control::AccessWithoutAccess));
         }
         if app.access.without_access {
-            buttons.push(("All profiles", Control::AccessTab(Tab::Profiles)));
+            buttons.push(("All accounts", Control::AccessTab(Tab::Accounts)));
         }
         if app.access.tab == Tab::Invites {
             buttons.push(("New invite", Control::AccessInviteNew));

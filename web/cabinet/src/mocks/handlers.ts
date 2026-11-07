@@ -58,12 +58,16 @@ export const handlers = [
     HttpResponse.json({ account: {}, session: tokens() }, { status: 201 })),
   http.post('/api/v1/invites/preview', async ({ request }) => {
     const body = (await request.json()) as Schemas['InviteTokenInput'];
-    if (body.token === 'inv_used') return error(404, 'invite_invalid');
+    if (!body.token?.startsWith('inv_') || body.token === 'inv_used') return error(404, 'invite_invalid');
     const preview: Schemas['InvitePreview'] = { kind: 'new', vpn: true, tariff: choice().lang === 'ru' ? 'Месяц' : 'Month', login: null,
       has_password: false, expires_at: new Date(Date.now() + 86_400_000).toISOString() };
     return HttpResponse.json(preview);
   }),
-  http.post('/api/v1/invites/accept', () => HttpResponse.json({ account: {}, session: tokens() })),
+  http.post('/api/v1/invites/accept', async ({ request }) => {
+    const body = (await request.json()) as Schemas['InviteAcceptInput'];
+    return !body.token?.startsWith('inv_') || body.token === 'inv_used'
+      ? error(404, 'invite_invalid') : HttpResponse.json({ account: {}, session: tokens() });
+  }),
 
   http.get('/api/v1/me', guarded(() => {
     const { role, scenario, lang } = choice();

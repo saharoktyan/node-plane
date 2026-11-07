@@ -2160,6 +2160,8 @@ impl App {
         };
         if self.controller_section.is_some() {
             controls.push(("Back".into(), Control::ControllerBack));
+        } else if self.controller.overview.is_none() && !active {
+            controls.insert(0, ("Refresh".into(), Control::ControllerRefresh));
         }
         controls
     }
