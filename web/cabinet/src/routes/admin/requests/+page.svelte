@@ -147,17 +147,19 @@
             <span class="muted small">{item.username ? '@' + item.username + ' · ' : ''}{item.telegram_user_id ?? ''}
               · {dateTime(item.created_at)}</span></span>
           {#if item.status === 'pending'}
-            <button class="primary" onclick={() => (confirming = { id: item.id, decision: 'approve', key: key() })}>
-              {t('people.approve')}</button>
-            <button onclick={() => (confirming = { id: item.id, decision: 'reject', key: key() })}>{t('people.reject')}</button>
+            {#each ['approve', 'reject'] as const as decision (decision)}
+              {@const armed = confirming?.id === item.id && confirming.decision === decision}
+              <button class:primary={decision === 'approve'} class:armed class:danger={armed && decision === 'reject'} disabled={busy}
+                onclick={() => (armed ? decide() : (confirming = { id: item.id, decision, key: key() }))}>{t('people.' + decision)}</button>
+            {/each}
           {:else}
             <span class="badge">{t('people.request_' + item.status + (item.status === 'pending' ? '' : '_state'))}</span>
           {/if}
         </div>
         {#if confirming?.id === item.id}
           <Confirm text={t('people.' + confirming.decision + '_confirm', { name: personName(item) })}
-            action={t('people.' + confirming.decision)} danger={confirming.decision === 'reject'} {busy}
-            confirm={decide} cancel={() => (confirming = null)} />
+            action={t('people.' + confirming.decision)}
+            cancel={() => (confirming = null)} />
         {/if}
       {/each}
     </div>

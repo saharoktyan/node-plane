@@ -142,6 +142,20 @@ button.primary,
 button.danger {
   color: var(--danger);
 }
+/* A button asked about: pressed once, it waits for a second press. */
+button.armed {
+  color: var(--warn);
+  font-weight: 600;
+  text-decoration-color: var(--warn);
+  text-decoration-thickness: 2px;
+}
+button.armed.danger {
+  color: var(--danger);
+  text-decoration-color: var(--danger);
+}
+button {
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
 button:disabled {
   color: var(--faint);
   cursor: default;

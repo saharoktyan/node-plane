@@ -153,12 +153,12 @@
             <span class="muted small">{item.note ? what(item) + ' · ' : ''}{t('people.invite_until', { date: date(item.expires_at) })}</span></span>
           <span class={'badge ' + (item.status === 'active' ? 'ok' : '')}>{t('people.invite_' + item.status)}</span>
           {#if item.status === 'active' && account.may('accounts.manage')}
-            <button class="danger" onclick={() => (revoking = item.id)}>{t('people.revoke')}</button>
+            <button class="danger" class:armed={revoking === item.id} disabled={busy}
+              onclick={() => (revoking === item.id ? revoke(item.id) : (revoking = item.id))}>{t('people.revoke')}</button>
           {/if}
         </div>
         {#if revoking === item.id}
-          <Confirm text={t('people.revoke_confirm')} action={t('people.revoke')} danger {busy}
-            confirm={() => revoke(item.id)} cancel={() => (revoking = null)} />
+          <Confirm text={t('people.revoke_confirm')} action={t('people.revoke')} cancel={() => (revoking = null)} />
         {/if}
       {/each}
     </div>

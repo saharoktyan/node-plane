@@ -104,15 +104,15 @@
       {/if}
     {/if}
     {#if item.status === 'pending'}
+      <div class="row">
+        <button class="primary" class:armed={confirming === 'approve'} class:danger={confirming === 'approve'}
+          disabled={busy || (seen?.result.vpn === 'choose' && !keep)}
+          onclick={() => (confirming === 'approve' ? decide() : (confirming = 'approve'))}>{t('people.approve')}</button>
+        <button class:armed={confirming === 'reject'} disabled={busy}
+          onclick={() => (confirming === 'reject' ? decide() : (confirming = 'reject'))}>{t('people.reject')}</button>
+      </div>
       {#if confirming}
-        <Confirm text={t('people.merge_' + confirming + '_confirm')} action={t('people.' + confirming)}
-          danger={confirming === 'approve'} {busy} confirm={decide} cancel={() => (confirming = null)} />
-      {:else}
-        <div class="row">
-          <button class="primary" disabled={seen?.result.vpn === 'choose' && !keep}
-            onclick={() => (confirming = 'approve')}>{t('people.approve')}</button>
-          <button onclick={() => (confirming = 'reject')}>{t('people.reject')}</button>
-        </div>
+        <Confirm text={t('people.merge_' + confirming + '_confirm')} action={t('people.' + confirming)} cancel={() => (confirming = null)} />
       {/if}
     {/if}
   </section>

@@ -73,6 +73,10 @@
     return () => clearTimeout(timer);
   });
 
+  // A first press asks; a second press on the same button takes the action.
+  const ask = (action: 'freeze' | 'unfreeze' | 'delete') =>
+    (confirming?.action === action ? confirm() : (confirming = { action, key: key() }));
+
   async function confirm() {
     if (!confirming || !profile) return;
     const { action, key: commandKey } = confirming;
@@ -180,16 +184,15 @@
           <h2>{t('profiles.state')}</h2>
           {#if profile.frozen}
             <p class="muted small">{t('profiles.frozen_hint')}</p>
-            <button class="primary" onclick={() => (confirming = { action: 'unfreeze', key: key() })}>{t('profiles.unfreeze')}</button>
+            <button class="primary" class:armed={confirming?.action === 'unfreeze'} disabled={busy} onclick={() => ask('unfreeze')}>{t('profiles.unfreeze')}</button>
           {:else}
             <p class="muted small">{t('profiles.freeze_hint')}</p>
-            <button onclick={() => (confirming = { action: 'freeze', key: key() })}>{t('profiles.freeze')}</button>
+            <button class:armed={confirming?.action === 'freeze'} disabled={busy} onclick={() => ask('freeze')}>{t('profiles.freeze')}</button>
           {/if}
           <p class="muted small gap">{t('profiles.delete_hint')}</p>
-          <button class="danger" onclick={() => (confirming = { action: 'delete', key: key() })}>{t('profiles.delete')}</button>
+          <button class="danger" class:armed={confirming?.action === 'delete'} disabled={busy} onclick={() => ask('delete')}>{t('profiles.delete')}</button>
           {#if confirming}
-            <Confirm text={t('profiles.' + confirming.action + '_confirm')} action={t('profiles.' + confirming.action)}
-              danger={confirming.action !== 'unfreeze'} {busy} {confirm} cancel={() => (confirming = null)} />
+            <Confirm text={t('profiles.' + confirming.action + '_confirm')} action={t('profiles.' + confirming.action)} cancel={() => (confirming = null)} />
           {/if}
         </section>
       {/if}

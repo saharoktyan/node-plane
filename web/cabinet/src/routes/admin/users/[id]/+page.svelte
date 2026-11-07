@@ -87,7 +87,8 @@
     }
   }
 
-  const ask = (action: Action) => (confirming = { action, key: key() });
+  // A first press asks; a second press on the same button takes the action.
+  const ask = (action: Action) => (confirming?.action === action ? confirm() : (confirming = { action, key: key() }));
 
   async function signInLink() {
     await run(async () => {
@@ -173,15 +174,13 @@
               </label>
             {/each}
           </div>
+          <div class="row">
+            <button class="primary" class:armed={confirming?.action === 'roles'} disabled={busy} onclick={() => ask('roles')}>{t('people.save')}</button>
+            <button onclick={() => { roles = null; confirming = null; }}>{t('common.cancel')}</button>
+          </div>
           {#if confirming?.action === 'roles'}
             <Confirm text={roles.length ? t('people.roles_confirm', { roles: roles.map((r) => t('admin.role_' + r)).join(', ') })
-              : t('people.roles_confirm_none')} action={t('people.save')} {busy} confirm={confirm}
-              cancel={() => (confirming = null)} />
-          {:else}
-            <div class="row">
-              <button class="primary" onclick={() => ask('roles')}>{t('people.save')}</button>
-              <button onclick={() => (roles = null)}>{t('common.cancel')}</button>
-            </div>
+              : t('people.roles_confirm_none')} action={t('people.save')} cancel={() => (confirming = null)} />
           {/if}
         {:else}
           <p>{(person.roles ?? []).map((role) => t('admin.role_' + role)).join(', ') || t('people.no_roles')}</p>
@@ -196,33 +195,32 @@
             <span class="grow">{t('people.password')}: {person.has_password ? t('people.set') : t('people.not_set')}
               · {t('people.passkeys', { count: person.passkeys })}</span>
             {#if person.passkeys && account.may('accounts.manage')}
-              <button class="danger" onclick={() => ask('passkeys')}>{t('people.remove_passkeys')}</button>
+              <button class="danger" class:armed={confirming?.action === 'passkeys'} disabled={busy} onclick={() => ask('passkeys')}>{t('people.remove_passkeys')}</button>
             {/if}
           </div>
           {#if confirming?.action === 'passkeys'}
-            <Confirm text={t('people.passkeys_confirm')} action={t('people.remove_passkeys')} danger {busy} {confirm}
+            <Confirm text={t('people.passkeys_confirm')} action={t('people.remove_passkeys')}
               cancel={() => (confirming = null)} />
           {/if}
           <div>
             <span class="grow">{t('people.sessions', { count: person.sessions })}</span>
             {#if person.sessions && account.may('accounts.manage')}
-              <button class="danger" onclick={() => ask('sessions')}>{t('people.end_sessions')}</button>
+              <button class="danger" class:armed={confirming?.action === 'sessions'} disabled={busy} onclick={() => ask('sessions')}>{t('people.end_sessions')}</button>
             {/if}
           </div>
           {#if confirming?.action === 'sessions'}
-            <Confirm text={t('people.sessions_confirm')} action={t('people.end_sessions')} danger {busy} {confirm}
+            <Confirm text={t('people.sessions_confirm')} action={t('people.end_sessions')}
               cancel={() => (confirming = null)} />
           {/if}
           {#if person.workstations}
             <div>
               <span class="grow">{t('people.workstations', { count: person.workstations })}</span>
               {#if account.may('accounts.manage')}
-                <button class="danger" onclick={() => ask('workstations')}>{t('people.unlink_workstations')}</button>
+                <button class="danger" class:armed={confirming?.action === 'workstations'} disabled={busy} onclick={() => ask('workstations')}>{t('people.unlink_workstations')}</button>
               {/if}
             </div>
             {#if confirming?.action === 'workstations'}
-              <Confirm text={t('people.workstations_confirm')} action={t('people.unlink_workstations')} danger {busy}
-                {confirm} cancel={() => (confirming = null)} />
+              <Confirm text={t('people.workstations_confirm')} action={t('people.unlink_workstations')} cancel={() => (confirming = null)} />
             {/if}
           {/if}
         </div>
@@ -248,14 +246,13 @@
           <h2>{t('people.access')}</h2>
           {#if person.status === 'disabled'}
             <p class="muted small">{t('people.blocked_hint')}</p>
-            <button class="primary" onclick={() => ask('unblock')}>{t('people.unblock')}</button>
+            <button class="primary" class:armed={confirming?.action === 'unblock'} disabled={busy} onclick={() => ask('unblock')}>{t('people.unblock')}</button>
           {:else}
             <p class="muted small">{t('people.block_hint')}</p>
-            <button class="danger" onclick={() => ask('block')}>{t('people.block')}</button>
+            <button class="danger" class:armed={confirming?.action === 'block'} disabled={busy} onclick={() => ask('block')}>{t('people.block')}</button>
           {/if}
           {#if confirming?.action === 'block' || confirming?.action === 'unblock'}
-            <Confirm text={t('people.' + confirming.action + '_confirm')} action={t('people.' + confirming.action)}
-              danger={confirming.action === 'block'} {busy} {confirm} cancel={() => (confirming = null)} />
+            <Confirm text={t('people.' + confirming.action + '_confirm')} action={t('people.' + confirming.action)} cancel={() => (confirming = null)} />
           {/if}
         </section>
       {/if}

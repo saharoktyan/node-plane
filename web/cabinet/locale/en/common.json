@@ -8,5 +8,6 @@
   "menu": "Menu",
   "actions": "Actions",
   "attention": "Needs attention",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "press_again": "Press “{action}” again to go ahead."
 }

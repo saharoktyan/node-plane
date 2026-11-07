@@ -108,10 +108,10 @@
       {/if}
     {/if}
     {#if quota.period && account.may('profiles.manage')}
+      <p><button class:armed={resetting !== null} disabled={busy}
+        onclick={() => (resetting ? reset() : (resetting = key()))}>{t('quota.reset')}</button></p>
       {#if resetting}
-        <Confirm text={t('quota.reset_confirm')} action={t('quota.reset')} {busy} confirm={reset} cancel={() => (resetting = null)} />
-      {:else}
-        <p><button onclick={() => (resetting = key())}>{t('quota.reset')}</button></p>
+        <Confirm text={t('quota.reset_confirm')} action={t('quota.reset')} cancel={() => (resetting = null)} />
       {/if}
     {/if}
     {#if quota.history.length}

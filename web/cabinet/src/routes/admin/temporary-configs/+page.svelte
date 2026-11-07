@@ -193,7 +193,8 @@
               {t(opened === item.id ? 'temporary.hide' : 'temporary.show')}</button>
           {/if}
           {#if !['revoking', 'expired', 'revoked', 'cancelled'].includes(item.status)}
-            <button class="danger" onclick={() => (revoking = item.id)}>{t('temporary.revoke')}</button>
+            <button class="danger" class:armed={revoking === item.id} disabled={busy}
+              onclick={() => (revoking === item.id ? revoke() : (revoking = item.id))}>{t('temporary.revoke')}</button>
           {/if}
         </div>
         <!-- The configuration slides open under its row, as a member's does. -->
@@ -206,8 +207,7 @@
         </div>
         {#if revoking === item.id}
           <Confirm text={t(item.protocol === 'xray' && item.revocation_mode !== 'connections_closed'
-            ? 'temporary.revoke_confirm_vless' : 'temporary.revoke_confirm')} action={t('temporary.revoke')} danger {busy}
-            confirm={revoke} cancel={() => (revoking = null)} />
+            ? 'temporary.revoke_confirm_vless' : 'temporary.revoke_confirm')} action={t('temporary.revoke')} cancel={() => (revoking = null)} />
         {/if}
       {/each}
     </div>
