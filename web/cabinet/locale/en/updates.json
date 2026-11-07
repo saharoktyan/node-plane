@@ -41,7 +41,7 @@
   "dismiss": "Hide the result",
   "failed_nodes": "Servers that did not update",
   "automatic": "Automatic checks",
-  "auto_check": "Check for updates by itself",
+  "auto_check": "Automatic update check",
   "every": "How often",
   "interval_60": "every hour",
   "interval_360": "every 6 hours",

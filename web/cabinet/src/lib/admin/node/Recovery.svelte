@@ -1,4 +1,5 @@
-<!-- Operations on a server that wait for recovery, as npw lists them: what
+<!-- Operations on a server, or without one on every server and the
+     controller, that wait for recovery, as npw lists them: what
      each is, why it stopped, what to check, and the actions the controller
      allows for it now, each asked again with what it will do. -->
 <script lang="ts">
@@ -12,7 +13,7 @@
 
   type Item = { id: string; kind: string; status: string; error_code: string; next_step: string; phase: string;
     actions: string[]; node_key: string };
-  let { node }: { node: string } = $props();
+  let { node }: { node?: string } = $props();
   let items = $state<Item[] | null>(null);
   let total = $state(0);
   let failure = $state('');
@@ -21,9 +22,9 @@
 
   export async function load() {
     try {
-      const page = (await call(api.GET('/api/v1/system/recovery', { params: { query: { node_key: node } } }))) as unknown as
+      const page = (await call(api.GET('/api/v1/system/recovery', { params: { query: node ? { node_key: node } : {} } }))) as unknown as
         { items: Item[]; total: number };
-      items = page.items.filter((item) => item.node_key === node);
+      items = node ? page.items.filter((item) => item.node_key === node) : page.items;
       total = page.total;
       failure = '';
     } catch (error) {
@@ -59,7 +60,7 @@
 {#each items ?? [] as item (item.kind + item.id)}
   <div class="item">
     <p><strong>{t('nodes.recovery_kind_' + item.kind)}</strong> <span class="muted">· {t('nodes.op_' + item.status)}
-      {#if item.phase}· {item.phase}{/if}</span></p>
+      {#if item.phase}· {item.phase}{/if}{#if !node && item.node_key}· <a href={'/admin/nodes/' + item.node_key}>{item.node_key}</a>{/if}</span></p>
     {#if item.error_code}<p class="small">{cause(item.error_code)}</p>{/if}
     <p class="muted small">{t('nodes.recovery_hint_' + (has('recovery_hint_' + item.next_step) ? item.next_step : 'worker'))}</p>
     {#if item.actions.some((action) => recoveryPath(item.kind, item.id, action))}

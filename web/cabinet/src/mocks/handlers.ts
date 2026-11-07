@@ -12,6 +12,7 @@ import { systemHandlers, unseenAlerts } from './system';
 import { confirmationHandlers } from './confirmation';
 import { infraHandlers } from './infra';
 import { backupHandlers } from './backups';
+import { settingsHandlers } from './settings';
 import { updateHandlers } from './updates';
 import { choice } from './scenario';
 
@@ -88,6 +89,7 @@ export const handlers = [
   ...confirmationHandlers,
   ...infraHandlers,
   ...backupHandlers,
+  ...settingsHandlers,
   ...updateHandlers,
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),

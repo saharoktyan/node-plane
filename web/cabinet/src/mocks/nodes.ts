@@ -199,9 +199,9 @@ export const nodeHandlers = [
   })),
   http.get('/api/v1/system/recovery', guarded((request) => {
     const key = new URL(request.url).searchParams.get('node_key');
-    const items = (key === 'de1-0' ? [{ id: 'c0ffee00-0000-4000-8000-000000000001', kind: 'settings', status: 'blocked',
-      error_code: 'outcome_unconfirmed', next_step: 'journal', phase: 'applying', actions: [...recovered.has(key) ? [] : ['recheck', 'resolve', 'force']],
-      node_key: key, related_id: '', related_kind: '', subject_id: key }] : []).filter((item) => item.actions.length);
+    const items = (!key || key === 'de1-0' ? [{ id: 'c0ffee00-0000-4000-8000-000000000001', kind: 'settings', status: 'blocked',
+      error_code: 'outcome_unconfirmed', next_step: 'journal', phase: 'applying', actions: [...recovered.has('de1-0') ? [] : ['recheck', 'resolve', 'force']],
+      node_key: 'de1-0', related_id: '', related_kind: '', subject_id: key }] : []).filter((item) => item.actions.length);
     return { grouped: false, items, total: items.length, offset: 0, maintenance_active: false, node_key: key, node_title: '' };
   })),
   http.post('/api/v1/system/recovery/:kind/:id/:action', guarded(() => {
