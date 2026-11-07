@@ -240,7 +240,10 @@ export function nodeMetrics(scenario: Scenario, range: string): Schemas['NodeMet
   const step = hourly ? 3_600_000 : 300_000;
   const count = range === '30d' ? 720 : range === '7d' ? 168 : 288;
   const now = Math.floor(Date.now() / step) * step;
-  const servers = scenario === 'empty' ? [] : SERVERS.slice(0, scenario === 'many' ? 9 : 3);
+  // The fixture servers' own keys, so a server's card finds its readings.
+  const own = nodes(scenario);
+  const servers = (scenario === 'empty' ? [] : SERVERS.slice(0, scenario === 'many' ? 9 : 3))
+    .map((server, index) => (own[index] ? { ...server, key: own[index].key, title: own[index].title, flag: own[index].flag } : server));
   return { range: range as '24h' | '7d' | '30d', resolution: hourly ? '1h' : '5m', nodes: servers.map((server, seed) => {
     const points = Array.from({ length: count }, (_, index) => {
       const level = wave(index, seed);

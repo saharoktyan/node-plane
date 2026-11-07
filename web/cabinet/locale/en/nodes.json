@@ -371,5 +371,6 @@
   "port_state_listening": "a listener exists (possibly this node’s container)",
   "port_state_closed": "closed",
   "port_state_open": "open",
-  "temporary": "Temporary config"
+  "temporary": "Temporary config",
+  "load_title": "Load"
 }

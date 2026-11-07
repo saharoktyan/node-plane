@@ -7,6 +7,7 @@
   import { api, call, ApiError } from '$lib/api/client';
   import Policies from '$lib/admin/Policies.svelte';
   import Install from '$lib/admin/node/Install.svelte';
+  import Charts from '$lib/admin/node/Charts.svelte';
   import Maintenance from '$lib/admin/node/Maintenance.svelte';
   import Temporary from '$lib/admin/Temporary.svelte';
   import Settings from '$lib/admin/node/Settings.svelte';
@@ -230,6 +231,10 @@
         </section>
       {/if}
     </div>
+
+    {#if installed(node)}
+      <aside><Charts node={node.key} /></aside>
+    {/if}
   </div>
 {/if}
 
@@ -258,9 +263,6 @@
   .split {
     margin-right: 1rem;
     font-size: 13px;
-  }
-  .columns > .main {
-    max-width: 56rem;
   }
   .sections {
     display: flex;

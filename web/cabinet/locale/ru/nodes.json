@@ -371,5 +371,6 @@
   "port_state_listening": "есть слушатель (возможно, контейнер этой ноды)",
   "port_state_closed": "закрыт",
   "port_state_open": "открыт",
-  "temporary": "Временный конфиг"
+  "temporary": "Временный конфиг",
+  "load_title": "Нагрузка"
 }
