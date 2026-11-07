@@ -10,6 +10,7 @@ use serde::Deserialize;
 use tonic::{Request, Response, Status, transport::Server};
 
 mod agent_transport;
+mod bot_api;
 mod cabinet_api;
 mod enrollment;
 mod operations;
@@ -1348,6 +1349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_api = RuntimeApi { ctx: ctx.clone() };
     let relay_api = relay_api::RelayApi { ctx: ctx.clone() };
     let cabinet_api = cabinet_api::CabinetApi { ctx: ctx.clone() };
+    let bot_api = bot_api::BotApi { ctx: ctx.clone() };
     let operation_api = OperationApi { ctx };
 
     println!("node-plane-driver listening on {}", addr);
@@ -1374,6 +1376,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(
             driver::v1::cabinet_service_server::CabinetServiceServer::with_interceptor(
                 cabinet_api,
+                authorize_local,
+            ),
+        )
+        .add_service(
+            driver::v1::bot_service_server::BotServiceServer::with_interceptor(
+                bot_api,
                 authorize_local,
             ),
         )

@@ -1,17 +1,45 @@
 """Async HTTP transport; Telegram identities are delegated, never trusted as roles."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
+import secrets
+import time
 from uuid import uuid4
 from urllib.parse import quote, urlencode, urlsplit
 
 import aiohttp
 import logging
+from yarl import URL
 
 
 class BackendError(Exception):
     def __init__(self, code: str, status: int):
         self.code, self.status = code, status
         super().__init__(code)
+
+
+class Signer:
+    """The bot on a node: each request signed with its Ed25519 key (see
+    backend/client_keys.py) instead of the adapter token."""
+
+    def __init__(self, key_id: str, seed: bytes):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        self.key_id, self.key = key_id, Ed25519PrivateKey.from_private_bytes(seed)
+
+    @classmethod
+    def from_file(cls, key_id, path):
+        with open(path, 'rb') as stream:
+            return cls(key_id, stream.read())
+
+    def authorization(self, method, target, body, delegated, now=None):
+        timestamp = int(now if now is not None else time.time())
+        nonce = secrets.token_urlsafe(18)
+        message = '\n'.join(('np-sig-v1', method.upper(), target, hashlib.sha256(body).hexdigest(),
+                             delegated or '', str(timestamp), nonce)).encode()
+        signature = base64.urlsafe_b64encode(self.key.sign(message)).rstrip(b'=').decode()
+        return f'NP-Signature key={self.key_id}, ts={timestamp}, nonce={nonce}, sig={signature}'
 
 
 class BackendClient:
@@ -116,13 +144,19 @@ class BackendClient:
         return await self.request('POST', f'/api/v1/system/backups/catalog/{backup_id}/delete',
                                   telegram_user_id=user_id, body={'checksum': checksum})
 
-    def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str):
+    def __init__(self, session: aiohttp.ClientSession, base_url: str, adapter_token: str | None = None, *,
+                 signer: Signer | None = None):
         parsed = urlsplit(base_url)
-        if parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost'} or not parsed.port or parsed.path not in {'', '/'}:
+        if signer is not None:
+            # On a node the bot reaches the API through the relay.
+            if parsed.scheme != 'https' or not parsed.hostname or parsed.path not in {'', '/'}:
+                raise ValueError('a signing Telegram adapter requires an https backend endpoint')
+        elif parsed.scheme != 'http' or parsed.hostname not in {'127.0.0.1', 'localhost'} or not parsed.port or parsed.path not in {'', '/'}:
             raise ValueError('Telegram adapter requires a loopback backend endpoint')
         self.session = session
         self.base_url = base_url.rstrip('/')
         self.adapter_token = adapter_token
+        self.signer = signer
 
     async def request(self, method: str, path: str, *, telegram_user_id: int | None = None,
                       body: dict | None = None, command: bool = False,
@@ -133,20 +167,31 @@ class BackendClient:
         from .timings import record, route
         started = perf_counter()
         request_id = '-'
-        headers = {'Authorization': f'Bearer {self.adapter_token}'}
+        headers = {}
         if telegram_user_id is not None:
             headers['X-Node-Plane-Telegram-User-ID'] = str(telegram_user_id)
         if command:
             headers['Idempotency-Key'] = command_key or str(uuid4())
         if revision is not None:
             headers['If-Match'] = f'"{revision}"'
-        # Raw content is a backup file; its size is bounded by the backend.
-        options = {'headers': headers, 'json': body} if content is None else {'headers': headers, 'data': content}
+        url = self.base_url + path
+        if self.signer is None:
+            headers['Authorization'] = f'Bearer {self.adapter_token}'
+            # Raw content is a backup file; its size is bounded by the backend.
+            options = {'headers': headers, 'json': body} if content is None else {'headers': headers, 'data': content}
+        else:
+            # The signature covers the bytes sent and the path as written.
+            raw = content if content is not None else (b'' if body is None else json.dumps(body).encode())
+            if content is None and body is not None:
+                headers['Content-Type'] = 'application/json'
+            headers['Authorization'] = self.signer.authorization(
+                method, path, raw, headers.get('X-Node-Plane-Telegram-User-ID'))
+            url = URL(url, encoded=True)
+            options = {'headers': headers, 'data': raw if raw else None}
         if timeout_seconds is not None:
             options['timeout'] = aiohttp.ClientTimeout(total=timeout_seconds)
         try:
-            async with self.session.request(method, self.base_url + path,
-                                            **options) as response:
+            async with self.session.request(method, url, **options) as response:
                 if binary and response.status < 400:
                     return await response.read()
                 data = await response.json()
@@ -214,7 +259,8 @@ class BackendClient:
         return await self.request('POST','/api/v1/integrations/telegram/alerts/claim',command=True,command_key=key)
 
     async def wait_deliveries(self):
-        return await self.request('GET', '/api/v1/integrations/telegram/deliveries/wait',
+        # The relay gives a request 30 seconds: the wait ends before that.
+        return await self.request('GET', '/api/v1/integrations/telegram/deliveries/wait?timeout=25',
                                   timeout_seconds=35)
 
     async def alert_ack(self,delivery_id,key,status,retry_after=None):

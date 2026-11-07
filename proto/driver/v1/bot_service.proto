@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package nodeplane.driver.v1;
+
+// The Telegram bot on a node. The backend names the bot's package on this
+// host; the driver reads it and hands it to the node's agent, which installs
+// the bot and runs it through the relay.
+service BotService {
+  rpc BotKey(BotNodeRequest) returns (BotStatus);
+  rpc ApplyBot(ApplyBotRequest) returns (BotStatus);
+  rpc RemoveBot(BotNodeRequest) returns (BotStatus);
+}
+
+message ApplyBotRequest {
+  string node_key = 1;
+  // The package's directory on the controller.
+  string root = 2;
+  // The controller release the package comes from.
+  string version = 3;
+  string bot_token = 4;
+  string api_url = 5;
+  string relay_ca = 6;
+  string key_id = 7;
+}
+
+message BotNodeRequest {
+  string node_key = 1;
+}
+
+message BotStatus {
+  string version = 1;
+  bytes public_key = 2;
+  bool active = 3;
+}

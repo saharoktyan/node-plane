@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 mod api;
+mod bot;
 mod cabinet;
 mod config;
 mod enforcement;

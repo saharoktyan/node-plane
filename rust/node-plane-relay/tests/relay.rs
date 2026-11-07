@@ -226,11 +226,9 @@ async fn the_controller_serves_the_cabinet_itself_under_the_relays_rules() {
     assert_eq!(body["via_count"], 1);
     assert_eq!(body["headers"]["x-node-plane-via"], "relay");
     assert_eq!(body["headers"]["x-node-plane-client"], "127.0.0.1");
-    assert!(
-        body["headers"]
-            .get("x-node-plane-telegram-user-id")
-            .is_none()
-    );
+    // The bot's Telegram user crosses; the API takes it only from the bot's
+    // signed requests.
+    assert_eq!(body["headers"]["x-node-plane-telegram-user-id"], "1");
     assert_eq!(body["headers"]["authorization"], "Bearer t");
     assert!(headers.get("set-cookie").is_none() && headers.get("x-node-plane-secret").is_none());
     let client = Client::builder(TokioExecutor::new()).build_http();
@@ -319,7 +317,8 @@ async fn requests_reach_the_api_with_the_mark_and_only_allowed_headers() {
         (&sent["x-node-plane-via"], &body["via_count"]),
         (&json!("relay"), &json!(1))
     );
-    assert!(sent.get("x-node-plane-telegram-user-id").is_none());
+    // The API takes it only from the bot's signed requests.
+    assert_eq!(sent["x-node-plane-telegram-user-id"], "42");
     // Without a known peer the link names no client, and a browser cannot.
     assert!(sent.get("x-node-plane-client").is_none());
     assert!(sent.get("cookie").is_none());

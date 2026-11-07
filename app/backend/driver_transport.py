@@ -244,6 +244,29 @@ class GrpcIntentDriver:
             cabinet_service_pb2.CabinetNodeRequest(node_key=node_key), timeout=max(self.timeout, 120))
         return {'version': response.version or None}
 
+    def bot_key(self, node_key):
+        """The bot's public key on the node, made there when missing."""
+        from driver.v1 import bot_service_pb2, bot_service_pb2_grpc
+        response = bot_service_pb2_grpc.BotServiceStub(self.channel).BotKey(
+            bot_service_pb2.BotNodeRequest(node_key=node_key), timeout=max(self.timeout, 60))
+        return {'public_key': response.public_key, 'version': response.version or None, 'active': response.active}
+
+    def apply_bot(self, node_key, root, version, *, token, api_url, relay_ca, key_id):
+        """Have the node run the bot's package from `root` on this host; the
+        node installs its Python packages, which takes minutes."""
+        from driver.v1 import bot_service_pb2, bot_service_pb2_grpc
+        response = bot_service_pb2_grpc.BotServiceStub(self.channel).ApplyBot(
+            bot_service_pb2.ApplyBotRequest(node_key=node_key, root=root, version=version, bot_token=token,
+                                            api_url=api_url, relay_ca=relay_ca, key_id=key_id),
+            timeout=max(self.timeout, 660))
+        return {'version': response.version or None, 'active': response.active}
+
+    def remove_bot(self, node_key):
+        from driver.v1 import bot_service_pb2, bot_service_pb2_grpc
+        response = bot_service_pb2_grpc.BotServiceStub(self.channel).RemoveBot(
+            bot_service_pb2.BotNodeRequest(node_key=node_key), timeout=max(self.timeout, 120))
+        return {'version': response.version or None, 'active': response.active}
+
     def read_xray_public(self, node_key):
         """Read the live Reality public identity; no legacy registry access."""
         from driver.v1 import runtime_service_pb2

@@ -7,7 +7,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher
 
 from .commands import register_commands
-from .backend import BackendClient
+from .backend import BackendClient, Signer
 from .announcement_delivery import delivery_loop
 from .routers import admin_announcements
 from .routers import admin_system_cleanup
@@ -43,18 +43,29 @@ from .callback_answers import CallbackAnswerScope, ConcurrentCallbackAnswers
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s | %(message)s')
     token = os.environ['BOT_TOKEN']
-    adapter_file = Path(os.environ['NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE'])
-    adapter_token = adapter_file.read_text(encoding='utf-8').strip()
-    if not adapter_token:
-        raise ValueError('backend adapter credential is empty')
-        
     base_url = os.environ.get('NODE_PLANE_BACKEND_URL', 'http://127.0.0.1:8080')
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+    connector = None
+    if os.environ.get('NODE_PLANE_BOT_KEY_FILE'):
+        # On a node: signed requests through the relay, whose certificate
+        # may come from a private CA.
+        adapter_token = None
+        signer = Signer.from_file(os.environ['NODE_PLANE_BOT_KEY_ID'], os.environ['NODE_PLANE_BOT_KEY_FILE'])
+        if os.environ.get('NODE_PLANE_RELAY_CA_FILE'):
+            import ssl
+            connector = aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=os.environ['NODE_PLANE_RELAY_CA_FILE']))
+    else:
+        signer = None
+        adapter_file = Path(os.environ['NODE_PLANE_BACKEND_ADAPTER_TOKEN_FILE'])
+        adapter_token = adapter_file.read_text(encoding='utf-8').strip()
+        if not adapter_token:
+            raise ValueError('backend adapter credential is empty')
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), connector=connector) as session:
         async with Bot(token=token) as bot:
             bot.session.middleware(ConcurrentCallbackAnswers())
             bot.session.middleware(TelegramTimings())
             await register_commands(bot)
-            backend = BackendClient(session, base_url, adapter_token)
+            backend = BackendClient(session, base_url, adapter_token, signer=signer)
             from aiogram.fsm.storage.memory import SimpleEventIsolation
             dispatcher = Dispatcher(events_isolation=SimpleEventIsolation())
             dispatcher.update.outer_middleware(ActionTimings())

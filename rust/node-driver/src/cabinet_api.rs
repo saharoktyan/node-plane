@@ -22,8 +22,19 @@ pub(crate) struct CabinetApi {
 /// The build's regular files by their paths inside it; links are refused,
 /// so the build cannot reach outside its directory.
 pub(crate) fn read(root: &Path) -> Result<Vec<CabinetFile>, String> {
-    if !root.is_absolute() || !root.join("index.html").is_file() {
-        return Err("cabinet_build_missing".into());
+    read_tree(root, "index.html", "cabinet", MAX_BYTES)
+}
+
+/// A directory of the controller's release, `marker` in it, as files for an
+/// agent; errors are named after `prefix`.
+pub(crate) fn read_tree(
+    root: &Path,
+    marker: &str,
+    prefix: &str,
+    max_bytes: u64,
+) -> Result<Vec<CabinetFile>, String> {
+    if !root.is_absolute() || !root.join(marker).is_file() {
+        return Err(format!("{prefix}_build_missing"));
     }
     let mut files = Vec::new();
     let mut total = 0;
@@ -41,20 +52,20 @@ pub(crate) fn read(root: &Path) -> Result<Vec<CabinetFile>, String> {
             } else if kind.is_file() {
                 let content = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 total += content.len() as u64;
-                if total > MAX_BYTES {
-                    return Err("cabinet_files_too_large".into());
+                if total > max_bytes {
+                    return Err(format!("{prefix}_files_too_large"));
                 }
                 let name = path
                     .strip_prefix(root)
                     .ok()
                     .and_then(|p| p.to_str())
-                    .ok_or("cabinet_files_invalid")?;
+                    .ok_or_else(|| format!("{prefix}_files_invalid"))?;
                 files.push(CabinetFile {
                     path: name.to_string(),
                     content,
                 });
             } else {
-                return Err("cabinet_files_invalid".into());
+                return Err(format!("{prefix}_files_invalid"));
             }
         }
     }

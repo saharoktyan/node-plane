@@ -451,6 +451,42 @@ impl NodeAgentService for NodeAgentApi {
     ) -> Result<Response<agent::v1::CabinetState>, Status> {
         cabinet_blocking(|host, paths| crate::cabinet::remove(host, paths)).await
     }
+
+    async fn bot_key(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::BotState>, Status> {
+        bot_blocking(|host, paths| crate::bot::key(host, paths)).await
+    }
+
+    async fn apply_bot(
+        &self,
+        request: Request<agent::v1::ApplyBotRequest>,
+    ) -> Result<Response<agent::v1::BotState>, Status> {
+        let request = request.into_inner();
+        crate::bot::check(&request).map_err(crate::bot::status)?;
+        bot_blocking(move |host, paths| crate::bot::apply(host, paths, &request)).await
+    }
+
+    async fn remove_bot(
+        &self,
+        _request: Request<AgentEmpty>,
+    ) -> Result<Response<agent::v1::BotState>, Status> {
+        bot_blocking(|host, paths| crate::bot::remove(host, paths)).await
+    }
+}
+
+/// The bot's environment is built with uv and waits on systemd; keep it off the async workers.
+async fn bot_blocking(
+    work: impl FnOnce(&crate::bot::System, &crate::bot::Paths) -> Result<agent::v1::BotState, String>
+    + Send
+    + 'static,
+) -> Result<Response<agent::v1::BotState>, Status> {
+    tokio::task::spawn_blocking(move || work(&crate::bot::System, &crate::bot::Paths::host()))
+        .await
+        .map_err(|_| Status::internal("bot worker unavailable"))?
+        .map(Response::new)
+        .map_err(crate::bot::status)
 }
 
 /// The cabinet's files and the relay's restart stay off the async workers.

@@ -575,6 +575,10 @@ dev = [
 ]
 telegram = [
     { name = "aiogram" },
+    { name = "certifi" },
+    { name = "cryptography" },
+    { name = "pillow" },
+    { name = "qrcode" },
 ]
 
 [package.metadata]
@@ -599,7 +603,13 @@ dev = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "uv", specifier = "==0.13.6" },
 ]
-telegram = [{ name = "aiogram", specifier = "==3.31.0" }]
+telegram = [
+    { name = "aiogram", specifier = "==3.31.0" },
+    { name = "certifi", specifier = "==2026.10.19" },
+    { name = "cryptography", specifier = "==50.0.2" },
+    { name = "pillow", specifier = "==11.3.0" },
+    { name = "qrcode", specifier = "==8.2" },
+]
 
 [[package]]
 name = "pillow"

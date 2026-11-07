@@ -75,6 +75,8 @@ A node can run the web cabinet's relay. The agent starts it from its own binary 
 
 The relay's node can also serve the web cabinet, on the relay's domain beside the API. The controller sends the cabinet's files with its release version; the agent writes each version whole into `/var/lib/node-plane-cabinet/<version>/`, then points `current` at it and removes the older one, so the relay never serves half a version. The relay learns the directory from `/etc/node-plane/relay-cabinet.env`, an optional environment file of its unit: the first files restart the relay, a new version needs no restart. The files are public, like the cabinet; the agent accepts only plain relative paths of the build's file types. Removing the cabinet removes the files and that environment file and restarts the relay, which then answers only the API.
 
+A node can also run the Telegram bot, so the controller needs no public address or outbound access to Telegram. The controller sends the bot's code with its release version, together with the list of its Python packages pinned by hash and the `uv` binary that installs them. The agent writes each version whole into `/var/lib/node-plane-bot/<version>/` and builds its environment there with `uv`: the system's Python 3.11 or 3.12 when it has one, otherwise one `uv` downloads. The packages come from PyPI, so the node needs outbound HTTPS. Then `current` points at the new version and the older one is removed. The bot runs as the `node-plane-bot` user in a sandbox that may write only its state directory. It reaches the controller through the relay and signs every request with its own key: the agent creates the key on the node before the first install, and the controller pins its public half. The bot's token and the relay address are in `/etc/node-plane/bot.env`, readable only by root. Removing the bot removes its unit, settings, code and key; the `node-plane-bot` system user stays.
+
 ## Agent updates
 
 **Updates** updates agents together with the controller. The controller names its release; the agent downloads it from GitHub itself and checks it:
@@ -114,5 +116,7 @@ The agent's own removal is not verified: the controller cannot look at the serve
 | `/var/lib/node-plane-relay/` | Relay key, the controller's pinned key, link state, ACME certificates |
 | `/var/lib/node-plane-cabinet/` | The web cabinet's files, one directory per version and `current` |
 | `/etc/node-plane/relay-cabinet.env` | Where the relay finds the cabinet's files |
+| `/etc/systemd/system/node-plane-bot.service`, `/etc/node-plane/bot.env` | Telegram bot service and settings, when the node runs the bot |
+| `/var/lib/node-plane-bot/` | The bot's versions and `current`, its key, state, `uv` and its caches |
 
 Full node removal deletes the agent and its resources and verifies the host. See [Nodes](nodes.md#remove-a-node).

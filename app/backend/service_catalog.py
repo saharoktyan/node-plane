@@ -54,6 +54,10 @@ def _system_state(conn, service):
         row = conn.execute('SELECT status FROM backend_web_cabinet WHERE id=1').fetchone()
         return STATES[row['status']] if row else 'off'
     from .account_channels import enabled
+    from .telegram_bot_placement import STATES as BOT_STATES
+    row = conn.execute('SELECT status FROM backend_telegram_bot_placement WHERE id=1').fetchone()
+    if row is not None:
+        return BOT_STATES[row['status']]
     return 'active' if 'telegram' in enabled(conn) else 'off'
 
 

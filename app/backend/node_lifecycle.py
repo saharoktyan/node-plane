@@ -122,6 +122,10 @@ class NodeLifecycle:
             if conn.execute('SELECT 1 FROM backend_relays WHERE node_key = ?', (node_key,)).fetchone():
                 # The cabinet would lose its entry point; move or remove the relay first.
                 raise AccessDenied('node_has_relay', 409)
+            from .telegram_bot_placement import placed
+            if placed(conn) == node_key:
+                # Bring the bot back to the controller first.
+                raise AccessDenied('node_runs_telegram_bot', 409)
             previous = conn.execute('SELECT operation_ids_json FROM backend_node_drains WHERE node_key = ?', (node_key,)).fetchone()
             if previous is not None:
                 return {'node_key': node_key, 'status': 'draining',

@@ -167,6 +167,10 @@ class RelayService:
             if conn.execute("SELECT 1 FROM backend_web_cabinet WHERE mode='relay'").fetchone():
                 # The cabinet is served beside it: that goes first.
                 raise AccessDenied('relay_serves_cabinet', 409)
+            from .telegram_bot_placement import placed
+            if placed(conn) is not None:
+                # The bot on a node reaches the controller through it.
+                raise AccessDenied('relay_serves_telegram_bot', 409)
             conn.execute('''UPDATE backend_relays SET status='removing', error_code=NULL, attempted_at=NULL,
                 actor_id=?, updated_at=? WHERE instance_id=?''', (actor.account.id, _now().isoformat(),
                                                                   row['instance_id']))

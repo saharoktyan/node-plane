@@ -105,6 +105,32 @@ impl AgentTransport {
         Ok(client.remove_cabinet(AgentEmpty {}).await?.into_inner())
     }
 
+    pub async fn bot_key(&self) -> Result<crate::agent::v1::BotState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.bot_key(AgentEmpty {}).await?.into_inner())
+    }
+
+    /// The bot's package goes in one message; the node then installs its
+    /// packages from PyPI, which takes minutes on a slow link.
+    pub async fn apply_bot(
+        &self,
+        request: crate::agent::v1::ApplyBotRequest,
+    ) -> Result<crate::agent::v1::BotState, tonic::Status> {
+        let client = self.client().await.map_err(connection_status)?;
+        let mut request = tonic::Request::new(request);
+        request.set_timeout(Duration::from_secs(600));
+        Ok(client
+            .max_encoding_message_size(48 << 20)
+            .apply_bot(request)
+            .await?
+            .into_inner())
+    }
+
+    pub async fn remove_bot(&self) -> Result<crate::agent::v1::BotState, tonic::Status> {
+        let mut client = self.client().await.map_err(connection_status)?;
+        Ok(client.remove_bot(AgentEmpty {}).await?.into_inner())
+    }
+
     pub async fn get_backend_xray_public(
         &self,
     ) -> Result<crate::agent::v1::BackendXrayPublic, tonic::Status> {

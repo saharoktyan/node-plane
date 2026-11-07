@@ -63,6 +63,22 @@
   requests are then signed with that key instead of going over SSH; only
   the API is available, so installing, updating and diagnosing stay with
   SSH. A private CA for the relay is trusted from `NODE_PLANE_RELAY_CA_FILE`.
+- The Telegram bot can run on a node instead of the controller (migration
+  r0052), so the controller needs no access to Telegram:
+  `GET/PUT/DELETE /api/v1/telegram-bot/placement` (owners and administrators,
+  not through the relay). The worker builds the bot's package from the
+  release (its code, the `telegram` dependency group pinned by hash, the
+  controller's `uv`) and has the node's agent install it into
+  `/var/lib/node-plane-bot/` as the sandboxed `node-plane-bot` service, then
+  stops the controller's bot; the node installs the packages from PyPI. The
+  bot reaches the API through the relay and signs its requests with a key
+  made on the node, which the controller pins; it alone may act for a
+  Telegram user through the relay, and the relay now passes that header.
+  Moving the bot back removes it from the node, revokes its key and starts
+  the controller's bot. The relay and the node stay while the bot runs
+  there, the bot cannot be turned off from there, and a new token or
+  release reaches the node. The bot waits at most 25 seconds for deliveries,
+  within the relay's limit.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

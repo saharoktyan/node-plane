@@ -7408,6 +7408,131 @@
         "title": "TariffPage",
         "type": "object"
       },
+      "TelegramBotPlacementEnvelope": {
+        "properties": {
+          "placement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelegramBotPlacementOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relay_node_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relay Node Key"
+          },
+          "telegram_enabled": {
+            "default": false,
+            "title": "Telegram Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "TelegramBotPlacementEnvelope",
+        "type": "object"
+      },
+      "TelegramBotPlacementInput": {
+        "additionalProperties": false,
+        "properties": {
+          "node_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Node Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key"
+        ],
+        "title": "TelegramBotPlacementInput",
+        "type": "object"
+      },
+      "TelegramBotPlacementOutput": {
+        "properties": {
+          "applied_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Revision"
+          },
+          "applied_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Version"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "node_key": {
+            "title": "Node Key",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "applying",
+              "active",
+              "failed",
+              "removing"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key",
+          "status",
+          "state",
+          "revision",
+          "version",
+          "updated_at"
+        ],
+        "title": "TelegramBotPlacementOutput",
+        "type": "object"
+      },
       "TelegramBotUsername": {
         "properties": {
           "telegram_enabled": {
@@ -21536,6 +21661,168 @@
           }
         ],
         "summary": "Edit Tariff"
+      }
+    },
+    "/api/v1/telegram-bot/placement": {
+      "delete": {
+        "description": "Bring the bot back to the controller.",
+        "operationId": "return_telegram_bot_api_v1_telegram_bot_placement_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramBotPlacementEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Return Telegram Bot"
+      },
+      "get": {
+        "description": "Whether the bot runs on a node, and how far that is applied.",
+        "operationId": "get_telegram_bot_placement_api_v1_telegram_bot_placement_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramBotPlacementEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Telegram Bot Placement"
+      },
+      "put": {
+        "description": "Run the bot on a node with an agent; the worker moves it there.",
+        "operationId": "place_telegram_bot_api_v1_telegram_bot_placement_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelegramBotPlacementInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramBotPlacementEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Place Telegram Bot"
       }
     },
     "/api/v1/vpn-policies/installation": {

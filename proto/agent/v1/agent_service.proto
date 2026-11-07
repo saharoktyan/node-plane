@@ -59,6 +59,36 @@ service NodeAgentService {
   // The web cabinet's files, served by this node's relay; see src/cabinet.
   rpc ApplyCabinet(ApplyCabinetRequest) returns (CabinetState);
   rpc RemoveCabinet(AgentEmpty) returns (CabinetState);
+  // The Telegram bot run by this node, reaching the controller through the
+  // relay; see src/bot. BotKey makes the bot's key when it has none and
+  // gives its public half, for the controller to pin before ApplyBot.
+  rpc BotKey(AgentEmpty) returns (BotState);
+  rpc ApplyBot(ApplyBotRequest) returns (BotState);
+  rpc RemoveBot(AgentEmpty) returns (BotState);
+}
+
+message ApplyBotRequest {
+  // The controller release the bot's code comes from.
+  string version = 1;
+  // The code under app/, VERSION, RELEASE_CHANNEL, requirements.txt with
+  // hashes and uv.zlib (the uv binary, zlib-compressed).
+  repeated CabinetFile files = 2;
+  string bot_token = 3;
+  // The relay's address the bot reaches the controller's API through.
+  string api_url = 4;
+  // A private CA the relay's certificate comes from, as PEM; empty for a
+  // public one.
+  string relay_ca = 5;
+  // The id the controller stored the bot's key under; its requests name it.
+  string key_id = 6;
+}
+
+message BotState {
+  // The version installed; empty when there is none.
+  string version = 1;
+  // The bot key's raw Ed25519 public half; empty before BotKey.
+  bytes public_key = 2;
+  bool active = 3;
 }
 
 message CabinetFile {

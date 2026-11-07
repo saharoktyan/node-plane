@@ -62,7 +62,9 @@ CLEAR = (
     "backend_login_attempts",
     "backend_sessions",
     "backend_webauthn_challenges",
-    # Workstation is linked again and the bot's key comes back with the bot.
+    # Workstation is linked again; the bot runs on the controller again and
+    # its key comes back when it is moved to a node.
+    "backend_telegram_bot_placement",
     "backend_request_nonces",
     "backend_workstation_pairings",
     "backend_client_keys",

@@ -295,6 +295,8 @@ class Worker:
         self.relays = RelayService(self.executor.db, self.executor.driver)
         from .web_cabinet import WebCabinetService
         self.cabinet = WebCabinetService(self.executor.db, self.executor.driver)
+        from .telegram_bot_placement import TelegramBotPlacementService
+        self.bot_placement = TelegramBotPlacementService(self.executor.db, self.executor.driver)
         from .registrations import RegistrationCleanup
         self.registration_cleanup = RegistrationCleanup(self.executor.db)
 
@@ -302,14 +304,15 @@ class Worker:
         self.node_jobs.repair_removed_runtime_state()
         for service in (self.update_executor, self.executor, self.node_executor,
                         self.node_jobs, self.config_executor, self.temporary_executor,
-                        self.rollout_executor, self.enrollment_executor, self.relays, self.cabinet):
+                        self.rollout_executor, self.enrollment_executor, self.relays, self.cabinet,
+                        self.bot_placement):
             service.recover()
 
     def drain(self, stop):
         services = (self.system_cleanup, self.backup_executor, self.update_executor,
                     self.enrollment_executor, self.bootstrap_executor, self.rollout_executor, self.removals,
                     self.node_jobs, self.node_executor, self.executor,
-                    self.temporary_executor, self.config_executor, self.relays, self.cabinet,
+                    self.temporary_executor, self.config_executor, self.relays, self.cabinet, self.bot_placement,
                     self.registration_cleanup)
         while not stop.is_set():
             from .maintenance_gate import core_upgrade

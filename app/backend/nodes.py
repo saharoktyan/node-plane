@@ -212,6 +212,8 @@ class NodeService:
             create_relay_schema(conn)
             from db.migration_revisions.r0050_web_cabinet import create_schema as create_cabinet_schema
             create_cabinet_schema(conn)
+            from db.migration_revisions.r0052_telegram_bot_placement import create_schema as create_bot_schema
+            create_bot_schema(conn)
             conn.execute('CREATE TABLE IF NOT EXISTS backend_node_notes (node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE, notes TEXT NOT NULL)')
             conn.execute('''CREATE TABLE IF NOT EXISTS backend_node_connections (
                 node_key TEXT PRIMARY KEY REFERENCES backend_nodes(key) ON DELETE CASCADE,

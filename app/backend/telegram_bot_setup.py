@@ -3,7 +3,9 @@
 Enabling writes the token, gives the bot its adapter credential, turns the
 Telegram channel on and starts its service. Disabling stops and removes the
 service, revokes the bot's adapter credentials and turns the channel off.
-Accounts, their Telegram logins and channels stay as they are.
+Accounts, their Telegram logins and channels stay as they are. While the
+bot runs on a node (see telegram_bot_placement), the worker hands it the
+token there, and it comes back to the controller before it is turned off.
 """
 from __future__ import annotations
 
@@ -72,14 +74,22 @@ def enable(db, path, token, *, read, write, system):
         _, secret = CredentialService(db).issue(PrincipalKind.ADAPTER, ADAPTER_SCOPES)
         _write_secret(token_file, secret)
     write(path, original, {'BOT_TOKEN': token, TOKEN_KEY: str(token_file)})
+    from .telegram_bot_placement import reapply
     with db.transaction() as conn:
         set_enabled(conn, enabled(conn) | {'telegram'})
-    return system.install()
+        on_node = reapply(conn)
+    # The bot on a node gets the token from the worker.
+    return True if on_node else system.install()
 
 
 def disable(db, path, *, read, write, system):
     """Stop the bot and take its access away. Returns whether its service is gone."""
+    from .authorization import AccessDenied
+    from .telegram_bot_placement import placed
     with db.transaction() as conn:
+        if placed(conn) is not None:
+            # Bring it back to the controller first.
+            raise AccessDenied('telegram_bot_on_node', 409)
         set_enabled(conn, enabled(conn) - {'telegram'})
         conn.execute("UPDATE backend_credentials SET revoked_at=? WHERE kind='adapter' AND revoked_at IS NULL",
                      (datetime.now(timezone.utc).isoformat(),))

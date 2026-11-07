@@ -146,6 +146,12 @@ def change(db, actor, identities, path, request, *, verify=verify_token, restart
             if changed_file:
                 _write(path, original, {})
             raise
+    if action == 'telegram-token':
+        from .telegram_bot_placement import reapply
+        with db.transaction() as conn:
+            if reapply(conn):
+                # The worker hands the bot on its node the new token.
+                restart = lambda: True
     if restart is None:
         restart = lambda: subprocess.run(['systemctl', 'try-restart', 'node-plane-telegram.service'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False).returncode == 0

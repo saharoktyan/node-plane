@@ -19,7 +19,8 @@ backend = [
     "fastapi==0.141.1",
     "uvicorn==0.54.0",
 ]
-telegram = ["aiogram==3.31.0"]
+# The bot alone, as a node installs it (see app/backend/bot_package.py).
+telegram = ["aiogram==3.31.0", "certifi==2026.10.19", "cryptography==50.0.2", "pillow==11.3.0", "qrcode==8.2"]
 dev = ["grpcio-tools==1.74.0", "httpx==0.28.1", "uv==0.13.6"]
 
 [tool.uv]

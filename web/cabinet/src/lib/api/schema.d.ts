@@ -3266,6 +3266,34 @@ export interface paths {
         patch: operations["edit_tariff_api_v1_tariffs__tariff_id__patch"];
         trace?: never;
     };
+    "/api/v1/telegram-bot/placement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Telegram Bot Placement
+         * @description Whether the bot runs on a node, and how far that is applied.
+         */
+        get: operations["get_telegram_bot_placement_api_v1_telegram_bot_placement_get"];
+        /**
+         * Place Telegram Bot
+         * @description Run the bot on a node with an agent; the worker moves it there.
+         */
+        put: operations["place_telegram_bot_api_v1_telegram_bot_placement_put"];
+        post?: never;
+        /**
+         * Return Telegram Bot
+         * @description Bring the bot back to the controller.
+         */
+        delete: operations["return_telegram_bot_api_v1_telegram_bot_placement_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vpn-policies/installation": {
         parameters: {
             query?: never;
@@ -5886,6 +5914,46 @@ export interface components {
             items: components["schemas"]["TariffOutput"][];
             /** Keys */
             keys: string[];
+        };
+        /** TelegramBotPlacementEnvelope */
+        TelegramBotPlacementEnvelope: {
+            placement?: components["schemas"]["TelegramBotPlacementOutput"] | null;
+            /** Relay Node Key */
+            relay_node_key?: string | null;
+            /**
+             * Telegram Enabled
+             * @default false
+             */
+            telegram_enabled: boolean;
+        };
+        /** TelegramBotPlacementInput */
+        TelegramBotPlacementInput: {
+            /** Node Key */
+            node_key: string;
+        };
+        /** TelegramBotPlacementOutput */
+        TelegramBotPlacementOutput: {
+            /** Applied Revision */
+            applied_revision?: number | null;
+            /** Applied Version */
+            applied_version?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Node Key */
+            node_key: string;
+            /** Revision */
+            revision: number;
+            /** State */
+            state: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "applying" | "active" | "failed" | "removing";
+            /** Updated At */
+            updated_at: string;
+            /** Version */
+            version: string;
         };
         /** TelegramBotUsername */
         TelegramBotUsername: {
@@ -13426,6 +13494,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TariffOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_telegram_bot_placement_api_v1_telegram_bot_placement_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramBotPlacementEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    place_telegram_bot_api_v1_telegram_bot_placement_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelegramBotPlacementInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramBotPlacementEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    return_telegram_bot_api_v1_telegram_bot_placement_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramBotPlacementEnvelope"];
                 };
             };
             /** @description Validation Error */

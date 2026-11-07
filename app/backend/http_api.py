@@ -1288,6 +1288,31 @@ class WebCabinetEnvelope(BaseModel):
     relay_node_key: str | None = None
 
 
+class TelegramBotPlacementInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    node_key: str = Field(min_length=1, max_length=64)
+
+
+class TelegramBotPlacementOutput(BaseModel):
+    node_key: str
+    status: Literal['applying', 'active', 'failed', 'removing']
+    state: str
+    revision: int
+    applied_revision: int | None = None
+    # The release the node's bot came from, and the controller's own.
+    applied_version: str | None = None
+    version: str
+    error_code: str | None = None
+    updated_at: str
+
+
+class TelegramBotPlacementEnvelope(BaseModel):
+    # None while the controller runs the bot itself.
+    placement: TelegramBotPlacementOutput | None = None
+    telegram_enabled: bool = False
+    relay_node_key: str | None = None
+
+
 class RelayLinkOutput(BaseModel):
     agent_reachable: bool
     running: bool
@@ -2999,6 +3024,24 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def remove_web_cabinet(current=Depends(actor)):
         from .web_cabinet import WebCabinetService
         return WebCabinetService(db).remove(current)
+
+    @app.get('/api/v1/telegram-bot/placement', response_model=TelegramBotPlacementEnvelope)
+    def get_telegram_bot_placement(current=Depends(actor)):
+        """Whether the bot runs on a node, and how far that is applied."""
+        from .telegram_bot_placement import TelegramBotPlacementService
+        return TelegramBotPlacementService(db).get(current)
+
+    @app.put('/api/v1/telegram-bot/placement', response_model=TelegramBotPlacementEnvelope, status_code=202)
+    def place_telegram_bot(body: TelegramBotPlacementInput, current=Depends(actor)):
+        """Run the bot on a node with an agent; the worker moves it there."""
+        from .telegram_bot_placement import TelegramBotPlacementService
+        return TelegramBotPlacementService(db).place(current, body.node_key)
+
+    @app.delete('/api/v1/telegram-bot/placement', response_model=TelegramBotPlacementEnvelope, status_code=202)
+    def return_telegram_bot(current=Depends(actor)):
+        """Bring the bot back to the controller."""
+        from .telegram_bot_placement import TelegramBotPlacementService
+        return TelegramBotPlacementService(db).remove(current)
 
     @app.get('/api/v1/node-bootstraps/{identity}')
     def get_node_bootstrap(identity: UUID, current=Depends(actor)):
