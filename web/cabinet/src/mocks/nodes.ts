@@ -29,6 +29,10 @@ function store() {
   return state;
 }
 
+const jobs = new Map<string, { status: string; result: unknown }>();
+const removals = new Map<string, Record<string, unknown>>();
+const recovered = new Set<string | null>();
+
 const find = (key: string) => store().nodes.find((node) => node.key === key);
 
 /** Something the node does: running for a moment, then done. */
@@ -110,7 +114,7 @@ export const nodeHandlers = [
     if (agent === 'unavailable') return error(503, 'node_agent_unavailable');
     const ready = node.applied_revision > 0;
     return { docker: true, awg_running: ready && node.protocols.includes('awg'), xray_running: ready && node.protocols.includes('xray'),
-      awg_installed: ready, xray_installed: ready, awg_parameters: {} };
+      awg_installed: ready, xray_installed: ready, awg_config_valid: ready, xray_config_valid: ready, runtime_drift: false, awg_parameters: {} };
   })),
   http.get('/api/v1/nodes/:key/agent-enrollment', guarded((_, { key }) => {
     const status = store().extra[key]?.enrollment;
@@ -170,6 +174,71 @@ export const nodeHandlers = [
     node.settings_apply_pending = false;
     const operation = work(key, 'settings', () => (node.applied_revision = node.desired_revision));
     return HttpResponse.json({ ...operation, revision: node.desired_revision, services: node.protocols }, { status: 202 });
+  })),
+  http.get('/api/v1/nodes/:key/diagnostics', guarded((_, { key }) => {
+    const node = find(key);
+    if (!node) return error(404, 'resource_not_found');
+    if (store().extra[key].agent !== 'ready') return error(409, 'node_agent_unavailable');
+    const flag = (id: string, status = 'ok', detail = 'Confirmed') => ({ id, status, detail });
+    return { node_key: key, docker: 'ok', runtime_root: 'ok', awg_config: 'ok', xray_config: 'ok', runtime_version: '0.5.0',
+      checked_at: new Date().toISOString(), checks: [flag('agent', 'ok', 'Agent responded to the live inspection'),
+        flag('agent_version', 'ok', 'Agent version: 0.5.0; expected: 0.5.0'), flag('docker'),
+        ...node.protocols.flatMap((p) => ['installed', 'running', 'config_valid'].map((f) => flag(`${p}:${f}`))),
+        flag('settings', node.applied_revision < node.desired_revision ? 'warning' : 'ok',
+          node.applied_revision < node.desired_revision ? `Settings awaiting application: ${node.applied_revision} → ${node.desired_revision}`
+            : 'Desired and applied settings revisions match'),
+        flag('runtime_version'), flag('cpu_used_percent', 'ok', 'CPU used (1-minute average): 7%; warning ≥80%, error ≥95%'),
+        flag('ram_used_percent', 'warning', 'RAM used: 86%; warning ≥85%, error ≥95%'), flag('disk_free_percent', 'ok', 'Disk free: 64%'),
+        flag('load1', 'ok', 'Load average per CPU: 0.2')],
+      observation: { response_ms: 84, host_metrics: { cpu_used_percent: 7, ram_used_percent: 86, ram_total_bytes: 2 * 2 ** 30,
+        ram_available_bytes: 0.28 * 2 ** 30, disk_free_percent: 64, disk_total_bytes: 40 * 2 ** 30, disk_free_bytes: 25.6 * 2 ** 30,
+        load1: 0.4, load5: 0.3, load15: 0.2, cpus: 2 },
+        protocols: node.protocols.map((protocol) => ({ protocol, ports: protocol === 'awg' ? [{ network: 'udp', port: 443 }]
+          : [{ transport: 'tcp', network: 'tcp', port: 443 }, { transport: 'xhttp', network: 'tcp', port: 8443 }] })) } };
+  })),
+  http.get('/api/v1/system/recovery', guarded((request) => {
+    const key = new URL(request.url).searchParams.get('node_key');
+    const items = (key === 'de1-0' ? [{ id: 'c0ffee00-0000-4000-8000-000000000001', kind: 'settings', status: 'blocked',
+      error_code: 'outcome_unconfirmed', next_step: 'journal', phase: 'applying', actions: [...recovered.has(key) ? [] : ['recheck', 'resolve', 'force']],
+      node_key: key, related_id: '', related_kind: '', subject_id: key }] : []).filter((item) => item.actions.length);
+    return { grouped: false, items, total: items.length, offset: 0, maintenance_active: false, node_key: key, node_title: '' };
+  })),
+  http.post('/api/v1/system/recovery/:kind/:id/:action', guarded(() => {
+    recovered.add('de1-0');
+    return { outcome: 'confirmed' };
+  })),
+  http.post('/api/v1/nodes/:key/actions', guarded(async (request, { key }) => {
+    const body = (await request.json()) as { action: string };
+    const job = { id: crypto.randomUUID(), node_key: key, action: body.action, status: 'running', result: null as unknown };
+    jobs.set(job.id, job);
+    setTimeout(() => {
+      job.status = 'succeeded';
+      if (body.action === 'check_ports') job.result = { ports: [{ port: 443, protocol: 'udp', status: 'listening' },
+        { port: 443, protocol: 'tcp', status: 'listening' }, { port: 8443, protocol: 'tcp', status: 'free' }], firewall: 'unmanaged' };
+    }, 3000);
+    return HttpResponse.json(job, { status: 202 });
+  })),
+  http.get('/api/v1/node-jobs/:id', guarded((_, { id }) => jobs.get(id) ?? error(404, 'resource_not_found'))),
+  http.get('/api/v1/nodes/:key/removal', guarded((_, { key }) => removals.get(key) ?? error(404, 'resource_not_found'))),
+  http.get('/api/v1/nodes/:key/maintenance', guarded((_, { key }) => ({ node_key: key, status: 'active', affected_profiles: 6,
+    pending_tasks: 0, blocked_tasks: 0, cleanup_phase: null, revocations_complete: false, operation_ids: [], verification_target: null }))),
+  http.post('/api/v1/nodes/:key/remove-step', guarded((_, { key }) => {
+    const removal = { node_key: key, status: 'draining', removal_status: 'running', cleanup_phase: 'not_started',
+      revocations_complete: false, pending_tasks: 6, blocked_tasks: 0, affected_profiles: 6, error_code: null } as Record<string, unknown>;
+    removals.set(key, removal);
+    const steps: [number, Record<string, unknown>][] = [[3000, { revocations_complete: true, pending_tasks: 0, cleanup_phase: 'prepared' }],
+      [6000, { cleanup_phase: 'runtime_deleted' }], [9000, { cleanup_phase: 'uninstall_scheduled' }]];
+    for (const [delay, change] of steps) setTimeout(() => Object.assign(removal, change), delay);
+    setTimeout(() => {
+      removals.set(key, { node_key: key, status: 'removed', checked_by: 'agent' });
+      store().nodes = store().nodes.filter((node) => node.key !== key);
+    }, 12000);
+    return removal;
+  })),
+  http.post('/api/v1/nodes/:key/retire-registry-only', guarded((_, { key }) => {
+    store().nodes = store().nodes.filter((node) => node.key !== key);
+    removals.set(key, { node_key: key, status: 'removed_registry_only' });
+    return { node_key: key, mode: 'registry_only' };
   })),
   http.get('/api/v1/system/installation-defaults', guarded(() => ({ revision: 1, settings: { xray_sni: 'www.cloudflare.com' } })))
 ];

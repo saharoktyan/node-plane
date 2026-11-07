@@ -7,6 +7,7 @@
   import { api, call, ApiError } from '$lib/api/client';
   import Policies from '$lib/admin/Policies.svelte';
   import Install from '$lib/admin/node/Install.svelte';
+  import Maintenance from '$lib/admin/node/Maintenance.svelte';
   import Settings from '$lib/admin/node/Settings.svelte';
   import { agentOf, installed, needsSetup, pendingSettings, protocolName, protocolStatus, stateKey,
     type Agent, type Node, type Overview, type Services } from '$lib/admin/nodes';
@@ -26,7 +27,7 @@
   let agent = $state<Agent>('unknown');
   let enrollment = $state<Enrollment | null>(null);
   let failure = $state('');
-  let panel = $state<'settings' | 'limits' | null>(null);
+  let panel = $state<'settings' | 'limits' | 'maintenance' | null>(null);
   let busy = $state(false);
 
   const path = () => ({ path: { node_key: nodeKey } });
@@ -176,6 +177,9 @@
           <p class="muted small">{t('nodes.limits_hint')}</p>
           <Policies subject={{ kind: 'installation', node: node.key, xray: node.protocols.includes('xray') }} bare />
         </section>
+      {:else if panel === 'maintenance'}
+        <Maintenance {node} {services} busy={operation != null && ACTIVE.includes(operation[1].status)} onchange={load}
+          onclose={() => (panel = null)} />
       {/if}
 
       {#if traffic}
@@ -212,6 +216,7 @@
             {#if installed(node) && node.applied_revision > 0 && node.protocols.length}
               <a class="button" href="/admin/temporary-configs">{t('temporary.title')}</a>
             {/if}
+            <button onclick={() => (panel = panel === 'maintenance' ? null : 'maintenance')}>{t('nodes.maintenance')}</button>
           </div>
         </section>
       {/if}
