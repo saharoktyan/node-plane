@@ -10,9 +10,21 @@
 
   $effect(() => {
     if (!inner) return;
-    const observer = new ResizeObserver(() => (height = inner!.offsetHeight));
+    // Growing follows at once; shrinking waits a moment, so content that
+    // is replaced and still loading eases from the old height straight to
+    // the new one instead of dipping to nothing first.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new ResizeObserver(() => {
+      const next = inner!.offsetHeight;
+      clearTimeout(timer);
+      if (next >= height) height = next;
+      else timer = setTimeout(() => (height = inner!.offsetHeight), 250);
+    });
     observer.observe(inner);
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
   });
 </script>
 
