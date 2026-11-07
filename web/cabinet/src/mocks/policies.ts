@@ -173,11 +173,16 @@ export const temporaryHandlers = [
   http.get('/api/v1/system/temporary-configs/:id/artifact', guarded((_, { id }) => {
     const item = temporaries().items.find((entry) => entry.id === id);
     if (!item || item.status !== 'active') return error(503, 'config_unavailable');
-    const content = item.protocol === 'xray'
-      ? `vless://3f1c6a52-0000-4000-8000-${id.slice(0, 12)}@de1.example.net:443?type=${item.transport}&security=reality#${item.node_title}%20Temp`
-      : `[Interface]\nPrivateKey = mock\nAddress = 10.8.0.42/32\n\n[Peer]\nEndpoint = nl1.example.net:51820\n`;
-    return { content, expires_at: item.expires_at, revocation_mode: item.revocation_mode,
-      files: [{ filename: `${item.node_title} · ${item.protocol === 'awg' ? 'AWG' : 'VLESS'} · Temp.${item.protocol === 'awg' ? 'conf' : 'txt'}`, content }] };
+    const name = `${item.node_title} · ${item.protocol === 'awg' ? 'AWG' : 'VLESS · ' + item.transport.toUpperCase()} · Temp`;
+    if (item.protocol === 'xray') {
+      const link = `vless://3f1c6a52-0000-4000-8000-${id.slice(0, 12)}@de1.example.net:443?type=${item.transport}&security=reality#${encodeURIComponent(name)}`;
+      return { content: link, expires_at: item.expires_at, revocation_mode: item.revocation_mode,
+        files: [{ filename: name + '.txt', content: link }] };
+    }
+    const key = 'vpn://' + btoa(`temporary ${id}`).replaceAll('=', '');
+    const conf = `[Interface]\nPrivateKey = mock\nAddress = 10.8.0.42/32\n\n[Peer]\nEndpoint = nl1.example.net:51820\n`;
+    return { content: item.transport === 'conf' ? conf : key, expires_at: item.expires_at, revocation_mode: item.revocation_mode,
+      files: [{ filename: name + '.vpn', content: key }, { filename: name + '.conf', content: conf }] };
   })),
   http.post('/api/v1/system/temporary-configs/:id/revoke', guarded((_, { id }) => {
     const item = temporaries().items.find((entry) => entry.id === id);

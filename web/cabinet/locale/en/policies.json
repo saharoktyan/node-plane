@@ -54,5 +54,6 @@
   "xray_bittorrent": "BitTorrent",
   "xray_bittorrent_allow": "allowed",
   "xray_bittorrent_block": "blocked",
-  "device_title": "Limits of {name}"
+  "device_title": "Limits of {name}",
+  "for_node": "for this server"
 }

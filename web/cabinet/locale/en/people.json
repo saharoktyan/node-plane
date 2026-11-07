@@ -2,7 +2,7 @@
   "requests": "Requests",
   "invites": "Invites",
   "merges": "Merges",
-  "add": "Add a person",
+  "add": "Add a user",
   "add_placeholder": "Telegram ID, @username or a name",
   "add_confirm": "Add",
   "add_hint": "A Telegram ID or @username links the person's Telegram; a name makes an account without one. The account gets a VPN profile.",

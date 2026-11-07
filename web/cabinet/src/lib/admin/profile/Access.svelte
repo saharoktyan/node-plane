@@ -3,6 +3,7 @@
      given or taken by hand. The draft is saved at once, on the revision it
      was read on. A staff member's VPN reaches everything and is not edited. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -132,6 +133,7 @@
       </ul>
     {:else}<p class="muted">{t('profiles.access_none')}</p>{/if}
   {:else if draft}
+    <div transition:unfold>
     <h3>{t('profiles.rules')}</h3>
     <p class="muted small">{t('profiles.rules_hint')}</p>
     <div class="table"><table>
@@ -180,6 +182,7 @@
     <div class="row actions">
       <button class="primary" disabled={busy || !changed} onclick={save}>{t('people.save')}</button>
       <button onclick={() => (draft = null)}>{t('common.cancel')}</button>
+    </div>
     </div>
   {:else if !failure}<p class="muted">{t('common.loading')}</p>{/if}
 </section>

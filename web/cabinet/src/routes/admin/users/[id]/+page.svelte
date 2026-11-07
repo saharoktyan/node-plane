@@ -3,6 +3,7 @@
      its passkeys and Workstations away or give it a sign-in link; owners
      assign roles. Each change names the revision it was made on. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { account } from '$lib/account.svelte';
@@ -130,7 +131,7 @@
         <dl class="facts">
           <div><dt>{t('auth.login')}</dt><dd>
             {#if login !== null}
-              <form class="row" onsubmit={saveLogin}>
+              <form class="row" onsubmit={saveLogin} transition:unfold>
                 <!-- svelte-ignore a11y_autofocus -->
                 <input maxlength="32" aria-label={t('auth.login')} bind:value={login} autofocus />
                 <button class="primary" disabled={busy || !login.trim()}>{t('people.save')}</button>
@@ -167,7 +168,7 @@
           {/if}
         </div>
         {#if roles !== null}
-          <div class="roles">
+          <div class="roles" transition:unfold>
             {#each STAFF_ROLES as role (role)}
               <label class="check"><input type="checkbox" checked={roles.includes(role)} onchange={() => toggleRole(role)} />
                 <span><strong>{t('admin.role_' + role)}</strong><br /><span class="muted small">{t('people.role_hint_' + role)}</span></span>
@@ -232,7 +233,7 @@
           <p class="muted small">{t('people.sign_in_link_hint')}</p>
         {/if}
         {#if invite}
-          <div class="secret">
+          <div class="secret" transition:unfold>
             <p>{t('people.invite_once')}</p>
             {#if invite.cabinet_link}<p><strong>{t('people.invite_cabinet')}</strong> <code>{invite.cabinet_link}</code></p>{/if}
             {#if invite.telegram_link}<p><strong>Telegram</strong> <code>{invite.telegram_link}</code></p>{/if}

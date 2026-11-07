@@ -1,6 +1,7 @@
 <!-- Accounts: with access, without it, or all; a person is added by their
      Telegram or by name, and opens in their card. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { goto } from '$app/navigation';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -65,7 +66,7 @@
   {/if}
 </div>
 {#if adding}
-  <form class="row add" onsubmit={add}>
+  <form class="row add" onsubmit={add} transition:unfold>
     <!-- svelte-ignore a11y_autofocus -->
     <input class="identity" maxlength="128" placeholder={t('people.add_placeholder')} aria-label={t('people.add_placeholder')}
       bind:value={identity} autofocus />

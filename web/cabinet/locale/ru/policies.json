@@ -54,5 +54,6 @@
   "xray_bittorrent": "BitTorrent",
   "xray_bittorrent_allow": "разрешён",
   "xray_bittorrent_block": "заблокирован",
-  "device_title": "Ограничения: {name}"
+  "device_title": "Ограничения: {name}",
+  "for_node": "для этого сервера"
 }

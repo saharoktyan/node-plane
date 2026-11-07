@@ -2,6 +2,7 @@
      taken back: the action's button and Cancel. -->
 <script lang="ts">
   import { t } from '$lib/i18n/index.svelte';
+  import { unfold } from './motion';
 
   let { text, action, danger = false, busy = false, confirm, cancel }: {
     text: string;
@@ -13,7 +14,7 @@
   } = $props();
 </script>
 
-<div class="confirm" role="alertdialog" aria-label={text}>
+<div class="confirm" role="alertdialog" aria-label={text} transition:unfold>
   <p>{text}</p>
   <div class="row">
     <button class={danger ? 'danger' : 'primary'} disabled={busy} onclick={confirm}>{action}</button>

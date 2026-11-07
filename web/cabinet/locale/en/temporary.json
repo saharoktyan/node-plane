@@ -24,5 +24,6 @@
   "status_expired": "expired",
   "status_revoked": "revoked",
   "status_cancelled": "cancelled",
-  "until_value": "until {time}"
+  "until_value": "until {time}",
+  "hide": "Hide"
 }

@@ -2,6 +2,7 @@
      whether it is stopped or slowed, the past periods, a reset now and,
      for a monthly reset from a chosen day, that day. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -99,7 +100,7 @@
         <p class="small">{t('quota.anchor', { day: date(quota.anchor_day) })}
           {#if account.may('profiles.manage')}<button class="bare link" onclick={() => (day = quota?.anchor_day ?? '')}>{t('people.change')}</button>{/if}</p>
       {:else}
-        <form class="row" onsubmit={move}>
+        <form class="row" onsubmit={move} transition:unfold>
           <input type="date" bind:value={day} aria-label={t('quota.anchor_label')} />
           <button class="primary" disabled={busy || !day}>{t('people.save')}</button>
           <button type="button" onclick={() => (day = null)}>{t('common.cancel')}</button>

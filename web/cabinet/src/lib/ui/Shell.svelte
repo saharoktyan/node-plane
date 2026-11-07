@@ -250,6 +250,26 @@
   main {
     padding: 1.5rem 2.5rem 3rem;
   }
+  /* What a page shows comes in softly, also once its data has loaded. */
+  main > :global(*) {
+    animation: appear 0.35s ease both;
+  }
+  @keyframes appear {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    main > :global(*) {
+      animation-duration: 0.15s;
+    }
+    @keyframes appear {
+      from {
+        opacity: 0;
+      }
+    }
+  }
   .mobile,
   .scrim {
     display: none;

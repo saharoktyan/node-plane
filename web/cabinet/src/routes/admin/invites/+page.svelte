@@ -2,6 +2,7 @@
      makes a new account, with VPN and a tariff or without access; its link
      is shown once. Registration lets anyone make an account with a login. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -102,7 +103,7 @@
 {#if failure}<p class="error">{failure}</p>{/if}
 
 {#if creating}
-  <section class="block">
+  <section class="block" transition:unfold>
     <h2>{t('people.invite_new')}</h2>
     <form class="form" onsubmit={create}>
       {#if account.may('profiles.manage')}
@@ -131,7 +132,7 @@
 {/if}
 
 {#if created}
-  <div class="secret">
+  <div class="secret" transition:unfold>
     <p><strong>{t('people.invite_once')}</strong></p>
     {#if created.cabinet_link}<p>{t('people.invite_cabinet')}: <code>{created.cabinet_link}</code></p>{/if}
     {#if created.telegram_link}

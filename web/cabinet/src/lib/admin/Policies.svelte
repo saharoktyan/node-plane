@@ -3,14 +3,16 @@
      removed value falls back to the tariff, the profile or the
      installation, as the controller resolves it. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
   import { errorText } from '$lib/ui/errors';
   import { bytes, key } from '$lib/ui/format';
-  import { FIELDS, GROUPS, fromInput, shown, toInput, type Field, type PolicyKey } from './policies';
+  import { FIELDS, GROUPS, NODE_KEYS, fromInput, shown, toInput, type Field, type PolicyKey, type PolicyValue } from './policies';
 
-  type Subject = { kind: 'installation' } | { kind: 'profile'; profileId: string }
+  // The installation's values, or with `node` its values for that node only.
+  type Subject = { kind: 'installation'; node?: string; xray?: boolean } | { kind: 'profile'; profileId: string }
     | { kind: 'device'; profileId: string; deviceId: string };
   let { subject, bare = false, onchange }: { subject: Subject; bare?: boolean; onchange?: () => void | Promise<void> } = $props();
 
@@ -21,7 +23,8 @@
   let busy = $state(false);
 
   const permission = $derived(subject.kind === 'installation' ? 'settings.manage' : 'profiles.manage');
-  const installation = $derived(subject.kind === 'installation');
+  const installation = $derived(subject.kind === 'installation' && !subject.node);
+  const node = $derived(subject.kind === 'installation' ? (subject.node ?? null) : null);
 
   async function read() {
     if (subject.kind === 'installation') return call(api.GET('/api/v1/vpn-policies/installation'));
@@ -34,7 +37,7 @@
 
   function write(changes: { key: string; value: unknown; revision: number }[]) {
     const headers = { 'Idempotency-Key': key() };
-    const body = { changes };
+    const body = { changes: node ? changes.map((change) => ({ ...change, node_key: node })) : changes };
     if (subject.kind === 'installation') return call(api.PATCH('/api/v1/vpn-policies/installation', { headers, body }));
     if (subject.kind === 'profile') {
       return call(api.PATCH('/api/v1/profiles/{profile_id}/vpn-policies',
@@ -47,7 +50,15 @@
   async function load() {
     failure = '';
     try {
-      keys = ((await read()) as unknown as { keys: PolicyKey[] }).keys;
+      const result = (await read()) as unknown as { keys: PolicyKey[]; values: PolicyValue[] };
+      // For a node, its own values stand in for the subject's, and the
+      // installation's effective value is what they fall back to.
+      keys = node ? result.keys.filter((item) => NODE_KEYS.includes(item.key)
+        && (subject.kind !== 'installation' || subject.xray !== false || !item.key.startsWith('xray'))).map((item) => {
+        const own = result.values.find((value) => value.key === item.key && value.node_key === node && value.protocol == null);
+        const effective = own ? own.value : (item.value ?? item.effective);
+        return { ...item, value: own?.value ?? null, revision: own?.revision ?? 0, effective, default: item.value ?? item.effective };
+      }) : result.keys;
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
     }
@@ -85,7 +96,7 @@
   }
 
   function source(item: PolicyKey) {
-    if (item.value != null) return t(installation ? 'policies.set' : 'policies.own');
+    if (item.value != null) return t(installation ? 'policies.set' : node ? 'policies.for_node' : 'policies.own');
     if (item.tariff != null) return t('policies.from_tariff');
     return t(installation ? 'policies.by_default' : subject.kind === 'device' ? 'policies.from_profile' : 'policies.inherited');
   }
@@ -144,7 +155,7 @@
   {#if !keys}
     {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
   {:else if draft}
-    <form onsubmit={save}>
+    <form onsubmit={save} transition:unfold>
       {#each GROUPS as group (group)}
         {#if fields.some((field) => field.group === group)}
           <h3>{t('policies.group_' + group)}</h3>

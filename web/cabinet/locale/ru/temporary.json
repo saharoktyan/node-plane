@@ -24,5 +24,6 @@
   "status_expired": "срок истёк",
   "status_revoked": "отозван",
   "status_cancelled": "отменён",
-  "until_value": "до {time}"
+  "until_value": "до {time}",
+  "hide": "Скрыть"
 }

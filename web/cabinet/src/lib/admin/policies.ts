@@ -40,6 +40,12 @@ export const FIELDS: Field[] = [
   { key: 'xray.bittorrent', group: 'xray', type: 'choice', values: ['allow', 'block'] }
 ];
 
+/** Keys the installation may set for one node. */
+export const NODE_KEYS = ['connections.mode', 'connections.max_sources', 'speed.up_kbit', 'speed.down_kbit', 'xray.bittorrent'];
+
+/** A stored value of a subject, global or for one node. */
+export type PolicyValue = { key: string; node_key: string | null; protocol: string | null; value: unknown; revision: number };
+
 export const GROUPS = ['devices', 'connections', 'quota', 'speed', 'xray'] as const;
 const GIB = 2 ** 30;
 

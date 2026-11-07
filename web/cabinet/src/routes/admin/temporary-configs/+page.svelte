@@ -3,6 +3,7 @@
      background; once active it is shown as a link, a QR code and files, and
      can be revoked before it expires. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
   import Config from '$lib/services/vpn/Config.svelte';
@@ -27,7 +28,9 @@
   let creating = $state(false);
   let draft = $state({ node: '', transport: '', duration: 86_400 });
   let revoking = $state<string | null>(null);
-  let shown = $state<{ item: Temporary; artifact: Artifact } | null>(null);
+  // Configurations read from the node, kept after closing so the panel folds with its content.
+  let kept = $state<Record<string, Artifact>>({});
+  let opened = $state<string | null>(null);
 
   async function load() {
     try {
@@ -86,12 +89,17 @@
   }
 
   async function show(item: Temporary) {
+    if (opened === item.id) {
+      opened = null;
+      return;
+    }
     busy = true;
     failure = '';
     try {
       const artifact = (await call(api.GET('/api/v1/system/temporary-configs/{config_id}/artifact',
         { params: { path: { config_id: item.id } } }))) as unknown as Artifact;
-      shown = { item, artifact };
+      kept[item.id] = artifact;
+      opened = item.id;
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
     } finally {
@@ -105,7 +113,7 @@
     failure = '';
     try {
       await call(api.POST('/api/v1/system/temporary-configs/{config_id}/revoke', { params: { path: { config_id: revoking } } }));
-      if (shown?.item.id === revoking) shown = null;
+      if (opened === revoking) opened = null;
       revoking = null;
       await load();
     } catch (error) {
@@ -114,6 +122,15 @@
       busy = false;
     }
   }
+
+  // The panel members see takes an issuance and its artifact; a temporary one reads as both.
+  // AWG shows its AmneziaVPN key as the link and QR, with both files, whichever file was asked for.
+  const issuance = (item: Temporary) => ({ id: item.id, node_key: item.node_key, protocol: item.protocol,
+    transport: item.protocol === 'awg' ? 'vpn' : item.transport, status: 'ready', expires_at: item.expires_at ?? '', profile_id: '' }) as Schemas['ConfigIssuanceOutput'];
+  const artifact = (item: Temporary, value: Artifact): Schemas['ConfigArtifactOutput'] => ({ content: item.protocol === 'awg'
+      ? (value.files.find((file) => file.filename.endsWith('.vpn'))?.content ?? value.content) : value.content,
+    files: value.files, filename: value.files[0]?.filename ?? null, media_type: 'text/plain',
+    display_name: (item.node_title ?? item.node_key) + ' · ' + label(item.protocol, item.transport) + ' · Temp' });
 
   const tone = (status: string) => (status === 'active' ? 'ok' : status.includes('blocked') ? 'danger' : 'warn');
 </script>
@@ -127,7 +144,7 @@
 {#if failure}<p class="error">{failure}</p>{/if}
 
 {#if creating}
-  <section class="block">
+  <section class="block" transition:unfold>
     <h2>{t('temporary.create')}</h2>
     <form class="form" onsubmit={create}>
       <label>{t('temporary.server')}
@@ -161,13 +178,6 @@
   </section>
 {/if}
 
-{#if shown}
-  <div class="shown"><Config issuance={{ id: shown.item.id, node_key: shown.item.node_key, protocol: shown.item.protocol,
-    transport: shown.item.transport, status: 'ready', expires_at: shown.artifact.expires_at, profile_id: '' } as Schemas['ConfigIssuanceOutput']}
-    artifact={{ content: shown.artifact.content, files: shown.artifact.files, filename: shown.artifact.files[0]?.filename ?? null,
-      media_type: 'text/plain', display_name: (shown.item.node_title ?? shown.item.node_key) + ' · ' + label(shown.item.protocol, shown.item.transport) }}
-    onclose={() => (shown = null)} /></div>
-{/if}
 
 {#if items === null}
   {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
@@ -183,11 +193,20 @@
               <span class="badge {tone(item.status)}">{t('temporary.status_' + item.status)}</span>
               {#if item.unavailable_reason} · {t('temporary.unavailable_' + item.unavailable_reason)}{/if}</span></span>
           {#if item.status === 'active' && item.artifact_available !== false}
-            <button disabled={busy} onclick={() => show(item)}>{t('temporary.show')}</button>
+            <button disabled={busy} aria-expanded={opened === item.id} onclick={() => show(item)}>
+              {t(opened === item.id ? 'temporary.hide' : 'temporary.show')}</button>
           {/if}
           {#if !['revoking', 'expired', 'revoked', 'cancelled'].includes(item.status)}
             <button class="danger" onclick={() => (revoking = item.id)}>{t('temporary.revoke')}</button>
           {/if}
+        </div>
+        <!-- The configuration slides open under its row, as a member's does. -->
+        <div class="fold" class:open={opened === item.id} inert={opened !== item.id}>
+          <div>
+            {#if kept[item.id]}
+              <Config issuance={issuance(item)} artifact={artifact(item, kept[item.id])} onclose={() => (opened = null)} />
+            {/if}
+          </div>
         </div>
         {#if revoking === item.id}
           <Confirm text={t(item.protocol === 'xray' && item.revocation_mode !== 'connections_closed'
@@ -207,8 +226,25 @@
     margin-top: -0.5rem;
     max-width: 44rem;
   }
-  .shown {
-    margin-bottom: 1.5rem;
+  /* A panel folds to nothing; a grid row eases between none and its height. */
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows 0.4s ease, opacity 0.25s ease;
+  }
+  .fold.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .fold > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fold {
+      transition: opacity 0.15s;
+    }
   }
   .form {
     display: grid;

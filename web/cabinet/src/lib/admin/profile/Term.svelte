@@ -2,6 +2,7 @@
      days more, or forever), the tariff it is on and how assigning one moves
      the term, and a renewal the person asked for. -->
 <script lang="ts">
+  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -94,7 +95,7 @@
       {/if}
     </div>
     {#if editing === 'term'}
-      <form class="edit" onsubmit={(event) => { event.preventDefault(); setTerm(until ? endOf(until) : null); }}>
+      <form class="edit" transition:unfold onsubmit={(event) => { event.preventDefault(); setTerm(until ? endOf(until) : null); }}>
         <div class="row">
           <input type="date" bind:value={until} aria-label={t('profiles.expires')} />
           <button type="button" onclick={() => plus(30)}>+30</button>
@@ -116,7 +117,7 @@
       {/if}
     </div>
     {#if editing === 'tariff'}
-      <form class="edit" onsubmit={(event) => { event.preventDefault(); setTariff(); }}>
+      <form class="edit" transition:unfold onsubmit={(event) => { event.preventDefault(); setTariff(); }}>
         <label>{t('profiles.tariff')}
           <select bind:value={draft.tariff}>
             <option value="">{t('profiles.no_tariff')}</option>
