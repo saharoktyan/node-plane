@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0-alpha.1
+## 0.6.0-alpha.2
 
 - The relay can serve the web cabinet beside the API, on the same domain:
   given the cabinet's built files (`NODE_PLANE_RELAY_CABINET_DIR`) it answers
