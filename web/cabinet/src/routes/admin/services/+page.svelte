@@ -25,7 +25,7 @@
           <tbody>
             {#each items as item (item.service)}
               <tr>
-                <td>{serviceName(item.service)}</td>
+                <td>{#if item.service === 'vpn'}<a href="/admin/services/vpn">{serviceName(item.service)}</a>{:else}{serviceName(item.service)}{/if}</td>
                 <td>{item.state ? t('admin.state_' + item.state) : '—'}</td>
                 <td>{item.instances ?? '—'}</td>
               </tr>

@@ -55,5 +55,6 @@
   "xray_bittorrent_allow": "allowed",
   "xray_bittorrent_block": "blocked",
   "device_title": "Limits of {name}",
-  "for_node": "for this server"
+  "for_node": "for this server",
+  "in_tariff": "in the tariff"
 }

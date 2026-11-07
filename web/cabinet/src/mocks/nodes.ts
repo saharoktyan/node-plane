@@ -239,6 +239,5 @@ export const nodeHandlers = [
     store().nodes = store().nodes.filter((node) => node.key !== key);
     removals.set(key, { node_key: key, status: 'removed_registry_only' });
     return { node_key: key, mode: 'registry_only' };
-  })),
-  http.get('/api/v1/system/installation-defaults', guarded(() => ({ revision: 1, settings: { xray_sni: 'www.cloudflare.com' } })))
+  }))
 ];

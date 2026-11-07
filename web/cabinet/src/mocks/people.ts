@@ -4,6 +4,7 @@ import { http, HttpResponse, delay, type PathParams } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
 import { choice } from './scenario';
+import { localized } from './localized';
 
 type Account = Schemas['AdminAccountOutput'];
 const now = () => new Date().toISOString();
@@ -23,6 +24,17 @@ let state: {
   registration: Schemas['RegistrationSettings'];
   bot: Schemas['TelegramBotUsername'];
 } | null = null;
+
+// The bot's messages as the controller starts with them, every language for an editor.
+function policy(): Schemas['AccessRequestPolicyOutput'] {
+  const gate = localized({ source: 'en', fallback: {}, texts: { en: 'Authorization is required to use this bot.',
+    ru: 'Чтобы пользоваться ботом, нужна авторизация.' } });
+  const welcome = localized({ source: 'en', fallback: {}, texts: { en: 'Request access to use this bot.',
+    ru: 'Запросите доступ для использования бота.' } });
+  const lang = choice().lang;
+  return { enabled: true, notify_requests: true, telegram: true, gate_message: gate.shown[lang], welcome_message: welcome.shown[lang],
+    gate_messages: gate, welcome_messages: welcome };
+}
 
 function store() {
   const { scenario } = choice();
@@ -62,8 +74,7 @@ function store() {
         result: { vpn: 'choose', telegram: null, password: 'dropped', login: 'dropped', passkeys_removed: 1, keep_main_only: false }
       }
     }],
-    policy: { enabled: true, notify_requests: true, telegram: true, gate_message: '', welcome_message: '',
-      gate_messages: null, welcome_messages: null },
+    policy: policy(),
     registration: { open: false, cleanup_days: null },
     bot: { telegram_enabled: true, username: 'node_plane_vpn_bot' }
   };
@@ -133,14 +144,19 @@ export const peopleHandlers = [
   http.get('/api/v1/system/access-requests', guarded(() => store().policy)),
   http.patch('/api/v1/system/access-requests', guarded(async (request) => {
     const body = (await request.json()) as Schemas['AccessRequestPolicyInput'];
-    Object.assign(store().policy, Object.fromEntries(Object.entries(body).filter(([, value]) => value != null)));
-    return store().policy;
+    const policy = store().policy;
+    if (body.enabled != null) policy.enabled = body.enabled;
+    if (body.notify_requests != null) policy.notify_requests = body.notify_requests;
+    for (const name of ['welcome', 'gate'] as const) {
+      const input = body[`${name}_messages`];
+      if (!input) continue;
+      const value = localized(input);
+      policy[`${name}_messages`] = value;
+      policy[`${name}_message`] = value.shown[choice().lang] ?? '';
+    }
+    return policy;
   })),
 
-  http.get('/api/v1/tariffs', guarded(() => ({ items: [
-    { id: 't1', title: choice().lang === 'ru' ? 'Месяц' : 'Month', titles: null, description: '', descriptions: null,
-      duration_days: 30, revision: 1, profiles: 3, access_policy: {}, policies: {}, created_at: now(), updated_at: now() }
-  ], keys: [] }))),
   http.get('/api/v1/invites', guarded(() => ({ items: store().invites }))),
   http.post('/api/v1/invites', guarded(async (request) => {
     const body = (await request.json()) as Schemas['InviteInput'];

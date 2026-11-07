@@ -8,6 +8,7 @@
   import Policies from '$lib/admin/Policies.svelte';
   import Install from '$lib/admin/node/Install.svelte';
   import Charts from '$lib/admin/node/Charts.svelte';
+  import Sections from '$lib/ui/Sections.svelte';
   import Maintenance from '$lib/admin/node/Maintenance.svelte';
   import Temporary from '$lib/admin/Temporary.svelte';
   import Settings from '$lib/admin/node/Settings.svelte';
@@ -205,17 +206,14 @@
            the accent. -->
       {#if account.may('nodes.manage')}
         <section class="block">
-          <div class="block-head">
-            <div class="sections" role="tablist" aria-label={t('nodes.manage')}>
-              {#each panels as name (name)}
-                <button role="tab" aria-selected={panel === name} class:current={panel === name}
-                  onclick={() => { panel = name; first = false; }}>{t('nodes.' + name)}</button>
-              {/each}
-            </div>
-            {#if pendingSettings(node) && !(operation && ACTIVE.includes(operation[1].status))}
-              <button class="primary" disabled={busy} onclick={apply}>{t('nodes.apply')}</button>
-            {/if}
-          </div>
+          <Sections names={panels} bind:current={() => panel, (name) => { panel = name; first = false; }}
+            label={t('nodes.manage')} title={(name) => t('nodes.' + name)}>
+            {#snippet aside()}
+              {#if pendingSettings(node!) && !(operation && ACTIVE.includes(operation[1].status))}
+                <button class="primary" disabled={busy} onclick={apply}>{t('nodes.apply')}</button>
+              {/if}
+            {/snippet}
+          </Sections>
           {#key panel + reset}
             {#if panel === 'settings'}
               <Settings {node} appear={first} oncancel={() => (reset += 1)} onsaved={async () => { reset += 1; toast(t('nodes.saved')); await load(); }} />
@@ -263,36 +261,5 @@
   .split {
     margin-right: 1rem;
     font-size: 13px;
-  }
-  .sections {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 1.25rem;
-  }
-  /* The sections read as the heading they replace. */
-  .sections button {
-    font-family: var(--serif);
-    font-size: 1.25rem;
-    font-weight: 500;
-    color: var(--muted);
-    text-decoration: none;
-    padding: 0 0 0.2rem;
-    border-bottom: 2px solid transparent;
-    transition: color 0.2s, border-color 0.2s;
-  }
-  .sections button:hover {
-    color: var(--text);
-  }
-  .sections button.current {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-  }
-  @media (max-width: 640px) {
-    .sections {
-      gap: 0.25rem 1rem;
-    }
-    .sections button {
-      font-size: 1.1rem;
-    }
   }
 </style>

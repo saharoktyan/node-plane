@@ -1,0 +1,5 @@
+{
+  "main_language": "main",
+  "shows_main": "Without its own text, the {language} text shows here.",
+  "main_needed": "The main language needs a text."
+}

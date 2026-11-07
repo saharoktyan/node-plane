@@ -136,5 +136,10 @@
   "requests_renewal": "Renewal",
   "no_renewals": "No renewals asked for.",
   "renewal_line": "until {until} · {tariff}",
-  "give_vpn_done": "The VPN profile is created."
+  "give_vpn_done": "The VPN profile is created.",
+  "welcome_message": "Welcome in the bot",
+  "gate_message": "Message while requests are closed",
+  "welcome_hint": "Shown in the bot to someone who has not asked for access yet.",
+  "gate_hint": "Shown in the bot to a newcomer while requests are off.",
+  "message_needed": "Write the text in the main language."
 }

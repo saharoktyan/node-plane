@@ -1,6 +1,6 @@
-<!-- VPN limits of the installation, a profile or a device: each key's value
-     in effect and where it comes from, and an own value set or removed. A
-     removed value falls back to the tariff, the profile or the
+<!-- VPN limits of the installation, a tariff, a profile or a device: each
+     key's value in effect and where it comes from, and an own value set or
+     removed. A removed value falls back to the tariff, the profile or the
      installation, as the controller resolves it. -->
 <script lang="ts">
   import { toast } from '$lib/ui/toast.svelte';
@@ -12,8 +12,11 @@
   import { FIELDS, NODE_KEYS, fromInput, shown, toInput, type Field, type PolicyKey, type PolicyValue } from './policies';
 
   // The installation's values, or with `node` its values for that node only.
+  // A tariff keeps its values in itself, over the installation's; `allowed`
+  // are the keys a tariff may set.
   type Subject = { kind: 'installation'; node?: string; xray?: boolean } | { kind: 'profile'; profileId: string }
-    | { kind: 'device'; profileId: string; deviceId: string };
+    | { kind: 'device'; profileId: string; deviceId: string } | { kind: 'tariff'; id: string; allowed: string[] };
+  type Tariff = { revision: number; policies: Record<string, unknown> };
   let { subject, bare = false, onchange }: { subject: Subject; bare?: boolean; onchange?: () => void | Promise<void> } = $props();
 
   let keys = $state<PolicyKey[] | null>(null);
@@ -22,12 +25,19 @@
   let busy = $state(false);
   const formId = 'policies-' + Math.random().toString(36).slice(2);
 
-  const permission = $derived(subject.kind === 'installation' ? 'settings.manage' : 'profiles.manage');
+  const permission = $derived(subject.kind === 'installation' || subject.kind === 'tariff' ? 'settings.manage' : 'profiles.manage');
+  let tariff = $state<Tariff | null>(null);
   const installation = $derived(subject.kind === 'installation' && !subject.node);
   const node = $derived(subject.kind === 'installation' ? (subject.node ?? null) : null);
 
   async function read() {
     if (subject.kind === 'installation') return call(api.GET('/api/v1/vpn-policies/installation'));
+    if (subject.kind === 'tariff') {
+      const [installation, own] = await Promise.all([call(api.GET('/api/v1/vpn-policies/installation')),
+        call(api.GET('/api/v1/tariffs/{tariff_id}', { params: { path: { tariff_id: subject.id } } }))]);
+      tariff = own as unknown as Tariff;
+      return installation;
+    }
     if (subject.kind === 'profile') {
       return call(api.GET('/api/v1/profiles/{profile_id}/vpn-policies', { params: { path: { profile_id: subject.profileId } } }));
     }
@@ -36,6 +46,15 @@
   }
 
   function write(changes: { key: string; value: unknown; revision: number }[]) {
+    if (subject.kind === 'tariff') {
+      const policies = { ...tariff?.policies };
+      for (const change of changes) {
+        if (change.value == null) delete policies[change.key];
+        else policies[change.key] = change.value;
+      }
+      return call(api.PATCH('/api/v1/tariffs/{tariff_id}', { params: { path: { tariff_id: subject.id } },
+        headers: { 'If-Match': `"${tariff?.revision ?? 0}"` }, body: { policies } }));
+    }
     const headers = { 'Idempotency-Key': key() };
     const body = { changes: node ? changes.map((change) => ({ ...change, node_key: node })) : changes };
     if (subject.kind === 'installation') return call(api.PATCH('/api/v1/vpn-policies/installation', { headers, body }));
@@ -53,6 +72,15 @@
       const result = (await read()) as unknown as { keys: PolicyKey[]; values: PolicyValue[] };
       // For a node, its own values stand in for the subject's, and the
       // installation's effective value is what they fall back to.
+      if (subject.kind === 'tariff') {
+        const allowed = subject.allowed;
+        keys = result.keys.filter((item) => allowed.includes(item.key)).map((item) => {
+          const own = tariff?.policies[item.key] ?? null;
+          const base = item.value ?? item.default;
+          return { ...item, value: own, revision: tariff?.revision ?? 0, effective: own ?? base, default: base, tariff: undefined };
+        });
+        return;
+      }
       keys = node ? result.keys.filter((item) => NODE_KEYS.includes(item.key)
         && (subject.kind !== 'installation' || subject.xray !== false || !item.key.startsWith('xray'))).map((item) => {
         const own = result.values.find((value) => value.key === item.key && value.node_key === node && value.protocol == null);
@@ -96,7 +124,8 @@
   }
 
   function source(item: PolicyKey) {
-    if (item.value != null) return t(installation ? 'policies.set' : node ? 'policies.for_node' : 'policies.own');
+    if (item.value != null) return t(installation ? 'policies.set' : node ? 'policies.for_node'
+      : subject.kind === 'tariff' ? 'policies.in_tariff' : 'policies.own');
     if (item.tariff != null) return t('policies.from_tariff');
     return t(installation ? 'policies.by_default' : subject.kind === 'device' ? 'policies.from_profile' : 'policies.inherited');
   }

@@ -7,7 +7,9 @@
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { personName } from '$lib/admin/people';
-  import { t } from '$lib/i18n/index.svelte';
+  import Localized from '$lib/admin/Localized.svelte';
+  import { draftOf, inputOf, shownText, type Draft } from '$lib/admin/localized';
+  import { i18n, t } from '$lib/i18n/index.svelte';
   import Confirm from '$lib/ui/Confirm.svelte';
   import { errorText } from '$lib/ui/errors';
   import { date, dateTime, key } from '$lib/ui/format';
@@ -23,6 +25,9 @@
   let policy = $state<Schemas['AccessRequestPolicyOutput'] | null>(null);
   let failure = $state('');
   let busy = $state(false);
+  // The bot's message to newcomers: a welcome while requests are open, else the stub.
+  let message = $state<Draft | null>(null);
+  let languages = $state<string[]>(['en', 'ru']);
   let confirming = $state<{ id: string; decision: 'approve' | 'reject'; key: string } | null>(null);
 
   async function load() {
@@ -33,8 +38,23 @@
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
     }
-    if (account.may('settings.manage'))
+    if (account.may('settings.manage')) {
       policy = await call(api.GET('/api/v1/system/access-requests')).catch(() => null);
+      const system = await call(api.GET('/api/v1/system/languages')).catch(() => null);
+      if (system) languages = system.languages;
+    }
+  }
+
+  const messageField = $derived(policy?.enabled ? 'welcome_messages' : 'gate_messages');
+  async function saveMessage() {
+    if (!message) return;
+    const texts = inputOf(message, languages);
+    if (!texts) {
+      failure = t('people.message_needed');
+      return;
+    }
+    await setPolicy({ [messageField]: texts });
+    if (!failure) message = null;
   }
   load();
 
@@ -170,12 +190,32 @@
   <section class="block">
     <h2>{t('people.intake')}</h2>
     <label class="check"><input type="checkbox" checked={policy.enabled} disabled={busy}
-      onchange={(event) => setPolicy({ enabled: event.currentTarget.checked })} />
+      onchange={(event) => { message = null; setPolicy({ enabled: event.currentTarget.checked }); }} />
       {t('people.intake_open')}</label>
     <p class="muted small">{t('people.intake_hint')}</p>
     <label class="check"><input type="checkbox" checked={policy.notify_requests ?? false} disabled={busy}
       onchange={(event) => setPolicy({ notify_requests: event.currentTarget.checked })} />
       {t('people.intake_notify')}</label>
+    {#if policy.telegram}
+      {@const stored = policy[messageField]}
+      <div class="block-head message"><h3>{t(policy.enabled ? 'people.welcome_message' : 'people.gate_message')}</h3>
+        <span class="row">
+          {#if message}
+            <button class="primary" disabled={busy} onclick={saveMessage}>{t('people.save')}</button>
+            <button onclick={() => (message = null)}>{t('common.cancel')}</button>
+          {:else}
+            <button onclick={() => (message = draftOf(stored, languages, i18n.language))}>{t('people.change')}</button>
+          {/if}
+        </span>
+      </div>
+      <p class="muted small">{t(policy.enabled ? 'people.welcome_hint' : 'people.gate_hint')}</p>
+      {#if message}
+        <Localized bind:draft={message} {languages} label={t(policy.enabled ? 'people.welcome_message' : 'people.gate_message')}
+          max={500} multiline named={false} />
+      {:else}
+        <p class="text">{shownText(stored, i18n.language) || (policy.enabled ? policy.welcome_message : policy.gate_message)}</p>
+      {/if}
+    {/if}
   </section>
 {/if}
 
@@ -186,6 +226,15 @@
   .small {
     font-size: 13px;
     margin-left: 0.5rem;
+  }
+  .message {
+    margin-top: 1.5rem;
+  }
+  .message h3 {
+    margin: 0;
+  }
+  .text {
+    white-space: pre-line;
   }
   input.days {
     width: 4.5rem;
