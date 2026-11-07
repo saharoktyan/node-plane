@@ -29,7 +29,7 @@
   "profile_not_synced": "The servers are still applying your access. Try again in a minute.",
   "node_settings_pending": "The server is applying new settings. Try again in a minute.",
   "node_agent_unavailable": "The server does not answer now. Try another one or later.",
-  "config_stale": "The configuration changed meanwhile. Get it again.",
+  "config_stale": "The configuration no longer matches the node.",
   "config_expired": "This configuration page expired. Get it again.",
   "config_not_ready": "The configuration is not ready yet.",
   "configuration_unavailable": "This configuration is unavailable.",
@@ -67,5 +67,6 @@
   "tariff_not_found": "No such tariff.",
   "quota_not_set": "The quota has no period yet.",
   "invalid_policy_value": "A limit's value is out of range.",
-  "account_profile_exists": "This account already has a VPN profile."
+  "account_profile_exists": "This account already has a VPN profile.",
+  "config_unavailable": "The configuration cannot be read from the node now."
 }

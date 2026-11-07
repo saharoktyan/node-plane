@@ -127,3 +127,63 @@ export const policyHandlers = [
     return quota(id);
   }))
 ];
+
+// Temporary configurations: made in the background, active after a moment.
+type Temporary = { id: string; node_key: string; node_title: string; protocol: string; transport: string;
+  duration_seconds: number; status: string; created_at: string; expires_at: string | null; error_code: null;
+  revocation_mode: string };
+let temporary: { scenario: string; items: Temporary[] } | null = null;
+
+function temporaries() {
+  const { scenario } = choice();
+  if (temporary?.scenario === scenario) return temporary;
+  const at = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+  temporary = { scenario, items: scenario === 'empty' ? [] : [
+    { id: 't1000000-0000-4000-8000-000000000001', node_key: 'de1-0', node_title: 'Frankfurt 1', protocol: 'xray',
+      transport: 'tcp', duration_seconds: 86_400, status: 'active', created_at: at(-5), expires_at: at(19), error_code: null,
+      revocation_mode: 'new_connections_only' },
+    { id: 't1000000-0000-4000-8000-000000000002', node_key: 'nl1-2', node_title: 'Amsterdam 3', protocol: 'awg',
+      transport: 'conf', duration_seconds: 259_200, status: 'active', created_at: at(-30), expires_at: at(42), error_code: null,
+      revocation_mode: 'peer_removed' }
+  ] };
+  return temporary;
+}
+
+function later(item: Temporary, status: string) {
+  setTimeout(() => {
+    if (status === 'gone') temporaries().items = temporaries().items.filter((entry) => entry !== item);
+    else item.status = status;
+  }, 3500);
+}
+
+export const temporaryHandlers = [
+  http.get('/api/v1/system/temporary-configs', guarded(() => {
+    const items = temporaries().items;
+    return { items, total: items.length, page: 0, page_size: 100 };
+  })),
+  http.post('/api/v1/system/temporary-configs', guarded(async (request) => {
+    const body = (await request.json()) as { node_key: string; protocol: string; transport: string; duration_seconds: number };
+    const item: Temporary = { id: crypto.randomUUID(), ...body, node_title: body.node_key, status: 'queued',
+      created_at: new Date().toISOString(), expires_at: new Date(Date.now() + body.duration_seconds * 1000).toISOString(),
+      error_code: null, revocation_mode: body.protocol === 'awg' ? 'peer_removed' : 'new_connections_only' };
+    temporaries().items.push(item);
+    later(item, 'active');
+    return item;
+  })),
+  http.get('/api/v1/system/temporary-configs/:id/artifact', guarded((_, { id }) => {
+    const item = temporaries().items.find((entry) => entry.id === id);
+    if (!item || item.status !== 'active') return error(503, 'config_unavailable');
+    const content = item.protocol === 'xray'
+      ? `vless://3f1c6a52-0000-4000-8000-${id.slice(0, 12)}@de1.example.net:443?type=${item.transport}&security=reality#${item.node_title}%20Temp`
+      : `[Interface]\nPrivateKey = mock\nAddress = 10.8.0.42/32\n\n[Peer]\nEndpoint = nl1.example.net:51820\n`;
+    return { content, expires_at: item.expires_at, revocation_mode: item.revocation_mode,
+      files: [{ filename: `${item.node_title} · ${item.protocol === 'awg' ? 'AWG' : 'VLESS'} · Temp.${item.protocol === 'awg' ? 'conf' : 'txt'}`, content }] };
+  })),
+  http.post('/api/v1/system/temporary-configs/:id/revoke', guarded((_, { id }) => {
+    const item = temporaries().items.find((entry) => entry.id === id);
+    if (!item) return error(404, 'resource_not_found');
+    item.status = 'revoking';
+    later(item, 'gone');
+    return item;
+  }))
+];

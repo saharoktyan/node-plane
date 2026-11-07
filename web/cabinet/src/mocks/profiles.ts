@@ -33,7 +33,7 @@ function store() {
     expires_at: item.role === 'admin' ? null : index === 1 ? later(17) : later(10 + index * 7)
   }));
   const entries = owned.map((profile, index) => ({
-    profile, tariff: index % 2 === 1 ? 't1' : null, renewal: index === 1 ? crypto.randomUUID() : null,
+    profile, tariff: index % 2 === 1 ? 't1' : null, renewal: index === 1 || index === 2 ? crypto.randomUUID() : null,
     policy: index === 1
       ? { rules: [{ scope: 'region' as const, region_id: 'europe', protocols: ['awg' as const, 'xray' as const] }],
         explicit_grants: [{ node_key: 'us1-3', protocol: 'xray' }], exclusions: [{ node_key: 'de1-0', protocol: 'awg' }] }
@@ -150,6 +150,15 @@ export const profileHandlers = [
       entry.profile.expires_at = new Date(from + 30 * 86_400_000).toISOString();
     }
     return applied(entry);
+  })),
+  http.get('/api/v1/renewal-requests', guarded(() => {
+    const items = store().entries.filter((entry) => entry.renewal).map((entry) => ({ id: entry.renewal!,
+      profile_id: entry.profile.id, account_id: entry.profile.owner_account_id, status: 'pending',
+      created_at: '2026-11-06T18:20:00+00:00', decided_at: null, days: null, expires_at: null,
+      display_name: entry.profile.display_name, profile_expires_at: entry.profile.expires_at,
+      profile_revision: entry.profile.desired_revision,
+      tariff: entry.tariff ? { title: choice().lang === 'ru' ? 'Месяц' : 'Month', duration_days: 30 } : null }));
+    return { total: items.length, offset: 0, items };
   })),
   http.post('/api/v1/renewal-requests/:id/approve', guarded(async (request, { id }) => {
     const entry = store().entries.find((item) => item.renewal === id);

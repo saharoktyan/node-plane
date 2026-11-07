@@ -40,7 +40,7 @@ try {
     await page.click('button.primary');
     await page.waitForURL(`${base}/`);
     const pages = ['/', '/inbox', '/settings', ...(role === 'member' ? [] : ['/admin', '/admin/users', '/admin/requests',
-      '/admin/invites', '/admin/merges', '/admin/nodes', '/admin/services'])];
+      '/admin/invites', '/admin/merges', '/admin/nodes', '/admin/temporary-configs', '/admin/services'])];
     if (role !== 'member' && scenario !== 'empty') pages.push('/admin/users/a0-0000-4000-8000-000000000000', '/admin/users/a1-0000-4000-8000-000000000000/vpn', '/admin/merges/m1000000-0000-4000-8000-000000000001');
     if (scenario !== 'empty' && scenario !== 'errors') pages.splice(1, 0, '/services/6f1c1a52-8f3e-4c8e-9b8a-0f6f2d0c1a11');
     if (scenario === 'many') pages.splice(2, 0, '/services/9a7c2d1e-3b4f-4a5b-8c6d-7e8f9a0b1c22');

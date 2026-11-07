@@ -132,5 +132,9 @@
   "give_vpn": "Дать VPN",
   "give_vpn_hint": "Создаёт VPN-профиль человека; серверы и срок задаются в нём.",
   "merge_asked": "Создана",
-  "merge_choose_vpn": "нужно выбрать VPN"
+  "merge_choose_vpn": "нужно выбрать VPN",
+  "requests_access": "Доступ",
+  "requests_renewal": "Продление",
+  "no_renewals": "Продлений никто не просил.",
+  "renewal_line": "до {until} · {tariff}"
 }

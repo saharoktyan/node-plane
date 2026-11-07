@@ -17,13 +17,15 @@
       { href: '/admin/users', label: t('admin.users'), icon: 'users', group: t('admin.group_people'),
         allowed: account.may('accounts.manage') || account.may('access_requests.manage') || account.may('profiles.manage') },
       { href: '/admin/requests', label: t('people.requests'), icon: 'requests', group: t('admin.group_people'),
-        allowed: account.may('access_requests.manage'), count: pending || undefined },
+        allowed: account.may('access_requests.manage') || account.may('profiles.manage'), count: pending || undefined },
       { href: '/admin/invites', label: t('people.invites'), icon: 'invites', group: t('admin.group_people'),
         allowed: account.may('accounts.manage') },
       { href: '/admin/merges', label: t('people.merges'), icon: 'merges', group: t('admin.group_people'),
         allowed: account.may('accounts.manage') && account.may('profiles.manage') },
       { href: '/admin/nodes', label: t('admin.nodes'), icon: 'nodes', group: t('admin.group_infrastructure'), allowed: account.may('nodes.inspect') },
       { href: '/admin/services', label: t('admin.services'), icon: 'catalog', group: t('admin.group_infrastructure'), allowed: true },
+      { href: '/admin/temporary-configs', label: t('temporary.title'), icon: 'temporary', group: t('admin.group_infrastructure'),
+        allowed: account.may('settings.manage') },
       { href: '/admin/announcements', label: t('admin.announcements'), icon: 'announcements', group: t('admin.group_system'), allowed: account.may('settings.manage') },
       { href: '/admin/backups', label: t('admin.backups'), icon: 'backups', group: t('admin.group_system'), allowed: account.may('settings.manage') },
       { href: '/admin/updates', label: t('admin.updates'), icon: 'updates', group: t('admin.group_system'), allowed: account.may('settings.manage'),
@@ -43,7 +45,10 @@
       call(api.GET('/api/v1/system/attention')).then((value) => (attention = value as typeof attention)).catch(() => {});
     if (me?.role === 'admin' && account.may('access_requests.manage'))
       call(api.GET('/api/v1/access-requests', { params: { query: { limit: 1 } } }))
-        .then((value) => (pending = value.pending_total ?? 0)).catch(() => {});
+        .then((value) => (pending += value.pending_total ?? 0)).catch(() => {});
+    if (me?.role === 'admin' && account.may('profiles.manage'))
+      call(api.GET('/api/v1/renewal-requests'))
+        .then((value) => (pending += (value as { total?: number }).total ?? 0)).catch(() => {});
     return me;
   });
 </script>

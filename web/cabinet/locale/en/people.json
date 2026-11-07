@@ -132,5 +132,9 @@
   "give_vpn": "Give VPN",
   "give_vpn_hint": "Creates the person's VPN profile; its servers and term are set on it.",
   "merge_asked": "Asked",
-  "merge_choose_vpn": "VPN to choose"
+  "merge_choose_vpn": "VPN to choose",
+  "requests_access": "Access",
+  "requests_renewal": "Renewal",
+  "no_renewals": "No renewals asked for.",
+  "renewal_line": "until {until} · {tariff}"
 }
