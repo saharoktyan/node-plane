@@ -9,5 +9,6 @@
   "actions": "Actions",
   "attention": "Needs attention",
   "cancel": "Cancel",
-  "press_again": "Press “{action}” again to go ahead."
+  "press_again": "Press “{action}” again to go ahead.",
+  "close": "Close"
 }

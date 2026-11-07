@@ -4,6 +4,7 @@ import { http, HttpResponse, delay } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
 import { peopleAccounts, peopleHandlers } from './people';
+import { nodeHandlers } from './nodes';
 import { policyHandlers, temporaryHandlers } from './policies';
 import { profileHandlers } from './profiles';
 import { choice } from './scenario';
@@ -72,6 +73,7 @@ export const handlers = [
   http.get('/api/v1/me/services', guarded(() => ({ items: fixtures.myServices(choice().scenario, choice().lang) }))),
   http.get('/api/v1/services', guarded(() => ({ items: fixtures.catalog(choice().role, choice().scenario) }))),
   http.post('/api/v1/me/access-requests', guarded(() => HttpResponse.json({}, { status: 201 }))),
+  ...nodeHandlers,
   ...profileHandlers,
   ...policyHandlers,
   ...temporaryHandlers,

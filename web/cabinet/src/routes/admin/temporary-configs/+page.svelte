@@ -198,13 +198,14 @@
           {/if}
         </div>
         <!-- The configuration slides open under its row, as a member's does. -->
-        <div class="fold" class:open={opened === item.id} inert={opened !== item.id}>
+        <!-- Not a div: the list's row style is for the rows only. -->
+        <section class="fold" class:open={opened === item.id} inert={opened !== item.id}>
           <div>
             {#if kept[item.id]}
-              <Config issuance={issuance(item)} artifact={artifact(item, kept[item.id])} onclose={() => (opened = null)} />
+              <div class="panel"><Config issuance={issuance(item)} artifact={artifact(item, kept[item.id])} onclose={() => (opened = null)} /></div>
             {/if}
           </div>
-        </div>
+        </section>
         {#if revoking === item.id}
           <Confirm text={t(item.protocol === 'xray' && item.revocation_mode !== 'connections_closed'
             ? 'temporary.revoke_confirm_vless' : 'temporary.revoke_confirm')} action={t('temporary.revoke')} cancel={() => (revoking = null)} />
@@ -236,6 +237,9 @@
   .fold > div {
     overflow: hidden;
     min-height: 0;
+  }
+  .panel {
+    padding: 0.5rem 0 0.75rem;
   }
   @media (prefers-reduced-motion: reduce) {
     .fold {
