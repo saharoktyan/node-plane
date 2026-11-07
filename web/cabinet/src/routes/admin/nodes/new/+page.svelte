@@ -59,7 +59,8 @@
     title: form.title.trim() && form.title.length <= 128 ? null : 'nodes.new_title_invalid',
     region: region && region.length <= 128 ? null : 'nodes.new_region_invalid',
     flag: [...form.flag].length <= 16 ? null : 'nodes.new_flag_invalid',
-    target: form.transport !== 'remote' || validTarget(form.target.trim().replace(/:22$/, '')) ? null : 'nodes.new_target_invalid',
+    // Optional: without it the agent installs from a one-time command.
+    target: form.transport !== 'remote' || !form.target.trim() || validTarget(form.target.trim().replace(/:22$/, '')) ? null : 'nodes.new_target_invalid',
     host: validHost(form.host.trim()) || (form.transport === 'local' && form.host.trim() === '.') ? null : 'nodes.new_host_invalid'
   });
   const ready = $derived(options && Object.values(errors).every((value) => !value) && !(available?.reason && !template));
@@ -73,7 +74,7 @@
     failure = '';
     const xray = form.protocols.includes('xray');
     const body: Record<string, unknown> = { key: form.key.trim(), title: form.title.trim(), region, flag: form.flag.trim(),
-      transport: form.transport, ssh_target: form.transport === 'remote' ? form.target.trim().replace(/:22$/, '') : null,
+      transport: form.transport, ssh_target: form.transport === 'remote' && form.target.trim() ? form.target.trim().replace(/:22$/, '') : null,
       protocols: ['awg', 'xray'].filter((item) => form.protocols.includes(item)),
       xray_transports: xray ? (options.defaults.xray_transports.length ? options.defaults.xray_transports : ['tcp', 'xhttp']) : [],
       settings: { ...options.defaults.settings, public_host: form.host.trim() } };
