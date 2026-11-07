@@ -872,6 +872,7 @@ struct SessionKey {
     user: String,
     account: String,
     state: std::path::PathBuf,
+    relay: Option<crate::relay_client::Link>,
 }
 impl SessionKey {
     fn from_request(request: &Request) -> Self {
@@ -881,6 +882,7 @@ impl SessionKey {
             user: request.user.clone(),
             account: request.workflow.account.clone(),
             state: request.state_dir.clone(),
+            relay: request.workflow.relay.clone(),
         }
     }
 }
@@ -925,16 +927,26 @@ impl Worker {
                                 status.store(1, Ordering::Release);
                                 let _ = events
                                     .send(Event::Stage("Connecting to the controller".into()));
-                                let mut ssh = ssh::connect(
-                                    &SshOptions {
-                                        host: request.host.clone(),
-                                        port: request.port,
-                                        user: request.user.clone(),
-                                        state_dir: request.state_dir.clone(),
-                                    },
-                                    UiInteraction::shared(events.clone()),
-                                )
-                                .await?;
+                                let mut ssh = match &request.workflow.relay {
+                                    Some(link) => SshSession::through_relay(
+                                        crate::relay_client::Transport::open(
+                                            link.clone(),
+                                            &request.state_dir,
+                                        )?,
+                                    ),
+                                    None => {
+                                        ssh::connect(
+                                            &SshOptions {
+                                                host: request.host.clone(),
+                                                port: request.port,
+                                                user: request.user.clone(),
+                                                state_dir: request.state_dir.clone(),
+                                            },
+                                            UiInteraction::shared(events.clone()),
+                                        )
+                                        .await?
+                                    }
+                                };
                                 ssh.persistent = true;
                                 session = Some((key, ssh));
                                 status.store(2, Ordering::Release);
@@ -1184,6 +1196,14 @@ async fn execute_inner(
             }
         };
         let result = async {
+            if session.relay.is_some() {
+                // Through the relay updates stay with SSH: only the version is known here.
+                let version = backend::request(session, &credential, Method::GET, "/api/v1/system/version", None, None).await?;
+                if let Command::Controller(profile, _) = &command {
+                    let _ = tx.send(Event::Nodes(Update::Controller(*profile,
+                        crate::controller::Command::Presence, json!({"current_version":version["version"]}))));
+                }
+            } else {
             let updates = backend::request(session, &credential, Method::GET, "/api/v1/system/updates", None, None).await?;
             if let Command::Controller(profile, _) = &command {
                 let _ = tx.send(Event::Nodes(Update::Controller(*profile,
@@ -1196,7 +1216,8 @@ async fn execute_inner(
                 }
                 return Err(error);
             }
-            if fresh_authorization && !request.host.contains(':') {
+            }
+            if fresh_authorization && session.relay.is_none() && !request.host.contains(':') {
                 // Publish the selected installation address for Telegram’s local-node shorthand.
                 // Older controllers may not expose this optional metadata endpoint yet.
                 if let Err(error) = backend::request(session, &credential, Method::PATCH, "/api/v1/system/controller-address", Some(json!({"host":request.host})), None).await

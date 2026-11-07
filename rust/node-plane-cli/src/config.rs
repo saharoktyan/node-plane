@@ -161,6 +161,8 @@ pub struct WorkflowOptions {
     pub stop: Arc<AtomicBool>,
     pub account: String,
     pub operation: Option<uuid::Uuid>,
+    /// The installation is reached through its relay, not SSH.
+    pub relay: Option<crate::relay_client::Link>,
 }
 impl Default for WorkflowOptions {
     fn default() -> Self {
@@ -170,6 +172,7 @@ impl Default for WorkflowOptions {
             stop: Arc::new(AtomicBool::new(false)),
             account: String::new(),
             operation: None,
+            relay: None,
         }
     }
 }

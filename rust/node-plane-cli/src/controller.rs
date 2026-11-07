@@ -1427,6 +1427,7 @@ mod tests {
     fn verification_resumes_only_for_the_same_saved_connection() {
         let state = tempfile::tempdir().unwrap();
         let installation = crate::connections::Installation {
+            relay: None,
             id: Uuid::new_v4(),
             name: "Test".into(),
             host: "controller.example".into(),

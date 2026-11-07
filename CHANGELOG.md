@@ -57,6 +57,12 @@
   Settings list the Workstations linked to the account, each with
   **Unlink**; the account card in the bot and Workstation shows how many
   there are and unlinks them all after asking.
+- Workstation reaches an installation through its relay: `node-plane link
+  https://<relay>` makes a key (kept 0600 in the state directory), shows the
+  code and the link to confirm it, waits, and saves the installation. Its
+  requests are then signed with that key instead of going over SSH; only
+  the API is available, so installing, updating and diagnosing stay with
+  SSH. A private CA for the relay is trusted from `NODE_PLANE_RELAY_CA_FILE`.
 
 - History for charts (migration r0049). Traffic is kept per day for each
   profile, node and protocol, and a device that moved traffic in the last

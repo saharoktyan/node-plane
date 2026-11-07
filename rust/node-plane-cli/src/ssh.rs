@@ -96,7 +96,10 @@ impl client::Handler for HostVerifier {
 }
 
 pub struct SshSession {
-    session: client::Handle<HostVerifier>,
+    /// None for an installation reached through its relay: there is no SSH
+    /// then, and only the API is available.
+    session: Option<client::Handle<HostVerifier>>,
+    pub relay: Option<crate::relay_client::Transport>,
     pub ssh_user: String,
     pub workstation_fingerprint: String,
     pub endpoint: String,
@@ -124,7 +127,8 @@ pub async fn connect(
     let (mut session, _) = open_connection(options, interaction.clone()).await?;
     if authenticate_key(&mut session, &options.user, key.clone()).await? {
         let mut connected = SshSession {
-            session,
+            session: Some(session),
+            relay: None,
             ssh_user: options.user.clone(),
             workstation_fingerprint,
             endpoint: endpoint(options),
@@ -140,7 +144,8 @@ pub async fn connect(
 
     let public_key = key.public_key().to_openssh()?;
     let mut initial = SshSession {
-        session,
+        session: Some(session),
+        relay: None,
         ssh_user: options.user.clone(),
         workstation_fingerprint: workstation_fingerprint.clone(),
         endpoint: self::endpoint(options),
@@ -172,7 +177,8 @@ pub async fn connect(
         "Public key was added, but a fresh SSH login rejected it. Check sshd AuthorizedKeysFile and public-key policy; the password was not saved"
     );
     Ok(SshSession {
-        session: verified,
+        session: Some(verified),
+        relay: None,
         ssh_user: options.user.clone(),
         workstation_fingerprint,
         endpoint: self::endpoint(options),
@@ -315,7 +321,8 @@ pub async fn connect_once(
         authenticate_existing(&mut session, options, interaction).await?;
     }
     Ok(SshSession {
-        session,
+        session: Some(session),
+        relay: None,
         ssh_user: options.user.clone(),
         workstation_fingerprint,
         endpoint: endpoint(options),
@@ -475,7 +482,7 @@ impl SshSession {
         let _timing = crate::timings::Stage::new("ssh_forward");
         let channel = timeout(
             AUTH_TIMEOUT,
-            self.session
+            self.handle()?
                 .channel_open_direct_tcpip("127.0.0.1", 8080, "127.0.0.1", 0),
         )
         .await
@@ -513,7 +520,7 @@ impl SshSession {
         input: Option<&[u8]>,
         mut on_output: impl FnMut(OutputStream, &[u8]),
     ) -> Result<i32> {
-        let mut channel = timeout(AUTH_TIMEOUT, self.session.channel_open_session())
+        let mut channel = timeout(AUTH_TIMEOUT, self.handle()?.channel_open_session())
             .await
             .context("Timed out opening an SSH command channel")?
             .context("Could not open an SSH command channel")?;
@@ -562,8 +569,30 @@ impl SshSession {
         i32::try_from(status).context("SSH server returned an invalid exit status")
     }
 
+    /// An installation reached through its relay, with its signed key.
+    pub fn through_relay(transport: crate::relay_client::Transport) -> Self {
+        Self {
+            session: None,
+            ssh_user: String::new(),
+            workstation_fingerprint: String::new(),
+            endpoint: transport.link.url.clone(),
+            relay: Some(transport),
+            peers: BTreeMap::new(),
+            persistent: true,
+            authorization: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn handle(&self) -> Result<&client::Handle<HostVerifier>> {
+        self.session
+            .as_ref()
+            .context("This needs an SSH connection to the controller; through the relay only the API is available")
+    }
+
     pub fn is_closed(&self) -> bool {
-        self.session.is_closed()
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.is_closed())
     }
 
     pub async fn close(mut self) -> Result<()> {
@@ -571,16 +600,21 @@ impl SshSession {
         while let Some(mut peer) = peers.pop() {
             peers.extend(std::mem::take(&mut peer.peers).into_values());
             let _ = crate::backend::end_authorization(&mut peer).await;
-            let _ = timeout(
-                AUTH_TIMEOUT,
-                peer.session.disconnect(Disconnect::ByApplication, "", "en"),
-            )
-            .await;
+            if let Some(session) = &peer.session {
+                let _ = timeout(
+                    AUTH_TIMEOUT,
+                    session.disconnect(Disconnect::ByApplication, "", "en"),
+                )
+                .await;
+            }
         }
         let _ = crate::backend::end_authorization(&mut self).await;
+        let Some(session) = &self.session else {
+            return Ok(());
+        };
         timeout(
             AUTH_TIMEOUT,
-            self.session.disconnect(Disconnect::ByApplication, "", "en"),
+            session.disconnect(Disconnect::ByApplication, "", "en"),
         )
         .await
         .context("Timed out closing SSH")?

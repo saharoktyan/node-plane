@@ -33,6 +33,9 @@ pub struct Installation {
     pub account: String,
     #[serde(default)]
     pub installed: bool,
+    /// Reached through its relay with a linked key instead of SSH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<crate::relay_client::Link>,
 }
 impl Installation {
     pub fn validate_field(index: usize, value: &str) -> Result<()> {
@@ -46,6 +49,7 @@ impl Installation {
             admin_ids: String::new(),
             account: String::new(),
             installed: false,
+            relay: None,
         };
         match index {
             0 => sample.name = value.trim().into(),
@@ -344,6 +348,7 @@ impl Connections {
                 continue;
             }
             let profile = Installation {
+                relay: None,
                 id: Uuid::new_v4(),
                 name: record.host.clone(),
                 host: record.host,
@@ -418,6 +423,7 @@ mod tests {
     }
     fn installation(host: &str) -> Installation {
         Installation {
+            relay: None,
             installed: false,
             id: Uuid::new_v4(),
             name: host.into(),

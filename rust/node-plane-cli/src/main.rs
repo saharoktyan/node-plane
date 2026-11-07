@@ -17,6 +17,7 @@ mod operation_store;
 mod policy_scope;
 mod progress;
 mod relay;
+mod relay_client;
 mod self_manage;
 mod services;
 mod ssh;
@@ -92,6 +93,16 @@ enum Command {
         #[arg(long)]
         repair: bool,
     },
+    /// Link this Workstation to an installation through its relay: shows a
+    /// code to confirm in the web cabinet (staff only), then saves the
+    /// installation. Through the relay only the API is available.
+    Link {
+        /// The relay's address, such as https://cab.example.com.
+        relay: String,
+        /// How the device is named in the web cabinet.
+        #[arg(long, default_value = "Workstation")]
+        name: String,
+    },
     /// Update the whole installed stack, or resume observing an existing update.
     Update {
         #[command(flatten)]
@@ -127,6 +138,9 @@ fn entry() -> Result<()> {
         Some(state) => state,
         None => config::default_state_dir(config::workstation_channel())?,
     };
+    if let Some(Command::Link { relay, name }) = &cli.command {
+        return link(&state, relay, name);
+    }
     let mut request = Request {
         action: Action::Install,
         host: String::new(),
@@ -179,7 +193,7 @@ fn entry() -> Result<()> {
             request.workflow.yes = yes;
         }
         None => {}
-        Some(Command::SelfManage { .. }) => unreachable!(),
+        Some(Command::SelfManage { .. } | Command::Link { .. }) => unreachable!(),
     }
     if !cli.no_tui && io::stdin().is_terminal() && io::stdout().is_terminal() {
         return tui::run(request);
@@ -430,6 +444,33 @@ pub fn spawn(
             });
         let _ = tx.send(Event::Finished(result.map_err(|e| format!("{e:#}"))));
     })
+}
+
+struct LinkProgress;
+impl relay_client::Progress for LinkProgress {
+    fn code(&self, pairing: &relay_client::Pairing) {
+        println!("Code: {}", pairing.code);
+        match &pairing.url {
+            Some(url) => println!("Confirm it in the web cabinet: {url}"),
+            None => println!(
+                "Confirm it in the web cabinet under Settings → Workstation → Link a Workstation."
+            ),
+        }
+        println!("Waiting for confirmation (10 minutes)…");
+    }
+    fn waiting(&self) {}
+}
+
+fn link(state: &std::path::Path, relay: &str, name: &str) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let installation = runtime.block_on(relay_client::link(state, relay, name, &LinkProgress))?;
+    println!(
+        "Linked. The installation “{}” is saved and selected; open Workstation to use it.",
+        installation.name
+    );
+    Ok(())
 }
 
 #[cfg(test)]

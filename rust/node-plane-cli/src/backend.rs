@@ -275,6 +275,29 @@ pub async fn authenticate(
             .clone());
     }
     end_authorization(session).await?;
+    if session.relay.is_some() {
+        // Through the relay the key is the credential: it acts as the account
+        // that confirmed it, whichever administrator was asked for.
+        let credential = Credential {
+            token: Zeroizing::new(String::new()),
+            account_id: String::new(),
+        };
+        let me = request(session, &credential, Method::GET, "/api/v1/me", None, None)
+            .await
+            .map_err(|error| anyhow::anyhow!("The relay refused Workstation: {}", error.code))?;
+        let credential = Credential {
+            account_id: me["id"].as_str().unwrap_or_default().to_owned(),
+            ..credential
+        };
+        *session.authorization.lock().unwrap() = Some(Authorization {
+            credential: credential.clone(),
+            session_id: id,
+            selector: account.to_owned(),
+            issued: std::time::Instant::now(),
+            valid: true,
+        });
+        return Ok(credential);
+    }
     let id = if session.persistent {
         Uuid::new_v4()
     } else {
@@ -380,7 +403,10 @@ pub async fn authenticate(
 }
 
 pub async fn revoke(session: &mut SshSession, id: Uuid) -> Result<()> {
-    if session.persistent && session.authorization.lock().unwrap().is_some() {
+    // A key linked through the relay is no session to end.
+    if session.relay.is_some()
+        || session.persistent && session.authorization.lock().unwrap().is_some()
+    {
         return Ok(());
     }
     helper(
@@ -419,6 +445,11 @@ pub async fn request_revision(
         Duration::from_secs(75)
     };
     let operation = async {
+        if let Some(relay) = &session.relay {
+            return relay
+                .request(&method, path, body.as_ref(), command, revision)
+                .await;
+        }
         let stream = session
             .backend_stream()
             .await

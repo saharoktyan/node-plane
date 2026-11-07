@@ -4031,6 +4031,7 @@ fn selected_fields_remain_clickable_after_resize_and_keyboard_navigation() {
 }
 fn saved_installation(host: &str) -> Installation {
     Installation {
+        relay: None,
         installed: false,
         id: uuid::Uuid::new_v4(),
         name: "Home installation".into(),

@@ -621,10 +621,12 @@ impl Form {
         r.admin_ids = self.fields[5].trim().into();
         r.bot_token = Zeroizing::new(self.fields[6].trim().to_owned());
         r.workflow.account = self.fields[7].trim().into();
+        r.workflow.relay = self.saved.as_ref().and_then(|p| p.relay.clone());
         r.validate()
     }
     pub(super) fn installation(&self) -> Installation {
         Installation {
+            relay: self.saved.as_ref().and_then(|p| p.relay.clone()),
             installed: self.saved.as_ref().is_some_and(|p| p.installed),
             id: self
                 .saved

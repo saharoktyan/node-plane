@@ -613,6 +613,10 @@ impl App {
     pub(in crate::tui) fn save_edit(&mut self) -> Result<()> {
         let (id, fields, _) = self.editor.as_ref().unwrap();
         let profile = Installation {
+            // Editing keeps the relay link of a linked installation.
+            relay: id
+                .and_then(|id| self.connections.installations.iter().find(|p| p.id == id))
+                .and_then(|p| p.relay.clone()),
             installed: id
                 .and_then(|id| self.connections.installations.iter().find(|p| p.id == id))
                 .is_some_and(|p| {
