@@ -11,6 +11,7 @@ import { vpnAdminHandlers } from './vpnadmin';
 import { systemHandlers, unseenAlerts } from './system';
 import { confirmationHandlers } from './confirmation';
 import { infraHandlers } from './infra';
+import { backupHandlers } from './backups';
 import { choice } from './scenario';
 
 const ACCESS = 'mock-access';
@@ -85,6 +86,7 @@ export const handlers = [
   ...systemHandlers,
   ...confirmationHandlers,
   ...infraHandlers,
+  ...backupHandlers,
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),
