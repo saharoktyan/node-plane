@@ -48,7 +48,8 @@
         action: t('admin.review') });
     if (overview.tasks?.blocked) items.push({ text: t('admin.tasks_blocked', { count: overview.tasks.blocked }) });
     if (overview.alerts_enabled && overview.unacknowledged_alerts)
-      items.push({ text: t('admin.alerts_open', { count: overview.unacknowledged_alerts }) });
+      items.push({ text: t('admin.alerts_open', { count: overview.unacknowledged_alerts }), href: '/admin/alerts',
+        action: t('alerts.title') });
     const updates = overview.updates as { available?: boolean; latest_version?: string | null } | undefined;
     if (updates?.available)
       items.push({ text: t('admin.update_ready', { version: updates.latest_version ?? '' }), href: '/admin/updates',

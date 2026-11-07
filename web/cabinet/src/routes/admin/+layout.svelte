@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import { account } from '$lib/account.svelte';
   import { api, call } from '$lib/api/client';
+  import { attention, refreshAttention } from '$lib/admin/attention.svelte';
   import { t } from '$lib/i18n/index.svelte';
   import Async from '$lib/ui/Async.svelte';
   import Shell, { type Link } from '$lib/ui/Shell.svelte';
@@ -27,23 +28,23 @@
       { href: '/admin/temporary-configs', label: t('temporary.title'), icon: 'temporary', group: t('admin.group_infrastructure'),
         allowed: account.may('settings.manage') },
       { href: '/admin/announcements', label: t('admin.announcements'), icon: 'announcements', group: t('admin.group_system'), allowed: account.may('settings.manage') },
+      { href: '/admin/alerts', label: t('alerts.title'), icon: 'alerts', group: t('admin.group_system'), allowed: account.may('settings.manage'),
+        count: attention.unacknowledged_alerts || undefined },
       { href: '/admin/backups', label: t('admin.backups'), icon: 'backups', group: t('admin.group_system'), allowed: account.may('settings.manage') },
       { href: '/admin/updates', label: t('admin.updates'), icon: 'updates', group: t('admin.group_system'), allowed: account.may('settings.manage'),
-        dot: attention?.update_available === true },
+        dot: attention.update_available },
       { href: '/admin/system', label: t('admin.settings'), icon: 'system', group: t('admin.group_system'), allowed: account.may('settings.manage') }
     ];
     return all.filter((section) => section.allowed).map(({ allowed: _, ...section }) => section);
   }
 
-  // Whether an update waits: a dot on Updates.
-  let attention = $state<{ update_available?: boolean } | null>(null);
   // Requests waiting for a decision: a count on Requests.
   let pending = $state(0);
   // The account at hand draws the administration at once; the counts follow.
   const ready = account.require().then(async (me) => {
     if (me && me.role !== 'admin') await goto('/');
-    if (me?.role === 'admin' && account.may('settings.manage'))
-      call(api.GET('/api/v1/system/attention')).then((value) => (attention = value as typeof attention)).catch(() => {});
+    // Whether an update waits, a dot on Updates; unseen alerts, a count on Alerts.
+    if (me?.role === 'admin' && account.may('settings.manage')) refreshAttention();
     if (me?.role === 'admin' && account.may('access_requests.manage'))
       call(api.GET('/api/v1/access-requests', { params: { query: { limit: 1 } } }))
         .then((value) => (pending += value.pending_total ?? 0)).catch(() => {});

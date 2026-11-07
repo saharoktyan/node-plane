@@ -8,6 +8,7 @@ import { nodeHandlers } from './nodes';
 import { policyHandlers, temporaryHandlers } from './policies';
 import { profileHandlers } from './profiles';
 import { vpnAdminHandlers } from './vpnadmin';
+import { systemHandlers, unseenAlerts } from './system';
 import { choice } from './scenario';
 
 const ACCESS = 'mock-access';
@@ -79,6 +80,7 @@ export const handlers = [
   ...policyHandlers,
   ...temporaryHandlers,
   ...vpnAdminHandlers,
+  ...systemHandlers,
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),
@@ -121,7 +123,7 @@ export const handlers = [
     fixtures.nodeMetrics(choice().scenario, new URL(request.url).searchParams.get('range') ?? '24h'))),
   http.get('/api/v1/admin/metrics/vpn', guarded(() => fixtures.vpnActivity(choice().scenario))),
   http.get('/api/v1/me/profiles/:id/history', guarded(() => fixtures.trafficHistory(choice().scenario))),
-  http.get('/api/v1/system/attention', guarded(() => ({ unacknowledged_alerts: 0,
+  http.get('/api/v1/system/attention', guarded(() => ({ unacknowledged_alerts: unseenAlerts(),
     update_available: choice().scenario !== 'empty' }))),
   ...peopleHandlers,
   http.get('/api/v1/accounts', guarded(({ url }) => ({

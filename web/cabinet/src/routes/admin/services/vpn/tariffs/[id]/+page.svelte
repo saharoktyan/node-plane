@@ -143,7 +143,7 @@
               {:else}{tariff.title}{/if}</dd></div>
             <div><dt>{t('vpnadmin.description')}</dt><dd class:wide={form}>
               {#if form}<Localized bind:draft={form.descriptions} {languages} label={t('vpnadmin.description')} max={1000} multiline
-                named={false} />
+                named={false} optional />
               {:else if tariff.description}<span class="text">{tariff.description}</span>{:else}<span class="muted">—</span>{/if}</dd></div>
             <div><dt>{t('vpnadmin.term')}</dt><dd>
               {#if form}

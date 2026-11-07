@@ -4,7 +4,7 @@ import { http, HttpResponse, delay, type PathParams } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
 import { choice } from './scenario';
-import { localized } from './localized';
+import { localized, textIn } from './localized';
 
 type Account = Schemas['AdminAccountOutput'];
 const now = () => new Date().toISOString();
@@ -32,7 +32,7 @@ function policy(): Schemas['AccessRequestPolicyOutput'] {
   const welcome = localized({ source: 'en', fallback: {}, texts: { en: 'Request access to use this bot.',
     ru: 'Запросите доступ для использования бота.' } });
   const lang = choice().lang;
-  return { enabled: true, notify_requests: true, telegram: true, gate_message: gate.shown[lang], welcome_message: welcome.shown[lang],
+  return { enabled: true, notify_requests: true, telegram: true, gate_message: textIn(gate, lang), welcome_message: textIn(welcome, lang),
     gate_messages: gate, welcome_messages: welcome };
 }
 
@@ -152,7 +152,7 @@ export const peopleHandlers = [
       if (!input) continue;
       const value = localized(input);
       policy[`${name}_messages`] = value;
-      policy[`${name}_message`] = value.shown[choice().lang] ?? '';
+      policy[`${name}_message`] = textIn(value, choice().lang);
     }
     return policy;
   })),

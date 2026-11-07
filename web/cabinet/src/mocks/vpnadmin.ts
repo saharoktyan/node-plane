@@ -3,7 +3,7 @@
 import { http, HttpResponse } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import { error, guarded } from './people';
-import { localized } from './localized';
+import { localized, textIn } from './localized';
 import { choice } from './scenario';
 
 type Tariff = Schemas['TariffOutput'];
@@ -12,8 +12,7 @@ const KEYS = ['devices.max', 'connections.mode', 'connections.max_sources', 'quo
   'quota.interval_days', 'quota.on_exhausted', 'quota.throttle_kbit', 'speed.up_kbit', 'speed.down_kbit'];
 const now = () => new Date().toISOString();
 
-const shown = (value: Schemas['LocalizedTextOutput'] | null | undefined) =>
-  value ? (value.shown[choice().lang] ?? value.texts[value.source] ?? '') : '';
+const shown = (value: Schemas['LocalizedTextOutput'] | null | undefined) => textIn(value, choice().lang);
 
 let state: { scenario: string; tariffs: Tariff[]; traffic: { enabled: boolean; last_scan: string | null };
   defaults: { revision: number; protocols: string[]; xray_transports: string[]; settings: Record<string, unknown> } } | null = null;

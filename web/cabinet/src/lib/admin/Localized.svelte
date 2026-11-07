@@ -5,10 +5,13 @@
   import type { Draft } from './localized';
   import { t } from '$lib/i18n/index.svelte';
 
-  // `named`: false where the row it sits in already names it.
-  let { draft = $bindable(), languages, label, multiline = false, max, named = true }: {
-    draft: Draft; languages: string[]; label: string; multiline?: boolean; max: number; named?: boolean;
+  import { empty } from './localized';
+  // `named`: false where the row it sits in already names it. `optional`:
+  // left empty everywhere, it is simply not there.
+  let { draft = $bindable(), languages, label, multiline = false, max, named = true, optional = false }: {
+    draft: Draft; languages: string[]; label: string; multiline?: boolean; max: number; named?: boolean; optional?: boolean;
   } = $props();
+  const quiet = $derived(optional && empty(draft));
 </script>
 
 <fieldset class="localized" aria-label={named ? undefined : label}>
@@ -24,9 +27,11 @@
       {:else}
         <input maxlength={max} bind:value={draft.texts[language]} aria-label={label + ' · ' + language} />
       {/if}
-      {#if language !== draft.source && !draft.texts[language]?.trim()}
+      {#if quiet}
+        <!-- Nothing written, nothing to say. -->
+      {:else if language !== draft.source && !draft.texts[language]?.trim()}
         <span class="muted small">{t('texts.shows_main', { language: t('settings.language_' + draft.source) })}</span>
-      {:else if language === draft.source && !draft.texts[language]?.trim()}
+      {:else if language === draft.source && !draft.texts[language]?.trim() && !empty(draft)}
         <span class="muted small">{t('texts.main_needed')}</span>
       {/if}
     </div>
