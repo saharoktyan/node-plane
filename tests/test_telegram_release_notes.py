@@ -25,3 +25,9 @@ class ReleaseNotesTests(TestCase):
         self.assertLessEqual(len(text),1800)
         self.assertNotIn('https://example.test/',text)
         self.assertFalse(any(getattr(b.text,'type',None)=='code' for b in blocks))
+
+    def test_no_changelog_explains_missing_notes_in_both_locales(self):
+        for locale, text in [('en', 'No release notes'), ('ru', 'нет описания')]:
+            screen = alert_screen({'locale':locale, 'event':{'kind':'update_available',
+                'payload':{'version':'v0.5.0-alpha.6','branch':'dev','changelog':''}}})
+            self.assertIn(text, screen.plain())

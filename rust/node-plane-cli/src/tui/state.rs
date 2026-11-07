@@ -729,6 +729,25 @@ pub(super) enum ProfileCopyState {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MismatchTarget {
+    Controller,
+    Workstation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VersionMismatchContext {
+    pub profile_id: uuid::Uuid,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub controller_version: String,
+    pub controller_channel: String,
+    pub workstation_version: String,
+    pub workstation_channel: String,
+    pub target: MismatchTarget,
+}
+
 pub(super) struct App {
     pub(super) manual_awg_original: Option<String>,
     pub(super) text_input: std::cell::RefCell<super::text_input::TextInput>,
@@ -828,4 +847,8 @@ pub(super) struct App {
     pub(super) result_scroll: usize,
     pub(super) result_max_scroll: std::cell::Cell<usize>,
     pub(super) result_page_size: std::cell::Cell<usize>,
+    pub(super) version_mismatch_dismissed: bool,
+    pub(super) version_mismatch_deferred: bool,
+    pub(super) version_mismatch_receiver: Option<mpsc::Receiver<Answer>>,
+    pub(super) version_mismatch_context: Option<VersionMismatchContext>,
 }

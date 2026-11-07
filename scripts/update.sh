@@ -815,11 +815,10 @@ update_simple() {
       bash "${current_link}/scripts/setup_driver_agents.sh" --skip-agents --strict --bin-source release
     NODE_PLANE_APP_DIR="$current_link" NODE_PLANE_SHARED_DIR="$shared_dir" \
       PYTHONPATH="${current_link}/app" "${current_link}/.venv/bin/python" - <<'PYDRIVER'
-import grpc
-from backend.driver_transport import GrpcIntentDriver
+from backend.driver_transport import GrpcIntentDriver, local_channel
 from config import APP_COMMIT
 from config import NODE_DRIVER_GRPC_TARGET
-with grpc.insecure_channel(NODE_DRIVER_GRPC_TARGET) as channel:
+with local_channel(NODE_DRIVER_GRPC_TARGET) as channel:
     actual = GrpcIntentDriver(channel).binary_info().get('commit') or ''
 if len(actual) < 7 or APP_COMMIT == 'unknown' or not (APP_COMMIT.startswith(actual) or actual.startswith(APP_COMMIT)):
     raise SystemExit('Controller driver version verification failed')

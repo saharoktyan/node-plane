@@ -978,6 +978,7 @@ impl App {
         let Some((prompt, _)) = &self.prompt else {
             return;
         };
+        let profile_copy = matches!(self.profile_copy, Some(ProfileCopyState::Selecting { .. }));
         let answer = match prompt {
             Prompt::SelectAdministrator { choices } | Prompt::Select { choices, .. } => {
                 match key.code {
@@ -987,8 +988,25 @@ impl App {
                     }
                     KeyCode::Down | KeyCode::Tab => {
                         self.administrator_selected =
-                            (self.administrator_selected + 1).min(choices.len().saturating_sub(1));
+                            (self.administrator_selected + 1).min(if profile_copy {
+                                choices.len()
+                            } else {
+                                choices.len().saturating_sub(1)
+                            });
                         None
+                    }
+                    KeyCode::BackTab if profile_copy => {
+                        self.administrator_selected = if self.administrator_selected == 0 {
+                            choices.len()
+                        } else {
+                            self.administrator_selected - 1
+                        };
+                        None
+                    }
+                    KeyCode::Enter
+                        if profile_copy && self.administrator_selected == choices.len() =>
+                    {
+                        Some(Answer::Cancel)
                     }
                     KeyCode::Enter if !choices.is_empty() => {
                         Some(Answer::Selection(self.administrator_selected))

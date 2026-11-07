@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0-alpha.1
 
 - The relay can serve the web cabinet beside the API, on the same domain:
   given the cabinet's built files (`NODE_PLANE_RELAY_CABINET_DIR`) it answers
@@ -625,6 +625,50 @@
   Database revision 23 adds the requests, which are not backed up.
 - Choose the destination Workstation channel when copying a saved profile;
   report missing installations and retain confirmation before copying.
+## 0.5.0-alpha.6
+
+- Show target-version changes in Telegram update notices instead of installer and
+  download tables; publish the matching changelog section in release notes.
+- Clarify Workstation profile-copy destinations, keep selection arrows white,
+  and add a full-width Cancel button.
+
+## 0.5.0-alpha.5
+
+- Ship authenticated Driver build verification in controller updates with macOS 15
+  CI and release runners after the alpha.4 workflow hit the macOS 14 brownout.
+
+## 0.5.0-alpha.4
+
+- Authenticate the updater's Driver build verification using the shared local
+  credential instead of failing a healthy controller update with UNAUTHENTICATED.
+
+## 0.5.0-alpha.3
+
+- Keep Telegram progress screens refreshing after rendering failures and unrelated
+  service updates, including controller cleanup with nodes.
+
+- Keep On/Off values in the chosen theme accent independently of focus, and
+  highlight toggle labels on hover, including monitoring and policy settings.
+
+- Initialize local Driver authentication before starting the backend API and
+  worker on fresh installations; report unavailable temporary config transport
+  without an internal server error.
+
+- Show a dismissible version compatibility warning in Workstation instead of
+  forcing controller Updates or blocking ordinary management and removal.
+
+## 0.5.0-alpha.2
+
+- Use Python 3.12 in server/global release packaging and publication jobs so
+  release identity validation can load the standard-library TOML parser.
+
+## 0.5.0-alpha.1
+
+- Prepare the isolated dev channel for installation testing before public beta.
+- Choose the destination Workstation channel when copying a saved profile;
+  report missing installations and retain confirmation before copying.
+- Include the pre-beta security fixes, explicit release channel validation,
+  and controller/agent updater handoff fixes.
 
 ## 0.5.0-beta.1
 

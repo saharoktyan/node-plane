@@ -209,3 +209,23 @@ class AutoRefreshTests(IsolatedAsyncioTestCase):
             backend.remove_node_step.assert_awaited_once_with(1,'lv1',retry=False)
             backend.request.assert_awaited_once_with('GET','/api/v1/nodes/lv1/removal',telegram_user_id=1)
             self.assertIn('removed',draw.call_args.args[2].plain().lower())
+
+    async def test_render_failure_retries_instead_of_freezing_progress(self):
+        state = SimpleNamespace()
+        completed = asyncio.Event()
+        calls = 0
+        async def refresh():
+            nonlocal calls
+            calls += 1
+            if calls < 3:
+                raise RuntimeError('render failed')
+            completed.set()
+        common.schedule_refresh(state, refresh, interval=.001)
+        await asyncio.wait_for(completed.wait(), 1)
+        self.assertEqual(calls, 3)
+
+    async def test_service_update_does_not_cancel_progress(self):
+        state = SimpleNamespace()
+        common.schedule_refresh(state, AsyncMock(), interval=30)
+        await common.NotificationStateMiddleware()(AsyncMock(), SimpleNamespace(my_chat_member=object()), {'state': state})
+        self.assertIn(common._refresh_key(state), common._REFRESH_TASKS)

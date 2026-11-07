@@ -5,6 +5,7 @@ use view::*;
 
 mod actions;
 mod app;
+pub(super) use app::*;
 mod events;
 mod input;
 mod screens;
@@ -206,6 +207,13 @@ pub fn run(mut request: Request) -> Result<()> {
             app.nodes = crate::nodes::Browser::default();
             app.access = crate::access::Browser::default();
             app.temporary = crate::temporary::Browser::default();
+            app.version_mismatch_receiver = None;
+            app.version_mismatch_context = None;
+            app.version_mismatch_deferred = false;
+            if matches!(&app.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+            {
+                app.prompt = None;
+            }
         }
         if app.probe_requested
             && receiver.is_none()
@@ -312,6 +320,7 @@ pub fn run(mut request: Request) -> Result<()> {
             app.controller.profile = app.form.saved.as_ref().map(|p| p.id);
             app.controller_command(crate::controller::Command::Onboarding);
         }
+        app.poll_version_mismatch(receiver.is_some());
         if let Some(command) = app.take_browser_request(receiver.is_some()) {
             let mut next = app.next_request();
             next.action = Action::Diagnose;

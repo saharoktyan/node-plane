@@ -128,14 +128,32 @@ class UpdatesTests(unittest.TestCase):
         from unittest.mock import MagicMock
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({
-            'tag_name':'v9.0.0', 'body':'notes' * 1000, 'draft':False}).encode()
+            'tag_name':'v9.0.0', 'body':'## Changes\n' + 'notes' * 15000, 'draft':False}).encode()
         with patch('services.updates.urllib.request.urlopen', return_value=response) as request:
-            self.assertEqual(len(self.updates.get_release_changelog('v9.0.0')), 1800)
+            self.assertEqual(len(self.updates.get_release_changelog('v9.0.0')), 65536)
             self.assertEqual(self.updates.get_release_changelog('origin/dev'), '')
             self.assertEqual(request.call_count, 1)
             response.__enter__.return_value.read.return_value = b'[]'
             self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
         with patch('services.updates.urllib.request.urlopen', side_effect=OSError):
+            self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
+
+    def test_changelog_uses_selected_tag_when_release_body_has_only_downloads(self):
+        import json
+        from unittest.mock import MagicMock
+        release = MagicMock()
+        release.__enter__.return_value.read.return_value = json.dumps({
+            'tag_name': 'v9.0.0', 'draft': False,
+            'body': '## Install\n' + 'download ' * 1000}).encode()
+        changelog = MagicMock()
+        changelog.__enter__.return_value.read.return_value = b"# Changelog\n## Unreleased\n- future\n## 9.0.0\n- Fixed updates.\n## 8.0.0\n- Old change."
+        with patch('services.updates.urllib.request.urlopen', side_effect=[release, changelog]) as request:
+            self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '- Fixed updates.')
+            self.assertTrue(request.call_args.args[0].full_url.endswith('/v9.0.0/CHANGELOG.md'))
+        changelog.__enter__.return_value.read.return_value = b'# Changelog\n## 8.0.0\n- Old change.'
+        with patch('services.updates.urllib.request.urlopen', side_effect=[release, changelog]):
+            self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
+        with patch('services.updates.urllib.request.urlopen', side_effect=[release, OSError('unavailable')]):
             self.assertEqual(self.updates.get_release_changelog('v9.0.0'), '')
 
     def test_check_for_updates_records_available_state(self) -> None:

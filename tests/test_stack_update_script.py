@@ -251,3 +251,71 @@ rm -rf -- "$STACK_SNAPSHOT"
         self.assertIn("mark_target_handoff \"$TARGET_HANDOFF\" succeeded", source)
         self.assertIn("mark_target_handoff \"$TARGET_HANDOFF\" failed", source)
         self.assertIn("CONTROLLER_STAGE_OWNED=0", main)
+
+    def test_updater_version_probe_authenticates_and_checks_exact_driver_build(self):
+        import grpc
+        from concurrent.futures import ThreadPoolExecutor
+        from driver.v1 import runtime_service_pb2 as runtime
+
+        source = (ROOT / 'scripts/update.sh').read_text()
+        probe = source.split("<<'PYDRIVER'\n", 1)[1].split('\nPYDRIVER', 1)[0]
+        token = 'fixture-driver-token-never-print'
+        expected = 'a' * 40
+        observed = []
+        actual = [expected]
+
+        def driver_info(request, context):
+            observed.append(request.action)
+            if dict(context.invocation_metadata()).get('x-node-plane-local-token') != token:
+                context.abort(grpc.StatusCode.UNAUTHENTICATED, 'invalid local Driver credentials')
+            return runtime.BackendNodeSettingsResult(result_json=json.dumps({'commit': actual[0]}))
+
+        server = grpc.server(ThreadPoolExecutor(max_workers=1))
+        server.add_generic_rpc_handlers((grpc.method_handlers_generic_handler('nodeplane.driver.v1.RuntimeService', {
+            'BackendNodeAction': grpc.unary_unary_rpc_method_handler(driver_info,
+                request_deserializer=runtime.BackendNodeActionRequest.FromString,
+                response_serializer=runtime.BackendNodeSettingsResult.SerializeToString),
+        }),))
+        port = server.add_insecure_port('127.0.0.1:0')
+        self.assertNotEqual(port, 0)
+        server.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                shared = root / 'shared'
+                shared.mkdir()
+                (root / 'BUILD_COMMIT').write_text(expected)
+                # Route the fixed loopback production address to an isolated
+                # ephemeral fixture; all RPC serialization/auth is real.
+                wrapper = f"""import grpc
+original_channel = grpc.insecure_channel
+def fixture_channel(address):
+    assert address == '127.0.0.1:50051'
+    return original_channel('127.0.0.1:{port}')
+grpc.insecure_channel = fixture_channel
+"""
+                env = {**os.environ, 'PYTHONPATH': str(ROOT / 'app'),
+                    'NODE_PLANE_APP_DIR': str(root), 'NODE_PLANE_SHARED_DIR': str(shared),
+                    'NODE_DRIVER_GRPC_TARGET': '127.0.0.1:50051'}
+                env.pop('NODE_PLANE_DRIVER_LOCAL_TOKEN', None)
+                for credential, commit, success, error in (
+                    (token, expected, True, ''),
+                    ('wrong-fixture-token', expected, False, 'UNAUTHENTICATED'),
+                    (None, expected, False, 'LocalDriverTokenMissing'),
+                    (token, 'b' * 40, False, 'Controller driver version verification failed'),
+                ):
+                    with self.subTest(credential_present=credential is not None, matching_build=commit == expected):
+                        actual[0] = commit
+                        (shared / '.env').write_text('NODE_PLANE_DRIVER_LOCAL_TOKEN=' + credential + '\n' if credential else '')
+                        before = len(observed)
+                        result = subprocess.run([__import__('sys').executable, '-c', wrapper + probe],
+                            env=env, capture_output=True, text=True, timeout=10)
+                        self.assertEqual(result.returncode == 0, success, result.stderr)
+                        self.assertNotIn(token, result.stdout + result.stderr)
+                        if not success:
+                            self.assertIn(error, result.stderr)
+                        self.assertTrue(all(action == 'driver_info' for action in observed[before:]))
+                        if credential is None:
+                            self.assertEqual(len(observed), before)
+        finally:
+            server.stop(0).wait()

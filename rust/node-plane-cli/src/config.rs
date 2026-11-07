@@ -59,7 +59,7 @@ pub fn channel_branch(channel: &str) -> &'static str {
 
 pub fn channel_label(channel: &str) -> &'static str {
     match channel {
-        "stable" => "Stable (main)",
+        "stable" => "Stable",
         "beta" => "Beta",
         "dev" => "Dev",
         _ => "Workstation",

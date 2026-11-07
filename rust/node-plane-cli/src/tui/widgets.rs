@@ -224,15 +224,11 @@ pub(super) fn draw_choice_button(
     {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(format!("{prefix}: "), Style::default().fg(Color::White)),
                 Span::styled(
-                    value,
-                    Style::default().fg(if value == "On" {
-                        Color::Cyan
-                    } else {
-                        Color::White
-                    }),
+                    format!("{prefix}: "),
+                    Style::default().fg(if focused { Color::Cyan } else { Color::White }),
                 ),
+                Span::styled(value, Style::default().fg(theme::TOGGLE_VALUE)),
             ]))
             .alignment(ratatui::layout::Alignment::Center),
             Block::bordered().inner(area),
@@ -287,15 +283,11 @@ pub(super) fn draw_button_color(
     {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(format!("{prefix}: "), Style::default().fg(Color::White)),
                 Span::styled(
-                    value,
-                    Style::default().fg(if value == "On" {
-                        Color::Cyan
-                    } else {
-                        Color::White
-                    }),
+                    format!("{prefix}: "),
+                    Style::default().fg(if selected { accent } else { Color::White }),
                 ),
+                Span::styled(value, Style::default().fg(theme::TOGGLE_VALUE)),
             ]))
             .alignment(ratatui::layout::Alignment::Center),
             inner,

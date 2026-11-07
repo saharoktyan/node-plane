@@ -1,6 +1,12 @@
 //! Screen composition, header, dialogs and focus decoration.
 use super::*;
 
+fn has_toggle_value(frame: &mut Frame, area: Rect) -> bool {
+    (area.y..area.bottom()).any(|y| {
+        (area.x..area.right()).any(|x| frame.buffer_mut()[(x, y)].fg == theme::TOGGLE_VALUE)
+    })
+}
+
 pub(super) fn disabled_channel(app: &App, control: Control) -> bool {
     match control {
         Control::EditField(4) => true,
@@ -574,10 +580,17 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
     if let Some((prompt, _)) = &app.prompt {
         // Modal hit targets replace background controls, including outside clicks.
         hits.clear();
+        let is_profile_copy = matches!(app.profile_copy, Some(ProfileCopyState::Selecting { .. }));
+        let is_version_mismatch = matches!(
+            prompt,
+            Prompt::ConfirmAction { title, .. } if title == "Version mismatch"
+        );
         let popup = centered(
             area,
             78,
-            if matches!(prompt, Prompt::ConfirmAction { .. }) {
+            if is_version_mismatch {
+                20
+            } else if matches!(prompt, Prompt::ConfirmAction { .. }) {
                 12
             } else {
                 20
@@ -607,11 +620,22 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             ),
         };
         if let Prompt::SelectAdministrator { choices } | Prompt::Select { choices, .. } = prompt {
+            let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+            let description_height = if is_profile_copy {
+                (paragraph.line_count(sections[0].width) as u16 + 1)
+                    .min(sections[0].height.saturating_sub(choices.len() as u16))
+            } else {
+                3
+            };
             let body =
-                Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(sections[0]);
-            frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), body[0]);
+                Layout::vertical([Constraint::Length(description_height), Constraint::Min(0)])
+                    .split(sections[0]);
+            frame.render_widget(paragraph, body[0]);
             let capacity = usize::from(body[1].height).max(1);
-            let start = app.administrator_selected.saturating_sub(capacity - 1);
+            let start = app
+                .administrator_selected
+                .min(choices.len().saturating_sub(1))
+                .saturating_sub(capacity - 1);
             for (row, (index, (_, label))) in choices
                 .iter()
                 .enumerate()
@@ -684,7 +708,30 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         } else {
             frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), sections[0]);
         }
-        if !matches!(prompt, Prompt::Select { .. }) {
+        if is_version_mismatch {
+            let cells = dialog_button_areas(sections[1], &["Update", "Dismiss"], 1);
+            draw_button_color(frame, cells[0], "Update", app.trust, Color::Cyan);
+            hits.push(Hit {
+                area: cells[0],
+                control: Control::Prompt(true),
+            });
+            draw_button_color(frame, cells[1], "Dismiss", !app.trust, Color::Red);
+            hits.push(Hit {
+                area: cells[1],
+                control: Control::Prompt(false),
+            });
+        } else if is_profile_copy {
+            draw_button(
+                frame,
+                sections[1],
+                "Cancel",
+                matches!(prompt, Prompt::Select { choices, .. } if app.administrator_selected == choices.len()),
+            );
+            hits.push(Hit {
+                area: sections[1],
+                control: Control::Prompt(false),
+            });
+        } else if !matches!(prompt, Prompt::Select { .. }) {
             let (label, other) = match prompt {
                 Prompt::HostKey { .. } => ("Trust host", "Cancel"),
                 Prompt::Password { .. } => ("Connect", "Cancel"),
@@ -760,6 +807,7 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
             if hovered_hit.is_some_and(|hovered| hovered.area == hit.area) {
                 continue;
             }
+            let toggle = has_toggle_value(frame, rect);
             let chosen = choice_selected(&app.controller, hit.control)
                 || matches!(hit.control,Control::AccessGrantMode(future) if app.access.editor.as_ref().is_some_and(|e|e.future_view==future))
                 || matches!(hit.control,Control::NodesEditTab(tab) if app.nodes.editor.as_ref().is_some_and(|e|e.tab==tab));
@@ -771,12 +819,12 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
                         "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯" | "─" | "│"
                     ) {
                         cell.fg = Color::White;
-                    } else if !chosen
+                    } else if (!chosen || toggle)
                         && y > rect.y
                         && y + 1 < rect.bottom()
                         && cell.fg == Color::Cyan
                     {
-                        cell.fg = Color::Gray;
+                        cell.fg = if toggle { Color::White } else { Color::Gray };
                         cell.modifier.remove(Modifier::BOLD);
                     }
                 }
@@ -850,16 +898,24 @@ pub(super) fn draw_content(frame: &mut Frame, app: &App) -> Vec<Hit> {
         let red = (rect.y..rect.bottom())
             .any(|y| (rect.x..rect.right()).any(|x| frame.buffer_mut()[(x, y)].fg == Color::Red));
         let color = if red { Color::Red } else { Color::Cyan };
+        let toggle = has_toggle_value(frame, rect);
         for y in rect.y..rect.bottom() {
             for x in rect.x..rect.right() {
                 if frame.buffer_mut()[(x, y)].fg == SECTION_BORDER
-                    || matches!(hit.control, Control::TemporaryChoice(_))
-                        && frame.buffer_mut()[(x, y)].symbol() == "→"
+                    || matches!(
+                        hit.control,
+                        Control::TemporaryChoice(_) | Control::Administrator(_)
+                    ) && frame.buffer_mut()[(x, y)].symbol() == "→"
                 {
                     continue;
                 }
                 if x == rect.x || x + 1 == rect.right() || y == rect.y || y + 1 == rect.bottom() {
                     frame.buffer_mut()[(x, y)].fg = color;
+                } else if toggle {
+                    let cell = &mut frame.buffer_mut()[(x, y)];
+                    if cell.fg != theme::TOGGLE_VALUE && !cell.symbol().trim().is_empty() {
+                        cell.fg = color;
+                    }
                 }
             }
         }

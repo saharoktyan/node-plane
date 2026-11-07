@@ -99,3 +99,59 @@ class CleanupScreensTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(cleanup, "render", AsyncMock()):
             await cleanup.cleanup_phrase(message, self.bot, self.backend, self.state)
         self.backend.system_cleanup_command.assert_not_awaited()
+
+    async def test_cleanup_observer_renders_multiple_phases_without_manual_refresh(self):
+        import asyncio
+        from telegram_client.routers import common
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.memory import MemoryStorage
+        from aiogram.fsm.storage.base import StorageKey
+        state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=123, user_id=123))
+        await state.update_data(locale='en', control_message_id=77)
+        bot = SimpleNamespace(edit_message_text=AsyncMock(return_value=SimpleNamespace(rich_message=None)))
+        phases = [('queued', 'backup'), ('running', 'nodes'), ('running', 'uninstall_prepare'), ('awaiting_shutdown', 'shutdown')]
+        self.backend.system_cleanup_job.side_effect = [dict(self.job, status=status, phase=phase) for status, phase in phases]
+        original = common.schedule_refresh
+        def fast_refresh(state, refresh):
+            original(state, refresh, interval=.001)
+        try:
+            with patch.object(cleanup, 'schedule_refresh', side_effect=fast_refresh):
+                await cleanup.show_job(123, 123, 77, self.job_id, bot, self.backend, state)
+                for _ in range(100):
+                    await asyncio.sleep(.005)
+                    if not common._REFRESH_TASKS:
+                        break
+            self.assertEqual(self.backend.system_cleanup_job.await_count, 4)
+            self.assertEqual(bot.edit_message_text.await_count, 4)
+            self.assertFalse(common._REFRESH_TASKS)
+            self.backend.system_cleanup_action.assert_not_awaited()
+        finally:
+            await common.shutdown_refreshes()
+
+    async def test_cleanup_recovers_after_render_error_without_repeating_cleanup(self):
+        import asyncio
+        from telegram_client.routers import common
+        self.job.update(status='running', phase='nodes')
+        finished = asyncio.Event()
+        reads = 0
+        async def read(*args):
+            nonlocal reads
+            reads += 1
+            return dict(self.job, status='awaiting_shutdown' if reads >= 3 else 'running')
+        async def draw(*args):
+            if reads == 2:
+                raise RuntimeError('temporary render failure')
+            if reads >= 3:
+                finished.set()
+        self.backend.system_cleanup_job.side_effect = read
+        original = common.schedule_refresh
+        def fast_refresh(state, refresh):
+            original(state, refresh, interval=.001)
+        try:
+            with patch.object(cleanup, 'schedule_refresh', side_effect=fast_refresh), patch.object(cleanup, 'render', side_effect=draw):
+                await cleanup.show_job(123, 123, 77, self.job_id, self.bot, self.backend, self.state)
+                await asyncio.wait_for(finished.wait(), 1)
+            self.assertEqual(reads, 3)
+            self.backend.system_cleanup_action.assert_not_awaited()
+        finally:
+            await common.shutdown_refreshes()

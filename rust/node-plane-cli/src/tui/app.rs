@@ -101,6 +101,10 @@ impl App {
             result_scroll: 0,
             result_max_scroll: std::cell::Cell::new(0),
             result_page_size: std::cell::Cell::new(1),
+            version_mismatch_dismissed: false,
+            version_mismatch_deferred: false,
+            version_mismatch_receiver: None,
+            version_mismatch_context: None,
         }
     }
     pub(super) fn take_browser_request(
@@ -141,10 +145,6 @@ impl App {
         !self.quick_start_completed()
             && matches!(self.screen, Screen::Idle | Screen::QuickStart)
             && self.controller_ready()
-            && self.controller.updates.as_ref().is_none_or(|value| {
-                crate::nodes::controller_branch(value)
-                    .is_ok_and(|branch| branch == crate::config::default_branch())
-            })
             && !operation_active
             && !self.nodes_busy
             && self.nodes_requested.is_none()
@@ -187,6 +187,16 @@ impl App {
                 .find(|p| p.matches(&request.host, request.port, &request.user))
         };
         if let Some(profile) = selected.cloned() {
+            let previous_profile = self.form.saved.as_ref().map(|p| p.id);
+            if previous_profile != Some(profile.id) {
+                self.version_mismatch_receiver = None;
+                self.version_mismatch_context = None;
+                self.version_mismatch_deferred = false;
+                if matches!(&self.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+                {
+                    self.prompt = None;
+                }
+            }
             self.quick_focus = false;
             self.settings_profile = self
                 .connections
@@ -374,4 +384,281 @@ impl App {
         self.hovered = None;
         self.pointer_active = self.pointer_position.is_some();
     }
+
+    pub(super) fn poll_version_mismatch(&mut self, operation_active: bool) {
+        if self.version_mismatch_receiver.is_some()
+            && !self
+                .version_mismatch_context
+                .as_ref()
+                .is_some_and(|context| {
+                    !self.controller.removed
+                        && self.form.saved.as_ref().is_some_and(|saved| {
+                            self.has_installation()
+                                && context.profile_id == saved.id
+                                && context.host == saved.host
+                                && context.port == saved.port
+                                && context.user == saved.user
+                                && self.controller_version.as_ref().is_some_and(
+                                    |(profile, version)| {
+                                        *profile == saved.id
+                                            && *version == context.controller_version
+                                    },
+                                )
+                        })
+                })
+        {
+            self.version_mismatch_receiver = None;
+            self.version_mismatch_context = None;
+            if matches!(&self.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+            {
+                self.prompt = None;
+            }
+            return;
+        }
+        let answer = self
+            .version_mismatch_receiver
+            .as_ref()
+            .map(|receiver| receiver.try_recv());
+        if matches!(&answer, Some(Err(mpsc::TryRecvError::Disconnected))) {
+            self.version_mismatch_receiver = None;
+            self.version_mismatch_context = None;
+            return;
+        }
+        if let Some(Ok(answer)) = answer {
+            self.version_mismatch_receiver = None;
+            let context = self.version_mismatch_context.take();
+            let is_current = self.form.saved.as_ref().is_some_and(|saved| {
+                (saved.installed || self.installed_profile == Some(saved.id))
+                    && context.as_ref().is_some_and(|c| {
+                        c.profile_id == saved.id
+                            && c.host == saved.host
+                            && c.port == saved.port
+                            && c.user == saved.user
+                    })
+            });
+            if !is_current {
+                if matches!(&self.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+                {
+                    self.prompt = None;
+                }
+                return;
+            }
+            match answer {
+                Answer::Confirm(false) | Answer::Cancel => {
+                    self.version_mismatch_dismissed = true;
+                    if matches!(&self.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+                    {
+                        self.prompt = None;
+                    }
+                }
+                Answer::Confirm(true) => {
+                    if matches!(&self.prompt, Some((Prompt::ConfirmAction { title, .. }, _)) if title == "Version mismatch")
+                    {
+                        self.prompt = None;
+                    }
+                    self.version_mismatch_deferred = true;
+                    if let Some(ctx) = context {
+                        match ctx.target {
+                            MismatchTarget::Controller => {
+                                self.open_controller();
+                                self.activate(Control::ControllerUpdates);
+                            }
+                            MismatchTarget::Workstation => {
+                                self.activate(Control::SettingsPage(SettingsPage::Updates));
+                                self.self_check_requested = true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.version_mismatch_dismissed
+            || self.version_mismatch_deferred
+            || self.version_mismatch_receiver.is_some()
+            || self.prompt.is_some()
+            || self.profile_copy.is_some()
+            || self.exit
+            || self.exit_confirm
+            || self.discard.is_some()
+            || self.nodes_busy
+            || self.nodes_requested.is_some()
+            || operation_active
+            || self.controller.verifying
+            || self.controller.removal_active()
+            || self.restart_required
+            || self.restart_requested
+            || matches!(
+                self.screen,
+                Screen::Running | Screen::Finished | Screen::SettingsPage(SettingsPage::Updates)
+            )
+            || self.controller.updates.is_some()
+            || self.form.action == Action::Update
+            || !self.has_installation()
+        {
+            return;
+        }
+
+        let Some(saved) = &self.form.saved else {
+            return;
+        };
+        if !saved.installed && self.installed_profile != Some(saved.id) {
+            return;
+        }
+
+        let Some((profile, version)) = &self.controller_version else {
+            return;
+        };
+        if *profile != saved.id {
+            return;
+        }
+
+        let Some(target) = evaluate_version_mismatch(version, env!("CARGO_PKG_VERSION")) else {
+            return;
+        };
+
+        let npw_channel = crate::config::default_branch();
+        let controller_channel = crate::config::version_branch(version).unwrap_or_else(|_| {
+            self.controller
+                .updates
+                .as_ref()
+                .and_then(|u| u["branch"].as_str())
+                .unwrap_or("unknown")
+        });
+
+        let description = format_version_mismatch_description(
+            version,
+            controller_channel,
+            env!("CARGO_PKG_VERSION"),
+            npw_channel,
+            target,
+            is_archived_migration(version, env!("CARGO_PKG_VERSION")),
+        );
+
+        let context = VersionMismatchContext {
+            profile_id: saved.id,
+            host: saved.host.clone(),
+            port: saved.port,
+            user: saved.user.clone(),
+            controller_version: version.clone(),
+            controller_channel: controller_channel.to_string(),
+            workstation_version: env!("CARGO_PKG_VERSION").to_string(),
+            workstation_channel: npw_channel.to_string(),
+            target,
+        };
+
+        let (reply, answer) = mpsc::channel();
+        self.prompt = Some((
+            Prompt::ConfirmAction {
+                title: "Version mismatch".into(),
+                description,
+            },
+            reply,
+        ));
+        self.trust = true;
+        self.version_mismatch_receiver = Some(answer);
+        self.version_mismatch_context = Some(context);
+    }
+}
+
+pub(crate) fn parse_clean_semver(raw: &str) -> Option<semver::Version> {
+    let clean = raw.split_whitespace().next()?.trim_start_matches('v');
+    semver::Version::parse(clean).ok()
+}
+
+pub(crate) fn clean_version_str(raw: &str) -> Option<String> {
+    let clean = raw.split_whitespace().next()?.trim_start_matches('v');
+    semver::Version::parse(clean).ok()?;
+    Some(clean.to_string())
+}
+
+pub(crate) fn is_archived_migration(controller_raw: &str, npw_raw: &str) -> bool {
+    let Some(cv) = parse_clean_semver(controller_raw) else {
+        return false;
+    };
+    let Some(nv) = parse_clean_semver(npw_raw) else {
+        return false;
+    };
+    nv.major == 0
+        && cv.major == 1
+        && cv.minor == 0
+        && cv.patch == 0
+        && cv
+            .pre
+            .as_str()
+            .split_once('.')
+            .is_some_and(|(stage, number)| {
+                matches!(stage, "alpha" | "beta")
+                    && !number.is_empty()
+                    && number.bytes().all(|b| b.is_ascii_digit())
+            })
+}
+
+pub(crate) fn evaluate_version_mismatch(
+    controller_raw: &str,
+    npw_raw: &str,
+) -> Option<MismatchTarget> {
+    let cv = parse_clean_semver(controller_raw)?;
+    let nv = parse_clean_semver(npw_raw)?;
+    if cv.major == nv.major && cv.minor == nv.minor && cv.patch == nv.patch && cv.pre == nv.pre {
+        return None;
+    }
+    if is_archived_migration(controller_raw, npw_raw) {
+        return Some(MismatchTarget::Controller);
+    }
+    let cv_clean = semver::Version {
+        major: cv.major,
+        minor: cv.minor,
+        patch: cv.patch,
+        pre: cv.pre,
+        build: semver::BuildMetadata::EMPTY,
+    };
+    let nv_clean = semver::Version {
+        major: nv.major,
+        minor: nv.minor,
+        patch: nv.patch,
+        pre: nv.pre,
+        build: semver::BuildMetadata::EMPTY,
+    };
+    if cv_clean < nv_clean {
+        Some(MismatchTarget::Controller)
+    } else {
+        Some(MismatchTarget::Workstation)
+    }
+}
+
+pub(crate) fn format_version_mismatch_description(
+    controller_version: &str,
+    controller_channel: &str,
+    workstation_version: &str,
+    workstation_channel: &str,
+    target: MismatchTarget,
+    is_archived: bool,
+) -> String {
+    let mut desc = format!(
+        "Controller version: {} ({})\nWorkstation version: {} ({})\n\n",
+        controller_version, controller_channel, workstation_version, workstation_channel
+    );
+    if is_archived {
+        desc.push_str("The installed controller is from an earlier archived release line (1.0 alpha/beta). Update the controller or perform a fresh installation.\n");
+    } else {
+        match target {
+            MismatchTarget::Controller => {
+                desc.push_str("The installed controller is outdated. Update the controller to match this Workstation.\n");
+            }
+            MismatchTarget::Workstation => {
+                desc.push_str("The installed controller is newer than this Workstation. Update Workstation to match.\n");
+            }
+        }
+    }
+    if controller_channel != workstation_channel {
+        desc.push_str(&format!(
+            "Channel mismatch: controller is on '{}', Workstation is on '{}'. Different channels can require matching Workstation or channel switch.\n",
+            controller_channel, workstation_channel
+        ));
+    }
+    desc.push_str("\nWarning: Continuing with different versions can cause errors or unsupported actions. Dismissal lasts only until NPW restarts.");
+    desc
 }
