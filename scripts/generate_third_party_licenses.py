@@ -24,7 +24,7 @@ import sys
 from typing import Sequence
 
 REQUIRED_CARGO_ABOUT_VERSION = "0.9.2"
-OWN_CRATES = {"node-plane-cli", "node-plane-driver", "node-plane-agent"}
+OWN_CRATES = {"node-plane-cli", "node-plane-driver", "node-plane-agent", "node-plane-relay", "node-plane-api"}
 SERVER_TARGET = "x86_64-unknown-linux-gnu"
 
 LEGAL_PREFIXES = ("license", "licence", "copying", "notice", "copyright")

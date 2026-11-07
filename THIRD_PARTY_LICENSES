@@ -6842,6 +6842,41 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/argon2/0.6.0
+- asn1-rs-derive@0.6.0
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/asn1-rs-derive/0.6.0
+- asn1-rs-impl@0.2.0
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/asn1-rs-impl/0.2.0
+- asn1-rs@0.7.2
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/asn1-rs/0.7.2
+- async-channel@2.5.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-channel/2.5.0
+- async-http-codec@0.8.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-http-codec/0.8.0
+- async-io@2.6.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-io/2.6.0
+- async-net@2.0.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-net/2.0.0
 - async-stream-impl@0.3.6
   Declared SPDX: MIT
   Components: node-plane-agent, node-plane-driver
@@ -6852,11 +6887,21 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-agent, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/async-stream/0.3.6
+- async-task@4.7.1
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-task/4.7.1
 - async-trait@0.1.89
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/async-trait/0.1.89
+- async-web-client@0.6.4
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/async-web-client/0.6.4
 - atomic-waker@1.1.2
   Declared SPDX: Apache-2.0 OR MIT
   Components: node-plane-agent, node-plane-cli, node-plane-driver
@@ -6972,6 +7017,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/block-padding/0.4.2
+- blocking@1.7.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/blocking/1.7.0
 - blowfish@0.10.0
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -7102,6 +7152,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/compact_str/0.9.1
+- concurrent-queue@2.5.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/concurrent-queue/2.5.0
 - const-oid@0.10.2
   Declared SPDX: Apache-2.0 OR MIT
   Components: node-plane-cli, node-plane-driver
@@ -7137,6 +7192,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/cpufeatures/0.3.1
+- crossbeam-utils@0.8.23
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/crossbeam-utils/0.8.23
 - crossterm@0.29.0
   Declared SPDX: MIT
   Components: node-plane-cli
@@ -7199,7 +7259,7 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Source package: https://crates.io/crates/darling_macro/0.24.1
 - data-encoding@2.11.1
   Declared SPDX: MIT
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/data-encoding/2.11.1
 - delegate@0.13.5
@@ -7207,11 +7267,21 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/delegate/0.13.5
+- der-parser@10.0.0
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/der-parser/10.0.0
 - der@0.8.2
   Declared SPDX: Apache-2.0 OR MIT
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/der/0.8.2
+- deranged@0.5.9
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/deranged/0.5.9
 - derive_more-impl@2.1.1
   Declared SPDX: MIT
   Components: node-plane-cli
@@ -7244,7 +7314,7 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Source package: https://crates.io/crates/dirs/6.0.0
 - displaydoc@0.2.7
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/displaydoc/0.2.7
 - document-features@0.2.12
@@ -7312,6 +7382,16 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/error-code/3.4.0
+- event-listener-strategy@0.5.4
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/event-listener-strategy/0.5.4
+- event-listener@5.4.2
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/event-listener/5.4.2
 - fallible-iterator@0.3.0
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent
@@ -7407,6 +7487,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/futures-core/0.3.34
+- futures-executor@0.3.32
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/futures-executor/0.3.32
 - futures-executor@0.3.34
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -7414,14 +7499,29 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Source package: https://crates.io/crates/futures-executor/0.3.34
 - futures-io@0.3.34
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/futures-io/0.3.34
+- futures-lite@2.6.1
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/futures-lite/2.6.1
+- futures-macro@0.3.32
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/futures-macro/0.3.32
 - futures-macro@0.3.34
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/futures-macro/0.3.34
+- futures-rustls@0.26.0
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/futures-rustls/0.26.0
 - futures-sink@0.3.32
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-driver
@@ -7452,6 +7552,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/futures-util/0.3.34
+- futures@0.3.32
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/futures/0.3.32
 - futures@0.3.34
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -7769,7 +7874,7 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Source package: https://crates.io/crates/kem/0.3.0
 - lazy_static@1.5.1
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/lazy_static/1.5.1
 - libc@0.2.184
@@ -7862,6 +7967,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/mime/0.3.17
+- minimal-lexical@0.2.1
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/minimal-lexical/0.2.1
 - miniz_oxide@0.8.9
   Declared SPDX: MIT OR Zlib OR Apache-2.0
   Components: node-plane-agent
@@ -7907,19 +8017,34 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/nix/0.31.3
+- nom@7.1.3
+  Declared SPDX: MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/nom/7.1.3
 - nom@8.0.0
   Declared SPDX: MIT
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/nom/8.0.0
+- num-bigint@0.4.8
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/num-bigint/0.4.8
 - num-bigint@0.5.1
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/num-bigint/0.5.1
+- num-conv@0.2.2
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/num-conv/0.2.2
 - num-integer@0.1.47
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/num-integer/0.1.47
 - num-traits@0.2.19
@@ -7957,6 +8082,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/objc2/0.6.5
+- oid-registry@0.8.1
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/oid-registry/0.8.1
 - once_cell@1.21.4
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-cli, node-plane-driver
@@ -8002,6 +8132,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/pageant/0.2.4
+- parking@2.2.1
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/parking/2.2.1
 - parking_lot@0.12.5
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -8022,6 +8157,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/pem-rfc7468/1.0.0
+- pem@3.0.6
+  Declared SPDX: MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/pem/3.0.6
 - percent-encoding@2.3.2
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-cli, node-plane-driver
@@ -8052,6 +8192,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-agent, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/pin-project/1.1.11
+- piper@0.2.5
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/piper/0.2.5
 - pkcs5@0.8.1
   Declared SPDX: Apache-2.0 OR MIT
   Components: node-plane-cli
@@ -8067,6 +8212,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-agent, node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/pkg-config/0.3.34
+- polling@3.11.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/polling/3.11.0
 - poly1305@0.9.1
   Declared SPDX: Apache-2.0 OR MIT
   Components: node-plane-cli
@@ -8082,6 +8232,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/potential_utf/0.1.6
+- powerfmt@0.2.1
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/powerfmt/0.2.1
 - ppv-lite86@0.2.21
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-driver
@@ -8202,6 +8357,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/ratatui/0.30.2
+- rcgen@0.13.2
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/rcgen/0.13.2
 - regex-automata@0.4.14
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-driver
@@ -8272,6 +8432,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/rustc_version/0.4.1
+- rusticata-macros@4.1.0
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/rusticata-macros/4.1.0
 - rustix@1.1.4
   Declared SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   Components: node-plane-agent, node-plane-driver
@@ -8282,6 +8447,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/rustix/1.1.5
+- rustls-acme@0.15.4
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/rustls-acme/0.15.4
 - rustls-native-certs@0.8.4
   Declared SPDX: Apache-2.0 OR ISC OR MIT
   Components: node-plane-cli
@@ -8417,6 +8587,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/serde_json/1.0.151
+- serde_path_to_error@0.1.20
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/serde_path_to_error/0.1.20
 - serde_spanned@0.6.9
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent, node-plane-driver
@@ -8577,11 +8752,21 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/syn/3.0.6
+- syn@3.0.9
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/syn/3.0.9
 - sync_wrapper@1.0.2
   Declared SPDX: Apache-2.0
   Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/sync_wrapper/1.0.2
+- synstructure@0.13.2
+  Declared SPDX: MIT
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/synstructure/0.13.2
 - synstructure@0.14.0
   Declared SPDX: MIT
   Components: node-plane-cli
@@ -8599,14 +8784,29 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Source package: https://crates.io/crates/tempfile/3.27.0
 - thiserror-impl@2.0.21
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/thiserror-impl/2.0.21
 - thiserror@2.0.21
   Declared SPDX: MIT OR Apache-2.0
-  Components: node-plane-cli
+  Components: node-plane-agent, node-plane-cli, node-plane-driver
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/thiserror/2.0.21
+- time-core@0.1.9
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/time-core/0.1.9
+- time-macros@0.2.32
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/time-macros/0.2.32
+- time@0.3.55
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/time/0.3.55
 - tinystr@0.8.4
   Declared SPDX: Unicode-3.0
   Components: node-plane-cli
@@ -8807,6 +9007,11 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/uuid/1.27.0
+- uuid@1.29.0
+  Declared SPDX: Apache-2.0 OR MIT
+  Components: node-plane-agent
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/uuid/1.29.0
 - vcpkg@0.2.15
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-agent
@@ -8862,11 +9067,21 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/wayland-sys/0.31.11
+- webpki-roots@0.26.11
+  Declared SPDX: CDLA-Permissive-2.0
+  Components: node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/webpki-roots/0.26.11
 - webpki-roots@1.0.10
   Declared SPDX: CDLA-Permissive-2.0
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/webpki-roots/1.0.10
+- webpki-roots@1.0.11
+  Declared SPDX: CDLA-Permissive-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/webpki-roots/1.0.11
 - widestring@1.2.1
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
@@ -9037,11 +9252,21 @@ Third-Party Crate Dependency Index & Graph Component Mapping
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/x11rb/0.13.2
+- x509-parser@0.18.1
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/x509-parser/0.18.1
 - xattr@1.6.1
   Declared SPDX: MIT OR Apache-2.0
   Components: node-plane-cli
   Source: registry+https://github.com/rust-lang/crates.io-index
   Source package: https://crates.io/crates/xattr/1.6.1
+- yasna@0.5.2
+  Declared SPDX: MIT OR Apache-2.0
+  Components: node-plane-agent, node-plane-driver
+  Source: registry+https://github.com/rust-lang/crates.io-index
+  Source package: https://crates.io/crates/yasna/0.5.2
 - yoke-derive@0.8.4
   Declared SPDX: Unicode-3.0
   Components: node-plane-cli
@@ -9514,22 +9739,35 @@ Used by:
   - allocator-api2@0.2.21 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - anyhow@1.0.102 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - anyhow@1.0.104 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - async-channel@2.5.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-io@2.6.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-net@2.0.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-task@4.7.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - async-trait@0.1.89 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - atomic-waker@1.1.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - blocking@1.7.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - camino@1.2.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - concurrent-queue@2.5.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - curve25519-dalek-derive@0.1.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - displaydoc@0.2.7 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - displaydoc@0.2.7 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - event-listener-strategy@0.5.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - event-listener@5.4.2 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - fastrand@2.4.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - fastrand@2.5.0 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
+  - futures-lite@2.6.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - group@0.14.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - indoc@2.0.7 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - itoa@1.0.18 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
-  - lazy_static@1.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - lazy_static@1.5.1 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - linux-raw-sys@0.12.1 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
+  - minimal-lexical@0.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - once_cell@1.21.4 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - parking@2.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - pin-project-internal@1.1.11 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - pin-project-lite@0.2.17 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - pin-project@1.1.11 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - piper@0.2.5 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - polling@3.11.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - prettyplease@0.2.37 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - proc-macro2@1.0.106 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - proc-macro2@1.0.107 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -9537,6 +9775,7 @@ Used by:
   - quote@1.0.47 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - rustix@1.1.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
   - rustix@1.1.5 [Components: node-plane-cli] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
+  - rustls-acme@0.15.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - rustversion@1.0.22 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - rustversion@1.0.23 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - semver@1.0.28 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -9548,11 +9787,13 @@ Used by:
   - serde_derive@1.0.229 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - serde_json@1.0.149 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - serde_json@1.0.151 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - serde_path_to_error@0.1.20 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - syn@2.0.117 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - syn@2.0.119 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - syn@3.0.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - thiserror-impl@2.0.21 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - thiserror@2.0.21 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - syn@3.0.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - thiserror-impl@2.0.21 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - thiserror@2.0.21 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - unicode-ident@1.0.24 [Components: node-plane-agent, node-plane-driver] [SPDX: (MIT OR Apache-2.0) AND Unicode-3.0]
   - unicode-ident@1.0.26 [Components: node-plane-cli] [SPDX: (MIT OR Apache-2.0) AND Unicode-3.0]
   - zmij@1.0.21 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
@@ -10424,12 +10665,14 @@ Used by:
   - serde_derive@1.0.229 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - serde_json@1.0.149 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - serde_json@1.0.151 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - serde_path_to_error@0.1.20 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - serde_urlencoded@0.7.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - syn@2.0.117 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - syn@2.0.119 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - syn@3.0.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - thiserror-impl@2.0.21 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - thiserror@2.0.21 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - syn@3.0.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - thiserror-impl@2.0.21 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - thiserror@2.0.21 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - unicode-ident@1.0.24 [Components: node-plane-agent, node-plane-driver] [SPDX: (MIT OR Apache-2.0) AND Unicode-3.0]
   - unicode-ident@1.0.26 [Components: node-plane-cli] [SPDX: (MIT OR Apache-2.0) AND Unicode-3.0]
   - utf8parse@0.2.2 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
@@ -10887,10 +11130,14 @@ Used by:
   - arboard@3.6.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - image@0.25.10 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - miniz_oxide@0.8.9 [Components: node-plane-agent] [SPDX: MIT OR Zlib OR Apache-2.0]
+  - num-conv@0.2.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - pin-project-internal@1.1.11 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - pin-project-lite@0.2.17 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - pin-project@1.1.11 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - sync_wrapper@1.0.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0]
+  - time-core@0.1.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - time-macros@0.2.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - time@0.3.55 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
 
@@ -11142,153 +11389,18 @@ DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
-License Notice (SHA-256: 157d381f6304eba77459fc10dfb5b1b22fc0d04e384a32865f32d8e67a34c0eb)
+License Notice (SHA-256: a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
 Used by:
-  - async-stream-impl@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
-  - async-stream@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+  - asn1-rs-derive@0.6.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - asn1-rs-impl@0.2.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - asn1-rs@0.7.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - der-parser@10.0.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - oid-registry@0.8.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - rusticata-macros@4.1.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - x509-parser@0.18.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
-Copyright (c) 2019 Carl Lerche
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-Copyright (c) 2018 David Tolnay
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-
-
---------------------------------------------------------------------------------
-License Notice (SHA-256: b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5)
-Used by:
-  - async-stream-impl@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
-  - async-stream@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
-  - axoupdater@0.10.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - delegate@0.13.5 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - md5@0.8.1 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
-  - objc2-app-kit@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
-  - objc2-core-foundation@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
-  - objc2-core-graphics@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
-  - objc2-encode@4.1.0 [Components: node-plane-cli] [SPDX: MIT]
-  - objc2-foundation@0.3.2 [Components: node-plane-cli] [SPDX: MIT]
-  - objc2@0.6.5 [Components: node-plane-cli] [SPDX: MIT]
-  - windows-collections@0.2.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-collections@0.3.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-core@0.61.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-core@0.62.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-future@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-future@0.3.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-implement@0.60.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-interface@0.59.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-link@0.1.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-link@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-numerics@0.2.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-numerics@0.3.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-result@0.3.4 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-result@0.4.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-strings@0.4.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-strings@0.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-sys@0.52.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-sys@0.61.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-targets@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-threading@0.1.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows-threading@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows@0.61.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows@0.62.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows_x86_64_gnu@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - windows_x86_64_msvc@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
---------------------------------------------------------------------------------
-
-MIT License
-
-Copyright (c) <year> <copyright holders>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-associated documentation files (the "Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
-following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial
-portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
-EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-
---------------------------------------------------------------------------------
-License Notice (SHA-256: 6226d0632e2e1a80c23597e964da9812ae193c535fe058154afb034e94167aa5)
-Used by:
-  - atomic-waker@1.1.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
---------------------------------------------------------------------------------
-
-===============================================================================
-
-Copyright (c) 2016 Alex Crichton
-Copyright (c) 2017 The Tokio Authors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-===============================================================================
-
-Copyright (c) 2016 Alex Crichton
-Copyright (c) 2017 The Tokio Authors
+Copyright (c) 2017 Pierre Chifflier
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -11318,6 +11430,13 @@ DEALINGS IN THE SOFTWARE.
 --------------------------------------------------------------------------------
 License Notice (SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
 Used by:
+  - asn1-rs-derive@0.6.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - asn1-rs-impl@0.2.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - asn1-rs@0.7.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - async-channel@2.5.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-io@2.6.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-net@2.0.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-task@4.7.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - atomic-waker@1.1.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - autocfg@1.5.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - autocfg@1.5.1 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
@@ -11326,20 +11445,26 @@ Used by:
   - bitflags@2.11.0 [Components: node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - bitflags@2.11.1 [Components: node-plane-agent] [SPDX: MIT OR Apache-2.0]
   - bitflags@2.13.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - blocking@1.7.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - camino@1.2.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - cc@1.2.59 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - cc@1.6.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - cfg-if@1.0.4 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - cfg-if@1.0.5 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - cmake@0.1.58 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - concurrent-queue@2.5.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - core-foundation-sys@0.8.7 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - core-foundation@0.10.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - crossbeam-utils@0.8.23 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - curve25519-dalek-derive@0.1.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - displaydoc@0.2.7 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - der-parser@10.0.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - displaydoc@0.2.7 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - either@1.15.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - either@1.18.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - equivalent@1.0.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - errno@0.3.14 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - event-listener-strategy@0.5.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - event-listener@5.4.2 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - fastrand@2.4.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - fastrand@2.5.0 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
   - filetime@0.2.29 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -11349,6 +11474,7 @@ Used by:
   - fnv@1.0.7 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0  OR  MIT]
   - form_urlencoded@1.2.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - fs2@0.4.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures-lite@2.6.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - gethostname@1.1.0 [Components: node-plane-cli] [SPDX: Apache-2.0]
   - group@0.14.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - hashbrown@0.12.3 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
@@ -11366,24 +11492,29 @@ Used by:
   - indexmap@2.14.0 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
   - itertools@0.14.0 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - jobserver@0.1.35 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - lazy_static@1.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - lazy_static@1.5.1 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - linux-raw-sys@0.12.1 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
   - lock_api@0.4.14 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - log@0.4.29 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - log@0.4.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - mime@0.3.17 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - multimap@0.10.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - num-bigint@0.4.8 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - num-bigint@0.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - num-integer@0.1.47 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - num-integer@0.1.47 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - num-traits@0.2.19 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - oid-registry@0.8.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - once_cell@1.21.4 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - openssl-probe@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - parking@2.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - parking_lot@0.12.5 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - parking_lot_core@0.9.12 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - percent-encoding@2.3.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - petgraph@0.7.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - petgraph@0.8.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - piper@0.2.5 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - pkg-config@0.3.34 [Components: node-plane-agent, node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - polling@3.11.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - prost-build@0.13.5 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0]
   - prost-derive@0.13.5 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0]
   - prost-types@0.13.5 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0]
@@ -11393,8 +11524,10 @@ Used by:
   - regex@1.12.3 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - ring@0.17.14 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 AND ISC]
   - rustc_version@0.4.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - rusticata-macros@4.1.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - rustix@1.1.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
   - rustix@1.1.5 [Components: node-plane-cli] [SPDX: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT]
+  - rustls-acme@0.15.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - rustls-native-certs@0.8.4 [Components: node-plane-cli] [SPDX: Apache-2.0 OR ISC OR MIT]
   - rustls-pemfile@2.2.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR ISC OR MIT]
   - rustls@0.23.45 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR ISC OR MIT]
@@ -11420,9 +11553,12 @@ Used by:
   - url@2.5.8 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - uuid@1.23.0 [Components: node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - uuid@1.27.0 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
+  - uuid@1.29.0 [Components: node-plane-agent] [SPDX: Apache-2.0 OR MIT]
   - version_check@0.9.5 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - wl-clipboard-rs@0.9.4 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - x509-parser@0.18.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - xattr@1.6.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - yasna@0.5.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
                               Apache License
@@ -11626,6 +11762,297 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5)
+Used by:
+  - asn1-rs-impl@0.2.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - async-http-codec@0.8.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-stream-impl@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+  - async-stream@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+  - async-web-client@0.6.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - axoupdater@0.10.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - delegate@0.13.5 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - md5@0.8.1 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
+  - objc2-app-kit@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
+  - objc2-core-foundation@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
+  - objc2-core-graphics@0.3.2 [Components: node-plane-cli] [SPDX: Zlib OR Apache-2.0 OR MIT]
+  - objc2-encode@4.1.0 [Components: node-plane-cli] [SPDX: MIT]
+  - objc2-foundation@0.3.2 [Components: node-plane-cli] [SPDX: MIT]
+  - objc2@0.6.5 [Components: node-plane-cli] [SPDX: MIT]
+  - rcgen@0.13.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - windows-collections@0.2.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-collections@0.3.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-core@0.61.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-core@0.62.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-future@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-future@0.3.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-implement@0.60.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-interface@0.59.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-link@0.1.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-link@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-numerics@0.2.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-numerics@0.3.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-result@0.3.4 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-result@0.4.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-strings@0.4.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-strings@0.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-sys@0.52.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-sys@0.61.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-targets@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-threading@0.1.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows-threading@0.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows@0.61.3 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows@0.62.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows_x86_64_gnu@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - windows_x86_64_msvc@0.52.6 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - yasna@0.5.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) <year> <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff)
+Used by:
+  - async-http-codec@0.8.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-web-client@0.6.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - aws-lc-sys@0.45.0 [Components: node-plane-cli] [SPDX: ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)]
+  - document-features@0.2.12 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - dunce@1.0.5 [Components: node-plane-cli] [SPDX: CC0-1.0 OR MIT-0 OR Apache-2.0]
+  - pageant@0.2.4 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - rpassword@7.5.4 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - rtoolbox@0.0.6 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - russh-cryptovec@0.62.0 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - russh-util@0.52.0 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - russh@0.63.3 [Components: node-plane-cli] [SPDX: Apache-2.0]
+  - ryu@1.0.23 [Components: node-plane-cli] [SPDX: Apache-2.0 OR BSL-1.0]
+  - sync_wrapper@1.0.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0]
+--------------------------------------------------------------------------------
+
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+     (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
+
+     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0)
+Used by:
+  - async-http-codec@0.8.0 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - async-web-client@0.6.4 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) <year> <copyright holders>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 157d381f6304eba77459fc10dfb5b1b22fc0d04e384a32865f32d8e67a34c0eb)
+Used by:
+  - async-stream-impl@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+  - async-stream@0.3.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2019 Carl Lerche
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Copyright (c) 2018 David Tolnay
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 6226d0632e2e1a80c23597e964da9812ae193c535fe058154afb034e94167aa5)
+Used by:
+  - atomic-waker@1.1.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+  - futures-lite@2.6.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+--------------------------------------------------------------------------------
+
+===============================================================================
+
+Copyright (c) 2016 Alex Crichton
+Copyright (c) 2017 The Tokio Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+===============================================================================
+
+Copyright (c) 2016 Alex Crichton
+Copyright (c) 2017 The Tokio Authors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -11887,97 +12314,6 @@ Copyright (c) 1995-2003 by Internet Software Consortium
 Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
 
 THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL ISC BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
-
---------------------------------------------------------------------------------
-License Notice (SHA-256: 074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff)
-Used by:
-  - aws-lc-sys@0.45.0 [Components: node-plane-cli] [SPDX: ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)]
-  - document-features@0.2.12 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - dunce@1.0.5 [Components: node-plane-cli] [SPDX: CC0-1.0 OR MIT-0 OR Apache-2.0]
-  - pageant@0.2.4 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - rpassword@7.5.4 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - rtoolbox@0.0.6 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - russh-cryptovec@0.62.0 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - russh-util@0.52.0 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - russh@0.63.3 [Components: node-plane-cli] [SPDX: Apache-2.0]
-  - ryu@1.0.23 [Components: node-plane-cli] [SPDX: Apache-2.0 OR BSL-1.0]
-  - sync_wrapper@1.0.2 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: Apache-2.0]
---------------------------------------------------------------------------------
-
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, "control" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
-
-"Object" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, "submitted" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
-
-2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
-
-3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
-
-     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
-
-     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and
-
-     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
-
-     (d) If the Work includes a "NOTICE" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
-
-     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
-
-5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
-
-6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
-
-8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work.
-
-To apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets "[]" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same "printed page" as the copyright notice for easier identification within third-party archives.
-
-Copyright [yyyy] [name of copyright owner]
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 
 
 --------------------------------------------------------------------------------
@@ -13593,8 +13929,9 @@ Used by:
   - bitflags@2.13.2 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - log@0.4.29 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - log@0.4.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - num-bigint@0.4.8 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - num-bigint@0.5.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - num-integer@0.1.47 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - num-integer@0.1.47 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - num-traits@0.2.19 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - regex-automata@0.4.14 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - regex-syntax@0.8.10 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
@@ -15101,6 +15438,41 @@ DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
+License Notice (SHA-256: 5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab)
+Used by:
+  - crossbeam-utils@0.8.23 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2019 The Crossbeam Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
 License Notice (SHA-256: 3fea97e00df9a8e30027f4298d6941b6970c542ffd49de68b4a2bcafedcbfe02)
 Used by:
   - crossterm@0.29.0 [Components: node-plane-cli] [SPDX: MIT]
@@ -15269,7 +15641,7 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 License Notice (SHA-256: b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186)
 Used by:
-  - data-encoding@2.11.1 [Components: node-plane-cli] [SPDX: MIT]
+  - data-encoding@2.11.1 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT]
 --------------------------------------------------------------------------------
 
 The MIT License (MIT)
@@ -15537,6 +15909,243 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b)
+Used by:
+  - deranged@0.5.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2024 Jacob Pratt et al.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376)
+Used by:
+  - deranged@0.5.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2024 Jacob Pratt et al.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 
 
 --------------------------------------------------------------------------------
@@ -15846,6 +16455,7 @@ SOFTWARE.
 License Notice (SHA-256: 8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90)
 Used by:
   - downcast-rs@1.2.1 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - minimal-lexical@0.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
                               Apache License
@@ -16945,8 +17555,10 @@ Used by:
   - futures-channel@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-core@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-core@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures-executor@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-executor@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - futures-io@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures-io@0.3.34 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - futures-macro@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-macro@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-sink@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-sink@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -16954,6 +17566,7 @@ Used by:
   - futures-task@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-util@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-util@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
@@ -17168,8 +17781,10 @@ Used by:
   - futures-channel@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-core@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-core@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures-executor@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-executor@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
-  - futures-io@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures-io@0.3.34 [Components: node-plane-agent, node-plane-cli, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - futures-macro@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-macro@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-sink@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-sink@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -17177,6 +17792,7 @@ Used by:
   - futures-task@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
   - futures-util@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures-util@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
+  - futures@0.3.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
   - futures@0.3.34 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
 --------------------------------------------------------------------------------
 
@@ -17206,6 +17822,248 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 8ef00f37f3b49f388ee3d2ffb66b51dbc433430350e6c82b48e0a79e33a86a44)
+Used by:
+  - futures-rustls@0.26.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2020 quininer kel
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 99864c445c106e20fb256d2c49d6eff14ed8f0191bf7a050189e6ad1cd040322)
+Used by:
+  - futures-rustls@0.26.0 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+                              Apache License
+                        Version 2.0, January 2004
+                     http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean the copyright owner or entity authorized by
+   the copyright owner that is granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all
+   other entities that control, are controlled by, or are under common
+   control with that entity. For the purposes of this definition,
+   "control" means (i) the power, direct or indirect, to cause the
+   direction or management of such entity, whether by contract or
+   otherwise, or (ii) ownership of fifty percent (50%) or more of the
+   outstanding shares, or (iii) beneficial ownership of such entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity
+   exercising permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation
+   source, and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical
+   transformation or translation of a Source form, including but
+   not limited to compiled object code, generated documentation,
+   and conversions to other media types.
+
+   "Work" shall mean the work of authorship, whether in Source or
+   Object form, made available under the License, as indicated by a
+   copyright notice that is included in or attached to the work
+   (an example is provided in the Appendix below).
+
+   "Derivative Works" shall mean any work, whether in Source or Object
+   form, that is based on (or derived from) the Work and for which the
+   editorial revisions, annotations, elaborations, or other modifications
+   represent, as a whole, an original work of authorship. For the purposes
+   of this License, Derivative Works shall not include works that remain
+   separable from, or merely link (or bind by name) to the interfaces of,
+   the Work and Derivative Works thereof.
+
+   "Contribution" shall mean any work of authorship, including
+   the original version of the Work and any modifications or additions
+   to that Work or Derivative Works thereof, that is intentionally
+   submitted to Licensor for inclusion in the Work by the copyright owner
+   or by an individual or Legal Entity authorized to submit on behalf of
+   the copyright owner. For the purposes of this definition, "submitted"
+   means any form of electronic, verbal, or written communication sent
+   to the Licensor or its representatives, including but not limited to
+   communication on electronic mailing lists, source code control systems,
+   and issue tracking systems that are managed by, or on behalf of, the
+   Licensor for the purpose of discussing and improving the Work, but
+   excluding communication that is conspicuously marked or otherwise
+   designated in writing by the copyright owner as "Not a Contribution."
+
+   "Contributor" shall mean Licensor and any individual or Legal Entity
+   on behalf of whom a Contribution has been received by Licensor and
+   subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   copyright license to reproduce, prepare Derivative Works of,
+   publicly display, publicly perform, sublicense, and distribute the
+   Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+   this License, each Contributor hereby grants to You a perpetual,
+   worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+   (except as stated in this section) patent license to make, have made,
+   use, offer to sell, sell, import, and otherwise transfer the Work,
+   where such license applies only to those patent claims licensable
+   by such Contributor that are necessarily infringed by their
+   Contribution(s) alone or by combination of their Contribution(s)
+   with the Work to which such Contribution(s) was submitted. If You
+   institute patent litigation against any entity (including a
+   cross-claim or counterclaim in a lawsuit) alleging that the Work
+   or a Contribution incorporated within the Work constitutes direct
+   or contributory patent infringement, then any patent licenses
+   granted to You under this License for that Work shall terminate
+   as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+   Work or Derivative Works thereof in any medium, with or without
+   modifications, and in Source or Object form, provided that You
+   meet the following conditions:
+
+   (a) You must give any other recipients of the Work or
+       Derivative Works a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices
+       stating that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works
+       that You distribute, all copyright, patent, trademark, and
+       attribution notices from the Source form of the Work,
+       excluding those notices that do not pertain to any part of
+       the Derivative Works; and
+
+   (d) If the Work includes a "NOTICE" text file as part of its
+       distribution, then any Derivative Works that You distribute must
+       include a readable copy of the attribution notices contained
+       within such NOTICE file, excluding those notices that do not
+       pertain to any part of the Derivative Works, in at least one
+       of the following places: within a NOTICE text file distributed
+       as part of the Derivative Works; within the Source form or
+       documentation, if provided along with the Derivative Works; or,
+       within a display generated by the Derivative Works, if and
+       wherever such third-party notices normally appear. The contents
+       of the NOTICE file are for informational purposes only and
+       do not modify the License. You may add Your own attribution
+       notices within Derivative Works that You distribute, alongside
+       or as an addendum to the NOTICE text from the Work, provided
+       that such additional attribution notices cannot be construed
+       as modifying the License.
+
+   You may add Your own copyright statement to Your modifications and
+   may provide additional or different license terms and conditions
+   for use, reproduction, or distribution of Your modifications, or
+   for any such Derivative Works as a whole, provided Your use,
+   reproduction, and distribution of the Work otherwise complies with
+   the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+   any Contribution intentionally submitted for inclusion in the Work
+   by You to the Licensor shall be under the terms and conditions of
+   this License, without any additional terms or conditions.
+   Notwithstanding the above, nothing herein shall supersede or modify
+   the terms of any separate license agreement you may have executed
+   with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+   names, trademarks, service marks, or product names of the Licensor,
+   except as required for reasonable and customary use in describing the
+   origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+   agreed to in writing, Licensor provides the Work (and each
+   Contributor provides its Contributions) on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied, including, without limitation, any warranties or conditions
+   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+   PARTICULAR PURPOSE. You are solely responsible for determining the
+   appropriateness of using or redistributing the Work and assume any
+   risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+   whether in tort (including negligence), contract, or otherwise,
+   unless required by applicable law (such as deliberate and grossly
+   negligent acts) or agreed to in writing, shall any Contributor be
+   liable to You for damages, including any direct, indirect, special,
+   incidental, or consequential damages of any character arising as a
+   result of this License or out of the use or inability to use the
+   Work (including but not limited to damages for loss of goodwill,
+   work stoppage, computer failure or malfunction, or any and all
+   other commercial damages or losses), even if such Contributor
+   has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+   the Work or Derivative Works thereof, You may choose to offer,
+   and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this
+   License. However, in accepting such obligations, You may act only
+   on Your own behalf and on Your sole responsibility, not on behalf
+   of any other Contributor, and only if You agree to indemnify,
+   defend, and hold each Contributor harmless for any liability
+   incurred by, or claims asserted against, such Contributor by reason
+   of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+   To apply the Apache License to your work, attach the following
+   boilerplate notice, with the fields enclosed by brackets "[]"
+   replaced with your own identifying information. (Don't include
+   the brackets!)  The text should be enclosed in the appropriate
+   comment syntax for the file format. We also recommend that a
+   file or class name and description of purpose be included on the
+   same "printed page" as the copyright notice for easier
+   identification within third-party archives.
+
+Copyright 2020 quininer kel
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
 
 --------------------------------------------------------------------------------
@@ -21292,6 +22150,51 @@ THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
+License Notice (SHA-256: dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599)
+Used by:
+  - minimal-lexical@0.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Minimal-lexical is dual licensed under the Apache 2.0 license as well as the MIT
+license. See the LICENCE-MIT and the LICENCE-APACHE files for the licenses.
+
+---
+
+`src/bellerophon.rs` is loosely based off the Golang implementation,
+found [here](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/src/strconv/extfloat.go).
+That code (used if the `compact` feature is enabled) is subject to a
+[3-clause BSD license](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/LICENSE):
+
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+--------------------------------------------------------------------------------
 License Notice (SHA-256: 0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39)
 Used by:
   - miniz_oxide@0.8.9 [Components: node-plane-agent] [SPDX: MIT OR Zlib OR Apache-2.0]
@@ -21744,6 +22647,7 @@ THE SOFTWARE.
 --------------------------------------------------------------------------------
 License Notice (SHA-256: 4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0)
 Used by:
+  - nom@7.1.3 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
   - nom@8.0.0 [Components: node-plane-cli] [SPDX: MIT]
 --------------------------------------------------------------------------------
 
@@ -21767,6 +22671,33 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: e2e245f2b566d0bfafb0f6a04c16b82d710c4e6e7d799e39bb4ef6e541b85b98)
+Used by:
+  - num-conv@0.2.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) Jacob Pratt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -22258,6 +23189,23 @@ DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
+License Notice (SHA-256: 9a6d7a3c1b8edcc706c4b6c37f8dae9a77f02c7f9051df603f975db136b55419)
+Used by:
+  - parking@2.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: Apache-2.0 OR MIT]
+--------------------------------------------------------------------------------
+
+===============================================================================
+
+Copyright 2014-2020 The Rust Project Developers
+
+Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+<LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+option. All files in the project carrying such notice may not be
+copied, modified, or distributed except according to those terms.
+
+
+--------------------------------------------------------------------------------
 License Notice (SHA-256: 8ea5cea8ddecc46a64a004406414d25529fca7eb71cfd8c0cfe49c343bff79c5)
 Used by:
   - pbkdf2@0.13.0 [Components: node-plane-cli] [SPDX: MIT OR Apache-2.0]
@@ -22325,6 +23273,35 @@ DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
+License Notice (SHA-256: b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf)
+Used by:
+  - pem@3.0.6 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Jonathan Creekmore
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
 License Notice (SHA-256: 37ecdbc1c72e7651b5d06b51be11a3873ed7aed6d0a050dfd3c34fa99c56e3ef)
 Used by:
   - petgraph@0.7.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
@@ -22370,6 +23347,243 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852)
+Used by:
+  - powerfmt@0.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2023 Jacob Pratt et al.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0)
+Used by:
+  - powerfmt@0.2.1 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2023 Jacob Pratt et al.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
 
 
 --------------------------------------------------------------------------------
@@ -23236,6 +24450,228 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 2ff0e21d54b189664c884c142f7a608aae1515524b72e6b1ca251577760d44cf)
+Used by:
+  - rcgen@0.13.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2019-2022 est31 <MTest31@outlook.com> and contributors
+
+Licensed under MIT or Apache License 2.0,
+at your option.
+
+The full list of contributors can be obtained by looking
+at the VCS log (originally, this crate was git versioned,
+there you can do "git shortlog -sn" for this task).
+
+MIT License
+-----------
+
+The MIT License (MIT)
+
+Copyright (c) 2019-2022 est31 <MTest31@outlook.com> and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+Apache License, version 2.0
+---------------------------
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
 
 
 --------------------------------------------------------------------------------
@@ -25805,6 +27241,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --------------------------------------------------------------------------------
 License Notice (SHA-256: 219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59)
 Used by:
+  - synstructure@0.13.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT]
   - synstructure@0.14.0 [Components: node-plane-cli] [SPDX: MIT]
 --------------------------------------------------------------------------------
 
@@ -25882,6 +27319,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc)
+Used by:
+  - time-core@0.1.9 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - time-macros@0.2.32 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+  - time@0.3.55 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) Jacob Pratt et al.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 
 --------------------------------------------------------------------------------
@@ -26932,6 +28398,7 @@ License Notice (SHA-256: 436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d
 Used by:
   - uuid@1.23.0 [Components: node-plane-driver] [SPDX: Apache-2.0 OR MIT]
   - uuid@1.27.0 [Components: node-plane-cli] [SPDX: Apache-2.0 OR MIT]
+  - uuid@1.29.0 [Components: node-plane-agent] [SPDX: Apache-2.0 OR MIT]
 --------------------------------------------------------------------------------
 
 Copyright (c) 2014 The Rust Project Developers
@@ -27128,7 +28595,9 @@ The above is the version of the MIT "Expat" License used by X.org:
 --------------------------------------------------------------------------------
 License Notice (SHA-256: e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8)
 Used by:
+  - webpki-roots@0.26.11 [Components: node-plane-driver] [SPDX: CDLA-Permissive-2.0]
   - webpki-roots@1.0.10 [Components: node-plane-cli] [SPDX: CDLA-Permissive-2.0]
+  - webpki-roots@1.0.11 [Components: node-plane-agent, node-plane-driver] [SPDX: CDLA-Permissive-2.0]
 --------------------------------------------------------------------------------
 
 # Community Data License Agreement - Permissive - Version 2.0
@@ -27632,6 +29101,21 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+License Notice (SHA-256: 2a7df90e60fd5512b8bca35d3ce90e068f21c52d962855053fd1d9e2e7ca0f16)
+Used by:
+  - yasna@0.5.2 [Components: node-plane-agent, node-plane-driver] [SPDX: MIT OR Apache-2.0]
+--------------------------------------------------------------------------------
+
+Copyright (c) 2016 Masaki Hara
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 --------------------------------------------------------------------------------
