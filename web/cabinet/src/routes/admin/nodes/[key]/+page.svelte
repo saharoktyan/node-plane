@@ -267,12 +267,12 @@
   .sections {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 1.5rem;
+    gap: 0.25rem 1.25rem;
   }
   /* The sections read as the heading they replace. */
   .sections button {
     font-family: var(--serif);
-    font-size: 1.4rem;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--muted);
     text-decoration: none;

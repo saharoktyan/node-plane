@@ -180,10 +180,11 @@
           </dd>
           {#if entry}
             <div class="edit">
+              <!-- The source sits left of the switch, so the switch stays where it is. -->
+              {#if !entry.own}<span class="muted small">{source(item)}</span>{/if}
               <label class="check"><input type="checkbox" checked={entry.own}
                 onchange={(event) => own(field, event.currentTarget.checked)} />
                 {t(installation ? 'policies.set' : 'policies.own')}</label>
-              {#if !entry.own}<span class="muted small">{source(item)}</span>{/if}
               {#if entry.own && field.hint}<p class="muted small hint">{t('policies.' + slug(field.key) + '_hint')}</p>{/if}
             </div>
           {/if}
