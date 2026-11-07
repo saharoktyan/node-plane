@@ -81,7 +81,7 @@
           {#if series.length > 1}
             <div class="legend">{#each series as line (line.label)}<span><i style:background={line.color}></i>{line.label}</span>{/each}</div>
           {/if}
-          <Line points={points(chart)} {series} start={end - SPAN[range]} {end} top={chart.top}
+          <Line points={points(chart)} {series} start={end - SPAN[data.range]} {end} top={chart.top}
             gap={data.resolution === '5m' ? 15 * 60_000 : 3 * 3_600_000} format={chart.format}
             label={`${node}: ${t('charts.metric_' + chart.metric)}`} height={120} />
         </div>

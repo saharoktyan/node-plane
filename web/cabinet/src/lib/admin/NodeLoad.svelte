@@ -95,7 +95,7 @@
             <span class="now">{latest(node)}</span>
           </div>
           {#if node.points.length}
-            <Line points={points(node)} {series} start={end - SPAN[range]} {end} top={read[metric].top}
+            <Line points={points(node)} {series} start={end - SPAN[data.range]} {end} top={read[metric].top}
               gap={data.resolution === '5m' ? 15 * 60_000 : 3 * 3_600_000} format={read[metric].format}
               label={`${node.title}: ${t('charts.metric_' + metric)}`} height={130} />
           {:else}

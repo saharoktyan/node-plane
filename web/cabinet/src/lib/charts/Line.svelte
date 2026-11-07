@@ -105,6 +105,8 @@
     return `${when(point.at)}: ` + series.map((line, index) =>
       `${line.label} ${point.values[index] == null ? '—' : format(point.values[index]!)}`).join(', ');
   });
+  // The lines stay inside the plot, whatever their readings.
+  const clip = 'plot-' + Math.random().toString(36).slice(2);
   const when = (time: number) => new Date(time).toLocaleString(i18n.language,
     { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 </script>
@@ -127,10 +129,11 @@
         <line class="limit" x1={LEFT} x2={width - RIGHT} y1={y(limit.value)} y2={y(limit.value)} />
         <text class="tick" x={width - RIGHT} y={y(limit.value) - 5} text-anchor="end">{limit.label}</text>
       {/if}
-      {#if series.length === 1}<path d={wash()} fill={series[0].color} opacity="0.1" />{/if}
+      <clipPath id={clip}><rect x={LEFT - 4} y={0} width={plot + 8} height={height} /></clipPath>
+      {#if series.length === 1}<path d={wash()} fill={series[0].color} opacity="0.1" clip-path="url(#{clip})" />{/if}
       {#each series as line, index (line.label)}
         <path d={path(index)} fill="none" stroke={line.color} stroke-width="2" stroke-linejoin="round"
-          stroke-linecap="round" />
+          stroke-linecap="round" clip-path="url(#{clip})" />
         {@const tail = last(index)}
         {#if tail && picked == null}
           <circle class="dot" cx={x(tail.at)} cy={y(tail.values[index]!)} r="4" fill={line.color} />
