@@ -1,6 +1,6 @@
 [project]
 name = "node-plane-controller"
-version = "0.6.0-alpha.3"
+version = "0.6.0-alpha.4"
 description = "Node Plane controller and Telegram adapter"
 requires-python = ">=3.11,<3.13"
 dependencies = [
