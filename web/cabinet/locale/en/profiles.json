@@ -60,5 +60,20 @@
   "renewal_by": "by {days} days",
   "renewal_days": "Days",
   "renewal_approved": "The renewal is approved.",
-  "renewal_rejected": "The renewal is rejected."
+  "renewal_rejected": "The renewal is rejected.",
+  "access": "Servers",
+  "access_count": "{count} reached",
+  "access_staff": "A staff member's VPN reaches every server with every protocol.",
+  "access_none": "No servers yet.",
+  "access_saved": "Access is saved; the nodes apply it.",
+  "rules": "Rules",
+  "rule_all": "All servers",
+  "rules_hint": "A rule gives every server it covers with the protocols ticked, servers added later included.",
+  "servers_list": "By server",
+  "servers_hint": "Give or take a server by hand. A rule's server taken here stays taken when the rule changes.",
+  "give_all": "Give all",
+  "take_all": "Take all",
+  "node_off": "off",
+  "by_rule": "by a rule",
+  "no_region": "No region"
 }

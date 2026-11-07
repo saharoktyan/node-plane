@@ -8,6 +8,7 @@
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { personName } from '$lib/admin/people';
+  import Access from '$lib/admin/profile/Access.svelte';
   import Term from '$lib/admin/profile/Term.svelte';
   import { t } from '$lib/i18n/index.svelte';
   import Devices from '$lib/services/vpn/Devices.svelte';
@@ -143,6 +144,7 @@
 
       {#if !profile.deleting}
         <Term {profile} {summary} {permanent} onchange={load} />
+        <Access {profile} {permanent} onchange={load} />
       {/if}
 
       {#if devices && !profile.deleting}
@@ -157,7 +159,7 @@
             <tbody>
               {#each used as { node, total } (node.key)}
                 <tr><td>{node.flag} {node.title}</td>
-                  <td>{node.protocols.map((p) => (p === 'awg' ? 'AWG' : 'VLESS')).join(' · ')}</td>
+                  <td>{(['awg', 'xray'] as const).filter((p) => node.protocols.includes(p)).map((p) => (p === 'awg' ? 'AWG' : 'VLESS')).join(' · ')}</td>
                   <td>{bytes(total)}</td></tr>
               {/each}
             </tbody>

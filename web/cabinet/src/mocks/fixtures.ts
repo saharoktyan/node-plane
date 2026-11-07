@@ -149,13 +149,14 @@ export function accounts(scenario: Scenario, access: string): Schemas['AdminAcco
 }
 
 export function nodes(scenario: Scenario): Schemas['AdminNodeOutput'][] {
-  const titles = [['de1', 'Frankfurt', '🇩🇪'], ['fi1', 'Helsinki', '🇫🇮'], ['nl1', 'Amsterdam', '🇳🇱']];
-  const count = scenario === 'empty' ? 0 : scenario === 'many' ? 24 : 3;
+  const titles = [['de1', 'Frankfurt', '🇩🇪', 'Europe'], ['fi1', 'Helsinki', '🇫🇮', 'Europe'],
+    ['nl1', 'Amsterdam', '🇳🇱', 'Europe'], ['us1', 'Ashburn', '🇺🇸', 'America']];
+  const count = scenario === 'empty' ? 0 : scenario === 'many' ? 24 : 4;
   return Array.from({ length: count }, (_, index) => {
-    const [key, title, flag] = titles[index % 3];
+    const [key, title, flag, region] = titles[index % 4];
     return {
-      key: `${key}-${index}`, title: `${title} ${index + 1}`, flag, region: 'Europe', enabled: index !== 5,
-      protocols: ['xray', 'awg'], xray_transports: ['tcp'], desired_revision: 3, applied_revision: index === 4 ? 2 : 3,
+      key: `${key}-${index}`, title: `${title} ${index + 1}`, flag, region, region_id: region.toLowerCase(), enabled: index !== 5,
+      protocols: index % 4 === 3 ? ['xray'] : ['xray', 'awg'], xray_transports: ['tcp'], desired_revision: 3, applied_revision: index === 4 ? 2 : 3,
       settings: {}, notes: '', policy_eligible: true, settings_apply_pending: index === 4, setup_attempted: true,
       stage: 'node', service_instances: [
         { id: `x${index}`, service: 'xray', state: index === 4 ? 'changes_pending' : 'active' },
