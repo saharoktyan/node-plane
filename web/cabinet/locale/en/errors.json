@@ -58,7 +58,11 @@
   "merge_own_request": "You cannot decide on your own merge.",
   "merge_staff_account": "A staff account cannot join another account.",
   "merge_profile_choice_required": "Choose which VPN profile stays.",
-  "admin_access_permanent": "A staff account's VPN is kept.",
+  "admin_access_permanent": "A staff member's VPN is kept as it is.",
   "invalid_input": "The values are not valid.",
-  "invalid_revision": "It changed meanwhile. Look again and repeat."
+  "invalid_revision": "It changed meanwhile. Look again and repeat.",
+  "renewal_decided": "The renewal is already decided.",
+  "renewal_days_required": "Set the number of days: the profile has no tariff term.",
+  "profile_deleting": "The profile is being deleted.",
+  "tariff_not_found": "No such tariff."
 }

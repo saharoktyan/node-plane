@@ -4,6 +4,7 @@ import { http, HttpResponse, delay } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
 import { peopleAccounts, peopleHandlers } from './people';
+import { profileHandlers } from './profiles';
 import { choice } from './scenario';
 
 const ACCESS = 'mock-access';
@@ -70,6 +71,7 @@ export const handlers = [
   http.get('/api/v1/me/services', guarded(() => ({ items: fixtures.myServices(choice().scenario, choice().lang) }))),
   http.get('/api/v1/services', guarded(() => ({ items: fixtures.catalog(choice().role, choice().scenario) }))),
   http.post('/api/v1/me/access-requests', guarded(() => HttpResponse.json({}, { status: 201 }))),
+  ...profileHandlers,
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),

@@ -58,7 +58,11 @@
   "merge_own_request": "Нельзя решать собственное слияние.",
   "merge_staff_account": "Аккаунт персонала нельзя присоединить к другому.",
   "merge_profile_choice_required": "Выберите, какой VPN-профиль оставить.",
-  "admin_access_permanent": "VPN аккаунта персонала остаётся.",
+  "admin_access_permanent": "VPN персонала остаётся как есть.",
   "invalid_input": "Значения неверны.",
-  "invalid_revision": "Это изменилось. Посмотрите ещё раз и повторите."
+  "invalid_revision": "Это изменилось. Посмотрите ещё раз и повторите.",
+  "renewal_decided": "Продление уже решено.",
+  "renewal_days_required": "Укажите число дней: у профиля нет срока тарифа.",
+  "profile_deleting": "Профиль удаляется.",
+  "tariff_not_found": "Такого тарифа нет."
 }

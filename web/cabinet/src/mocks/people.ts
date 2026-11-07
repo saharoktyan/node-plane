@@ -9,7 +9,7 @@ type Account = Schemas['AdminAccountOutput'];
 const now = () => new Date().toISOString();
 const later = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
 
-function error(status: number, code: string) {
+export function error(status: number, code: string) {
   return HttpResponse.json({ error: { code, message: code } }, { status });
 }
 
@@ -71,7 +71,7 @@ function store() {
 }
 
 /** Signed-in requests only, as the other mocks. */
-function guarded<T>(read: (request: Request, params: Record<string, string>) => Promise<T | Response> | T | Response) {
+export function guarded<T>(read: (request: Request, params: Record<string, string>) => Promise<T | Response> | T | Response) {
   return async ({ request, params }: { request: Request; params: PathParams }) => {
     await delay(120);
     if (request.headers.get('Authorization') !== 'Bearer mock-access') return error(401, 'invalid_credentials');
