@@ -1935,6 +1935,55 @@
         "title": "ConfigIssuanceOutput",
         "type": "object"
       },
+      "ConfirmationInput": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "ConfirmationInput",
+        "type": "object"
+      },
+      "ConfirmationOutput": {
+        "properties": {
+          "confirmed_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Until"
+          },
+          "passkeys": {
+            "title": "Passkeys",
+            "type": "boolean"
+          },
+          "password": {
+            "title": "Password",
+            "type": "boolean"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "required",
+          "password",
+          "passkeys"
+        ],
+        "title": "ConfirmationOutput",
+        "type": "object"
+      },
       "CreatedInvite": {
         "properties": {
           "account_id": {
@@ -5149,6 +5198,27 @@
           "expires_at"
         ],
         "title": "PairingState",
+        "type": "object"
+      },
+      "PasskeyConfirmationInput": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_id": {
+            "maxLength": 64,
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "credential"
+        ],
+        "title": "PasskeyConfirmationInput",
         "type": "object"
       },
       "PasskeyInput": {
@@ -11157,6 +11227,229 @@
           }
         ],
         "summary": "Create Access Request"
+      }
+    },
+    "/api/v1/me/confirmation": {
+      "get": {
+        "description": "Whether this session must confirm itself, until when it is confirmed, and with what it can.",
+        "operationId": "my_confirmation_api_v1_me_confirmation_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmationOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Confirmation"
+      },
+      "post": {
+        "operationId": "confirm_with_password_api_v1_me_confirmation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmationOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm With Password"
+      }
+    },
+    "/api/v1/me/confirmation/passkey": {
+      "post": {
+        "operationId": "confirm_with_passkey_api_v1_me_confirmation_passkey_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyConfirmationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmationOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm With Passkey"
+      }
+    },
+    "/api/v1/me/confirmation/passkey/options": {
+      "post": {
+        "operationId": "confirmation_passkey_options_api_v1_me_confirmation_passkey_options_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Node-Plane-Telegram-User-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Node-Plane-Telegram-User-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirmation Passkey Options"
       }
     },
     "/api/v1/me/login": {

@@ -71,5 +71,8 @@
   "config_unavailable": "The configuration cannot be read from the node now.",
   "tariff_in_use": "The tariff is assigned to profiles. Assign them another tariff first.",
   "tariff_exists": "A tariff with this name already exists.",
-  "alert_not_active": "This alert has already passed."
+  "alert_not_active": "This alert has already passed.",
+  "confirmation_required": "Confirm it is you first.",
+  "passkey_not_found": "The account has no passkey for this address.",
+  "confirmation_not_needed": "No confirmation is needed here."
 }

@@ -1,0 +1,9 @@
+{
+  "title": "Confirm it is you",
+  "hint": "This action cannot be undone. The confirmation holds for a few minutes.",
+  "password": "Password",
+  "confirm": "Confirm",
+  "with_passkey": "With a passkey",
+  "passkey_cancelled": "The passkey did not confirm it.",
+  "no_way": "The account has neither a password nor a passkey. Set a password in the settings, or take this action in Workstation."
+}

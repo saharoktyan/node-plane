@@ -6,6 +6,7 @@ import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
 import { error, guarded } from './people';
 import { choice } from './scenario';
+import { unconfirmed } from './confirmation';
 
 type Node = Schemas['AdminNodeOutput'] & Record<string, unknown>;
 type Extra = { agent: 'ready' | 'missing' | 'unavailable'; enrollment: string | null; operation: Record<string, unknown> | null };
@@ -204,6 +205,8 @@ export const nodeHandlers = [
     return { grouped: false, items, total: items.length, offset: 0, maintenance_active: false, node_key: key, node_title: '' };
   })),
   http.post('/api/v1/system/recovery/:kind/:id/:action', guarded(() => {
+    const refused = unconfirmed();
+    if (refused) return refused;
     recovered.add('de1-0');
     return { outcome: 'confirmed' };
   })),
@@ -223,6 +226,8 @@ export const nodeHandlers = [
   http.get('/api/v1/nodes/:key/maintenance', guarded((_, { key }) => ({ node_key: key, status: 'active', affected_profiles: 6,
     pending_tasks: 0, blocked_tasks: 0, cleanup_phase: null, revocations_complete: false, operation_ids: [], verification_target: null }))),
   http.post('/api/v1/nodes/:key/remove-step', guarded((_, { key }) => {
+    const refused = unconfirmed();
+    if (refused) return refused;
     const removal = { node_key: key, status: 'draining', removal_status: 'running', cleanup_phase: 'not_started',
       revocations_complete: false, pending_tasks: 6, blocked_tasks: 0, affected_profiles: 6, error_code: null } as Record<string, unknown>;
     removals.set(key, removal);
@@ -236,6 +241,8 @@ export const nodeHandlers = [
     return removal;
   })),
   http.post('/api/v1/nodes/:key/retire-registry-only', guarded((_, { key }) => {
+    const refused = unconfirmed();
+    if (refused) return refused;
     store().nodes = store().nodes.filter((node) => node.key !== key);
     removals.set(key, { node_key: key, status: 'removed_registry_only' });
     return { node_key: key, mode: 'registry_only' };

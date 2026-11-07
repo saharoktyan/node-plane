@@ -9,6 +9,7 @@
   import { t } from '$lib/i18n/index.svelte';
   import Async from '$lib/ui/Async.svelte';
   import Shell, { type Link } from '$lib/ui/Shell.svelte';
+  import Confirmation from '$lib/admin/Confirmation.svelte';
 
   let { children: content }: { children: Snippet } = $props();
   // Sections follow the account's roles, as in the bot and Workstation.
@@ -66,6 +67,7 @@
       >
         {@render content()}
       </Shell>
+      <Confirmation />
     {/if}
   {/snippet}
 </Async>

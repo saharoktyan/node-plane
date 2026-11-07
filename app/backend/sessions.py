@@ -127,9 +127,10 @@ ACTIVE_ACCOUNT_SQL = '''a.status = 'approved'
 
 
 def limited(conn, scopes, now):
-    """Refuses sign-in while a scope has too many recent failures."""
+    """Refuses sign-in while a scope has too many recent failures; a login and
+    an account confirming itself get few tries, a source more."""
     for scope in scopes:
-        if _failures(conn, scope, now) >= (LOGIN_FAILURES if scope.startswith('login:') else SOURCE_FAILURES):
+        if _failures(conn, scope, now) >= (LOGIN_FAILURES if scope.startswith(('login:', 'confirm:')) else SOURCE_FAILURES):
             raise AccessDenied('sign_in_rate_limited', 429)
 
 

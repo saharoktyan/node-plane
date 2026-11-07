@@ -209,6 +209,25 @@ class PasskeyInput(BaseModel):
     name: StrictStr | None = Field(default=None, max_length=256)
 
 
+class ConfirmationOutput(BaseModel):
+    # Whether this session is asked at all, and until when it is confirmed.
+    required: bool
+    confirmed_until: str | None = None
+    password: bool
+    passkeys: bool
+
+
+class ConfirmationInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    password: StrictStr = Field(max_length=256)
+
+
+class PasskeyConfirmationInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    challenge_id: StrictStr = Field(max_length=64)
+    credential: dict[str, Any]
+
+
 class PasskeySignInInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     challenge_id: StrictStr = Field(max_length=64)
@@ -2098,6 +2117,38 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
                                   keep_session=sessions.current(conn, current.principal.id))
         return me(current)
 
+    def confirmed(current):
+        """A dangerous action from a cabinet session needs it confirmed again."""
+        from . import confirmations
+        confirmations.require(db, current)
+
+    @app.get('/api/v1/me/confirmation', response_model=ConfirmationOutput)
+    def my_confirmation(current=Depends(actor)):
+        """Whether this session must confirm itself, until when it is confirmed, and with what it can."""
+        require_permission(current, 'account.self.read')
+        from . import confirmations
+        return confirmations.status(db, current)
+
+    @app.post('/api/v1/me/confirmation', response_model=ConfirmationOutput)
+    def confirm_with_password(body: ConfirmationInput, current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        if current.principal.kind == PrincipalKind.ADAPTER:
+            raise AccessDenied('password_not_through_adapter', 403)
+        from . import confirmations
+        return confirmations.with_password(db, current, body.password)
+
+    @app.post('/api/v1/me/confirmation/passkey/options', response_model=WebAuthnOptions)
+    def confirmation_passkey_options(current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import confirmations
+        return confirmations.passkey_options(db, current)
+
+    @app.post('/api/v1/me/confirmation/passkey', response_model=ConfirmationOutput)
+    def confirm_with_passkey(body: PasskeyConfirmationInput, current=Depends(actor)):
+        require_permission(current, 'account.self.read')
+        from . import confirmations
+        return confirmations.with_passkey(db, current, body.challenge_id, body.credential)
+
     @app.post('/api/v1/sessions/passkey/options', response_model=WebAuthnOptions)
     def passkey_sign_in_options(request: Request):
         """Start signing in with a passkey; the device offers its passkeys for the cabinet."""
@@ -2506,6 +2557,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/cleanup/jobs',status_code=202)
     def cleanup_queue(body:SystemCleanupInput,request:Request,current=Depends(actor)):
+        confirmed(current)
         return system_cleanup.queue(current,str(body.plan_id),body.confirmation_phrase,header(request,'Idempotency-Key'))
 
     @app.get('/api/v1/system/cleanup/jobs/{job_id}')
@@ -2514,10 +2566,12 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/cleanup/jobs/{job_id}/retry')
     def cleanup_retry(job_id:UUID,current=Depends(actor)):
+        confirmed(current)
         return system_cleanup.retry(current,str(job_id))
 
     @app.post('/api/v1/system/cleanup/jobs/{job_id}/abort')
     def cleanup_abort(job_id:UUID,current=Depends(actor)):
+        confirmed(current)
         return system_cleanup.abort(current,str(job_id))
 
     @app.post('/api/v1/system/cleanup/jobs/{job_id}/shutdown-ack')
@@ -2877,6 +2931,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.patch('/api/v1/system/controller-address')
     def controller_address(body: dict, current=Depends(actor)):
+        confirmed(current)
         from .authorization import require_permission
         from .nodes import _validate
         require_permission(current, 'nodes.manage')
@@ -2999,11 +3054,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.put('/api/v1/relay', response_model=RelayEnvelope, status_code=202)
     def configure_relay(body: RelayInput, current=Depends(actor)):
         """Set up the relay on a node, or change it; the worker applies it."""
+        confirmed(current)
         from .relays import RelayService
         return RelayService(db).configure(current, body.node_key, body.model_dump(exclude={'node_key'}))
 
     @app.delete('/api/v1/relay', response_model=RelayEnvelope, status_code=202)
     def remove_relay(current=Depends(actor)):
+        confirmed(current)
         from .relays import RelayService
         return RelayService(db).remove(current)
 
@@ -3017,11 +3074,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     def configure_web_cabinet(body: WebCabinetInput, current=Depends(actor)):
         """Serve the cabinet from the relay's node or from the controller; the
         worker applies it."""
+        confirmed(current)
         from .web_cabinet import WebCabinetService
         return WebCabinetService(db).configure(current, body.mode, listen=body.listen, public_url=body.public_url)
 
     @app.delete('/api/v1/web-cabinet', response_model=WebCabinetEnvelope, status_code=202)
     def remove_web_cabinet(current=Depends(actor)):
+        confirmed(current)
         from .web_cabinet import WebCabinetService
         return WebCabinetService(db).remove(current)
 
@@ -3034,12 +3093,14 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.put('/api/v1/telegram-bot/placement', response_model=TelegramBotPlacementEnvelope, status_code=202)
     def place_telegram_bot(body: TelegramBotPlacementInput, current=Depends(actor)):
         """Run the bot on a node with an agent; the worker moves it there."""
+        confirmed(current)
         from .telegram_bot_placement import TelegramBotPlacementService
         return TelegramBotPlacementService(db).place(current, body.node_key)
 
     @app.delete('/api/v1/telegram-bot/placement', response_model=TelegramBotPlacementEnvelope, status_code=202)
     def return_telegram_bot(current=Depends(actor)):
         """Bring the bot back to the controller."""
+        confirmed(current)
         from .telegram_bot_placement import TelegramBotPlacementService
         return TelegramBotPlacementService(db).remove(current)
 
@@ -3185,6 +3246,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/nodes/{node_key}/drain', response_model=DrainOutput)
     def drain_node(node_key: str, current=Depends(actor)):
+        confirmed(current)
         with maintenance_lock(current):
             with db.connect() as conn:
                 bound = conn.execute('''SELECT 1 FROM backend_node_verification_targets
@@ -3197,6 +3259,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
               response_model=CleanupStepOutput)
     def cleanup_node_step(node_key: str, body: CleanupStepInput,
                           current=Depends(actor)):
+        confirmed(current)
         from .driver_transport import GrpcIntentDriver, local_channel
         with maintenance_lock(current):
             try:
@@ -3212,6 +3275,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
     @app.post('/api/v1/nodes/{node_key}/verify-and-retire',
               response_model=VerifiedRetirementOutput)
     def verify_and_retire_node(node_key: str, current=Depends(actor)):
+        confirmed(current)
         import grpc
         from .driver_transport import local_channel
         from .removal_verifier import RemovalVerificationError
@@ -3235,11 +3299,13 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
               response_model=RegistryRetirementOutput)
     def retire_node_registry_only(node_key: str, body: RegistryRetirementInput,
                                   current=Depends(actor)):
+        confirmed(current)
         with maintenance_lock(current):
             return lifecycle.retire_registry_only(current, node_key, body.reason)
 
     @app.post('/api/v1/nodes/{node_key}/remove-step')
     def remove_node_step(node_key: str, body: NodeRemovalInput, current=Depends(actor)):
+        confirmed(current)
         from .node_removal import NodeRemovalService
         return NodeRemovalService(db).request(current, node_key, retry=body.retry)
 
@@ -3561,6 +3627,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/updates/run', status_code=202)
     def run_update(body: UpdateRunInput, request: Request, current=Depends(actor)):
+        confirmed(current)
         with live_updates() as service:
             return service.queue(current, header(request, 'Idempotency-Key'), body.kind,
                                  target_ref=body.target_ref, branch=body.branch)
@@ -3605,6 +3672,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/recovery/{kind}/{identity}/{action}')
     def recover_operation(kind: str, identity: str, action: str, body: ForceRecoveryInput | None = None, current=Depends(actor)):
+        confirmed(current)
         from .recovery import act
         with maintenance_lock(current):
             if node_driver is not None:
@@ -3648,6 +3716,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/updates/jobs/{job_id}/resume')
     def resume_update(job_id: UUID, current=Depends(actor)):
+        confirmed(current)
         from .recovery import track
         with maintenance_lock(current), track(db,current,'update',str(job_id),'resume'), live_updates() as service:
             return service.resume(current, str(job_id))
@@ -3696,6 +3765,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/backups/import', status_code=201)
     async def import_backup(request: Request, current=Depends(actor)):
+        confirmed(current)
         from .authorization import require_permission
         require_permission(current, 'settings.manage')
         content = bytearray()
@@ -3708,6 +3778,7 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/backups/catalog/{backup_id}/delete')
     def delete_backup(backup_id: UUID, body: BackupDeleteInput, current=Depends(actor)):
+        confirmed(current)
         return backup_service.delete(current, str(backup_id), body.checksum)
 
     @app.patch('/api/v1/system/backups/preferences')
@@ -3716,6 +3787,8 @@ def create_app(db, *, node_driver=None, cleanup_host=None) -> FastAPI:
 
     @app.post('/api/v1/system/backups/jobs',status_code=202)
     def backup_command(body:BackupCommandInput,request:Request,current=Depends(actor)):
+        if body.action == 'restore':
+            confirmed(current)
         return backup_service.queue(current,header(request,'Idempotency-Key'),body.action,
                                     str(body.backup_id) if body.backup_id else None,body.checksum,body.name)
 

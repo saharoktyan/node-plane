@@ -701,6 +701,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Confirmation
+         * @description Whether this session must confirm itself, until when it is confirmed, and with what it can.
+         */
+        get: operations["my_confirmation_api_v1_me_confirmation_get"];
+        put?: never;
+        /** Confirm With Password */
+        post: operations["confirm_with_password_api_v1_me_confirmation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/confirmation/passkey": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm With Passkey */
+        post: operations["confirm_with_passkey_api_v1_me_confirmation_passkey_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/confirmation/passkey/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirmation Passkey Options */
+        post: operations["confirmation_passkey_options_api_v1_me_confirmation_passkey_options_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/login": {
         parameters: {
             query?: never;
@@ -4115,6 +4170,22 @@ export interface components {
             /** Transport */
             transport: string;
         };
+        /** ConfirmationInput */
+        ConfirmationInput: {
+            /** Password */
+            password: string;
+        };
+        /** ConfirmationOutput */
+        ConfirmationOutput: {
+            /** Confirmed Until */
+            confirmed_until?: string | null;
+            /** Passkeys */
+            passkeys: boolean;
+            /** Password */
+            password: boolean;
+            /** Required */
+            required: boolean;
+        };
         /** CreatedInvite */
         CreatedInvite: {
             /** Account Id */
@@ -5169,6 +5240,15 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "approved" | "rejected" | "expired";
+        };
+        /** PasskeyConfirmationInput */
+        PasskeyConfirmationInput: {
+            /** Challenge Id */
+            challenge_id: string;
+            /** Credential */
+            credential: {
+                [key: string]: unknown;
+            };
         };
         /** PasskeyInput */
         PasskeyInput: {
@@ -7774,6 +7854,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessRequestOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_confirmation_api_v1_me_confirmation_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmationOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_with_password_api_v1_me_confirmation_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmationInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmationOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_with_passkey_api_v1_me_confirmation_passkey_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasskeyConfirmationInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmationOutput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirmation_passkey_options_api_v1_me_confirmation_passkey_options_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Node-Plane-Telegram-User-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnOptions"];
                 };
             };
             /** @description Validation Error */

@@ -4,6 +4,7 @@
      with what it does; a running removal is followed until it ends. -->
 <script lang="ts">
   import { api, call, ApiError } from '$lib/api/client';
+  import { confirmed } from '$lib/admin/confirmation.svelte';
   import { installed, type Node } from '$lib/admin/nodes';
   import { t } from '$lib/i18n/index.svelte';
   import Confirm from '$lib/ui/Confirm.svelte';
@@ -59,12 +60,12 @@
     failure = '';
     try {
       if (mode === 'full') {
-        snapshot = (await call(api.POST('/api/v1/nodes/{node_key}/remove-step', { params: path(),
-          body: { retry: blocked } }))) as unknown as Snapshot;
+        snapshot = (await confirmed(() => call(api.POST('/api/v1/nodes/{node_key}/remove-step', { params: path(),
+          body: { retry: blocked } })))) as unknown as Snapshot;
       } else {
-        await call(api.POST('/api/v1/nodes/{node_key}/retire-registry-only', { params: path(), body: {
+        await confirmed(() => call(api.POST('/api/v1/nodes/{node_key}/retire-registry-only', { params: path(), body: {
           accept_unverified_runtime: true,
-          reason: 'Administrator explicitly removed the server record through the web cabinet; remote runtime may remain.' } as never }));
+          reason: 'Administrator explicitly removed the server record through the web cabinet; remote runtime may remain.' } as never })));
         snapshot = { node_key: node.key, status: 'removed_registry_only' };
       }
       armed = null;

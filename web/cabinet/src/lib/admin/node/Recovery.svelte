@@ -2,6 +2,7 @@
      each is, why it stopped, what to check, and the actions the controller
      allows for it now, each asked again with what it will do. -->
 <script lang="ts">
+  import { confirmed } from '$lib/admin/confirmation.svelte';
   import { api, call, ApiError } from '$lib/api/client';
   import { explanation, recoveryPath } from './tools';
   import { catalogs, i18n, t } from '$lib/i18n/index.svelte';
@@ -41,7 +42,7 @@
     failure = '';
     try {
       const body = action === 'force' ? { confirm_operation_id: item.id, acknowledge_unknown_outcome: true } : undefined;
-      await call(api.POST(path as never, { body } as never));
+      await confirmed(() => call(api.POST(path as never, { body } as never)));
       armed = null;
       toast(t('nodes.recovery_sent'));
       await load();

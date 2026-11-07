@@ -71,5 +71,8 @@
   "config_unavailable": "Конфиг сейчас не прочитать с ноды.",
   "tariff_in_use": "На тарифе есть профили. Сначала назначьте им другой тариф.",
   "tariff_exists": "Тариф с таким названием уже есть.",
-  "alert_not_active": "Этот алерт уже прошёл."
+  "alert_not_active": "Этот алерт уже прошёл.",
+  "confirmation_required": "Нужно подтвердить, что это вы.",
+  "passkey_not_found": "У аккаунта нет passkey для этого адреса.",
+  "confirmation_not_needed": "Подтверждение здесь не нужно."
 }

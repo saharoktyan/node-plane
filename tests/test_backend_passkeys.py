@@ -127,6 +127,29 @@ class PasskeyTests(unittest.TestCase):
         with self.db.connect() as conn:
             self.assertEqual([s['method'] for s in sessions.listed(conn, account_id, now=NOW)], ['passkey'])
 
+    def test_a_session_confirms_itself_with_its_own_passkey_only(self):
+        from backend import confirmations
+        from backend.authorization import resolve_actor
+        account_id = self.account()
+        device = self.enroll(account_id)
+        other = self.enroll(self.account())
+        tokens = self.sign_in(device)
+        actor = resolve_actor(self.credentials.authenticate('Bearer ' + tokens['access_token'], now=NOW), self.identities)
+        started = confirmations.passkey_options(self.db, actor, now=NOW)
+        self.assertEqual([c['id'] for c in started['options']['allowCredentials']], [bytes_to_base64url(device.id)])
+        # Another account's passkey does not confirm this session.
+        self.assertEqual(self.code(confirmations.with_passkey, self.db, actor, started['challenge_id'],
+                                   other.get(started['options']), now=NOW), 'passkey_invalid')
+        started = confirmations.passkey_options(self.db, actor, now=NOW)
+        confirmed = confirmations.with_passkey(self.db, actor, started['challenge_id'], device.get(started['options']),
+                                               now=NOW)
+        self.assertEqual(confirmed['confirmed_until'], (NOW + confirmations.TTL).isoformat())
+        confirmations.require(self.db, actor, now=NOW)
+        # A confirmation challenge never signs anyone in.
+        started = confirmations.passkey_options(self.db, actor, now=NOW)
+        self.assertEqual(self.code(passkeys.sign_in, self.db, started['challenge_id'], device.get(started['options']),
+                                   device='Phone', source='10.0.0.1', now=NOW), 'passkey_challenge_invalid')
+
     def test_wrong_origin_challenge_clone_and_handle_are_refused(self):
         account_id = self.account()
         started = passkeys.registration_options(self.db, account_id, now=NOW)

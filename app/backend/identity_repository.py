@@ -67,6 +67,8 @@ class SQLIdentityRepository:
             sessions_schema(conn)
             from db.migration_revisions.r0042_passkeys import create_schema as passkeys_schema
             passkeys_schema(conn)
+            from db.migration_revisions.r0053_session_confirmations import create_schema as confirmations_schema
+            confirmations_schema(conn)
             # Linked Workstations are counted on the account.
             from db.migration_revisions.r0051_client_keys import create_schema as client_keys_schema
             client_keys_schema(conn)

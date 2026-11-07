@@ -184,6 +184,54 @@ def sign_in(db, challenge_id, credential, *, device, source, now=None):
     return result
 
 
+def confirmation_options(db, account_id, now=None):
+    """Options for confirming a session again with one of the account's own passkeys.
+    The challenge names the account, so it can never sign anyone in."""
+    now = now or _now()
+    with db.transaction() as conn:
+        challenge_id, challenge, rp_id = _challenge(conn, 'sign_in', account_id, now)
+        existing = conn.execute('SELECT id, transports_json FROM backend_passkeys WHERE account_id=? AND rp_id=?',
+                                (account_id, rp_id)).fetchall()
+    if not existing:
+        raise AccessDenied('passkey_not_found', 409)
+    options = webauthn.generate_authentication_options(
+        rp_id=rp_id, challenge=challenge, user_verification=UserVerificationRequirement.REQUIRED,
+        allow_credentials=[_descriptor(row) for row in existing])
+    return {'challenge_id': challenge_id, 'options': _options(options)}
+
+
+def confirm(db, account_id, challenge_id, credential, now=None):
+    """Checks a passkey of this account against its confirmation challenge."""
+    now = now or _now()
+    scopes = ('confirm:' + account_id,)
+    with db.transaction() as conn:
+        sessions.limited(conn, scopes, now)
+        challenge = _take(conn, challenge_id, 'sign_in', account_id, now)
+        credential_id = credential.get('id') if isinstance(credential, dict) else None
+        row = conn.execute('SELECT * FROM backend_passkeys WHERE id=? AND account_id=? AND rp_id=?',
+                           (credential_id, account_id, challenge['rp_id'])).fetchone() \
+            if isinstance(credential_id, str) else None
+    verified = None
+    if row is not None:
+        try:
+            verified = webauthn.verify_authentication_response(
+                credential=credential, expected_challenge=base64url_to_bytes(challenge['challenge']),
+                expected_rp_id=challenge['rp_id'], expected_origin=challenge['origin'],
+                credential_public_key=base64url_to_bytes(row['public_key']),
+                credential_current_sign_count=row['sign_count'], require_user_verification=True)
+        except (WebAuthnException, ValueError, TypeError, KeyError):
+            verified = None
+    with db.transaction() as conn:
+        if verified is None:
+            sessions.failed(conn, scopes, now)
+        else:
+            conn.execute('UPDATE backend_passkeys SET sign_count=?, backed_up=?, used_at=? WHERE id=?',
+                         (verified.new_sign_count, int(bool(verified.credential_backed_up)), now.isoformat(),
+                          row['id']))
+    if verified is None:
+        raise AccessDenied('passkey_invalid', 403)
+
+
 def _public(row):
     return {'id': row['id'], 'name': row['name'], 'created_at': row['created_at'], 'used_at': row['used_at'],
             'backed_up': bool(row['backed_up'])}

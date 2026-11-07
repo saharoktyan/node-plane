@@ -9,6 +9,7 @@ import { policyHandlers, temporaryHandlers } from './policies';
 import { profileHandlers } from './profiles';
 import { vpnAdminHandlers } from './vpnadmin';
 import { systemHandlers, unseenAlerts } from './system';
+import { confirmationHandlers } from './confirmation';
 import { choice } from './scenario';
 
 const ACCESS = 'mock-access';
@@ -81,6 +82,7 @@ export const handlers = [
   ...temporaryHandlers,
   ...vpnAdminHandlers,
   ...systemHandlers,
+  ...confirmationHandlers,
   http.get('/api/v1/me/profiles/:id/summary', guarded(({ url }) =>
     fixtures.summary(new URL(url).pathname.split('/')[5], choice().lang))),
   http.post('/api/v1/me/profiles/:id/renewal', guarded(() => HttpResponse.json({}, { status: 201 }))),

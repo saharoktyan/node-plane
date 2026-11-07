@@ -1,5 +1,5 @@
 """Through the web cabinet's relay the API grants no adapter powers and no
-system operations; the link marks every relayed request."""
+health or integration routes; the link marks every relayed request."""
 import unittest
 
 from backend.authorization import PrincipalKind
@@ -29,21 +29,34 @@ class RelayPolicyTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/me', headers={
             **self.headers, 'X-Node-Plane-Telegram-User-ID': '101'}).status_code, 200)
 
-    def test_integration_and_system_routes_are_closed(self):
+    def test_integration_and_health_routes_are_closed(self):
         headers = self.account_headers()
-        for method, path in (('GET', '/api/v1/system/updates'), ('POST', '/api/v1/system/backups/jobs'),
-                             ('GET', '/api/v1/system/recovery'), ('POST', '/api/v1/nodes/n1/agent-rollouts'),
-                             ('POST', '/api/v1/nodes/n1/bootstrap'), ('GET', '/api/v1/agent-rollouts/x'),
-                             ('POST', '/api/v1/integrations/telegram/alerts/claim'), ('GET', '/health/ready')):
+        for method, path in (('POST', '/api/v1/integrations/telegram/alerts/claim'), ('GET', '/health/ready')):
             response = self.client.request(method, path, headers=headers)
             self.assertEqual(response.status_code, 403, path)
             self.assertEqual(response.json()['error']['code'], 'not_available_through_relay', path)
 
+    def test_system_routes_are_open_to_staff(self):
+        headers = self.account_headers()
+        for path in ('/api/v1/system/recovery', '/api/v1/system/backups/catalog', '/api/v1/relay'):
+            response = self.client.get(path, headers=headers)
+            self.assertNotEqual(response.json().get('error', {}).get('code'), 'not_available_through_relay', path)
+
     def test_only_the_closed_routes_are_refused(self):
         from backend.relay_policy import refusal
-        for path in ('/api/v1/system/version', '/api/v1/system/updates-history', '/api/v1/nodes/n1/overview',
-                     '/api/v1/nodes/drain', '/api/v1/profiles/p1/devices', '/api/v1/system/traffic'):
+        for path in ('/api/v1/system/version', '/api/v1/system/updates', '/api/v1/nodes/n1/drain', '/api/v1/relay',
+                     '/api/v1/telegram-bot/placement', '/api/v1/system/cleanup/jobs', '/api/v1/profiles/p1/devices'):
             self.assertIsNone(refusal(path, {}, 'account'), path)
-        self.assertEqual(refusal('/api/v1/nodes/n1/drain', {}, 'account'), 'not_available_through_relay')
-        # The relay is not configured through itself.
-        self.assertEqual(refusal('/api/v1/relay', {}, 'account'), 'not_available_through_relay')
+        for path in ('/api/v1/integrations/telegram/deliveries/wait', '/health/live'):
+            self.assertEqual(refusal(path, {}, 'account'), 'not_available_through_relay', path)
+        # The bot's signed requests are never refused; an adapter token always is.
+        self.assertIsNone(refusal('/api/v1/integrations/x', {}, 'bot'))
+        self.assertEqual(refusal('/api/v1/me', {}, 'adapter'), 'not_available_through_relay')
+        # A Workstation linked through the relay has no session to confirm dangerous actions with.
+        for path in ('/api/v1/system/updates', '/api/v1/relay', '/api/v1/nodes/n1/remove-step'):
+            self.assertEqual(refusal(path, {}, 'workstation'), 'not_available_through_relay', path)
+        self.assertIsNone(refusal('/api/v1/nodes', {}, 'workstation'))
+
+
+if __name__ == '__main__':
+    unittest.main()
