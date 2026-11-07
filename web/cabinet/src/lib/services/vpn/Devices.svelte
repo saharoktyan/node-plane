@@ -1,19 +1,26 @@
 <!-- The profile's devices, as the bot keeps them: add one under the limit,
      rename it, give it a new VLESS or AWG key, remove it. A key change and a
-     removal ask once more, since the device's configurations stop working. -->
+     removal ask once more, since the device's configurations stop working.
+     Staff also set a device's own limits here. -->
 <script lang="ts">
+  import Policies from '$lib/admin/Policies.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
   import { errorText } from '$lib/ui/errors';
   import { key } from '$lib/ui/format';
+  import Dialog from '$lib/ui/Dialog.svelte';
   import Menu from '$lib/ui/Menu.svelte';
 
   type Device = Schemas['DeviceOutput'];
-  let { profileId, list, onchange }: {
+  let { profileId, list, onchange, limits = false }: {
     profileId: string;
     list: Schemas['DeviceList'];
     onchange: () => Promise<void>;
+    limits?: boolean;
   } = $props();
+  // The device whose limits are open.
+  let limited = $state<Device | null>(null);
+  let limitsOpen = $state(false);
 
   const items = $derived(list.items.filter((item) => item.status !== 'retired')
     .sort((a, b) => a.display_name.localeCompare(b.display_name) || a.id.localeCompare(b.id)));
@@ -129,6 +136,7 @@
               { label: t('vpn.rename'), select: () => { renaming = { id: device.id, name: device.display_name }; confirming = null; } },
               { label: t('vpn.rotate_xray'), select: () => (confirming = { id: device.id, action: 'rotate_xray', key: key() }) },
               { label: t('vpn.rotate_awg'), select: () => (confirming = { id: device.id, action: 'rotate_awg', key: key() }) },
+              ...(limits ? [{ label: t('policies.title'), select: () => { limited = device; limitsOpen = true; } }] : []),
               { label: t('vpn.delete'), danger: true,
                 select: () => (confirming = { id: device.id, action: 'delete', key: key() }) }
             ]} />
@@ -150,6 +158,11 @@
   {#if items.length}<p class="muted small hint">{room ? t('vpn.devices_hint') : t('vpn.limit_reached')}</p>{/if}
   {#if notice}<p class="error">{notice}</p>{/if}
 </section>
+{#if limited}
+  <Dialog bind:open={limitsOpen} title={t('policies.device_title', { name: limited.display_name })}>
+    {#key limited.id}<Policies subject={{ kind: 'device', profileId, deviceId: limited.id }} bare />{/key}
+  </Dialog>
+{/if}
 
 <style>
   .rows > div {

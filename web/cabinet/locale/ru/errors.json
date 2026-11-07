@@ -64,5 +64,8 @@
   "renewal_decided": "Продление уже решено.",
   "renewal_days_required": "Укажите число дней: у профиля нет срока тарифа.",
   "profile_deleting": "Профиль удаляется.",
-  "tariff_not_found": "Такого тарифа нет."
+  "tariff_not_found": "Такого тарифа нет.",
+  "quota_not_set": "У квоты ещё нет периода.",
+  "invalid_policy_value": "Значение ограничения вне допустимого.",
+  "account_profile_exists": "У аккаунта уже есть VPN-профиль."
 }

@@ -1,0 +1,21 @@
+{
+  "title": "Traffic quota",
+  "none": "No quota: traffic is not limited.",
+  "of": "of {limit}",
+  "stopped": "stopped",
+  "slowed": "slowed to {speed} Mbit/s",
+  "period": "Period {start} — {end}",
+  "no_period": "The period opens with the first traffic.",
+  "anchor": "Resets monthly from {day}",
+  "anchor_label": "Reset day",
+  "anchor_hint": "Applies from the next reset; midnight in {zone}.",
+  "anchor_saved": "The reset day is saved.",
+  "reset": "Reset now",
+  "reset_confirm": "Start a new period now? The used traffic is zeroed and a stopped VPN works again.",
+  "reset_done": "The quota is reset.",
+  "history": "Past periods",
+  "closed_period_end": "period ended",
+  "closed_manual": "reset by staff",
+  "closed_quota_removed": "quota removed",
+  "was_used_up": "used up"
+}

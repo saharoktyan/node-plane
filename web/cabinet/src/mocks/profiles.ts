@@ -32,13 +32,7 @@ function store() {
     owner_account_id: item.id, frozen: index === 2, deleting: false, desired_revision: 3 + index,
     expires_at: item.role === 'admin' ? null : index === 1 ? later(17) : later(10 + index * 7)
   }));
-  const loose: Profile[] = scenario === 'empty' ? [] : [
-    { id: 'p9000000-0000-4000-8000-000000000001', display_name: 'Office router', owner_account_id: null,
-      frozen: false, deleting: false, desired_revision: 2, expires_at: null },
-    { id: 'p9000000-0000-4000-8000-000000000002', display_name: 'Guest · Kirill', owner_account_id: null,
-      frozen: false, deleting: false, desired_revision: 1, expires_at: '2026-10-30T23:59:59+00:00' }
-  ];
-  const entries = [...owned, ...loose].map((profile, index) => ({
+  const entries = owned.map((profile, index) => ({
     profile, tariff: index % 2 === 1 ? 't1' : null, renewal: index === 1 ? crypto.randomUUID() : null,
     policy: index === 1
       ? { rules: [{ scope: 'region' as const, region_id: 'europe', protocols: ['awg' as const, 'xray' as const] }],
@@ -55,6 +49,9 @@ function store() {
 }
 
 const find = (id: string) => store().entries.find((entry) => entry.profile.id === id);
+
+/** Whether the profile is on a tariff, for the limits it inherits. */
+export const onTariff = (id: string) => find(id)?.tariff != null;
 
 /** A change the nodes apply: running for a moment, then done. */
 function applied(entry: Entry) {
@@ -80,11 +77,15 @@ export const profileHandlers = [
   })),
   http.post('/api/v1/profiles', guarded(async (request) => {
     const body = (await request.json()) as Schemas['ProfileCreateInput'];
-    const profile: Profile = { id: crypto.randomUUID(), display_name: body.display_name, owner_account_id: null,
+    const owner = peopleAccounts('all').find((item) => item.id === body.owner_account_id);
+    if (!owner) return error(422, 'invalid_input');
+    if (owner.profile_id) return error(409, 'account_profile_exists');
+    const profile: Profile = { id: crypto.randomUUID(), display_name: body.display_name, owner_account_id: owner.id,
       frozen: false, deleting: false, desired_revision: 1, expires_at: null };
     const entry = { profile, tariff: null, renewal: null, operation: operation(profile, 'no_targets'),
       policy: { rules: [], explicit_grants: [], exclusions: [] } };
     store().entries.unshift(entry);
+    owner.profile_id = profile.id;
     return HttpResponse.json({ profile, grants: [], operation_id: entry.operation.id, runtime_status: 'pending' },
       { status: 201 });
   })),

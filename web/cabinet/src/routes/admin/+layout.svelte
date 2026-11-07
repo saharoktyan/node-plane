@@ -16,8 +16,6 @@
       { href: '/admin', label: t('admin.overview'), icon: 'overview', allowed: true },
       { href: '/admin/users', label: t('admin.users'), icon: 'users', group: t('admin.group_people'),
         allowed: account.may('accounts.manage') || account.may('access_requests.manage') || account.may('profiles.manage') },
-      { href: '/admin/profiles', label: t('profiles.title'), icon: 'profiles', group: t('admin.group_people'),
-        allowed: account.may('profiles.manage') },
       { href: '/admin/requests', label: t('people.requests'), icon: 'requests', group: t('admin.group_people'),
         allowed: account.may('access_requests.manage'), count: pending || undefined },
       { href: '/admin/invites', label: t('people.invites'), icon: 'invites', group: t('admin.group_people'),

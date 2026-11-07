@@ -128,5 +128,9 @@
   "merge_approve_confirm": "Merge the accounts? The joining one is deleted; this cannot be undone.",
   "merge_reject_confirm": "Reject this merge request?",
   "merge_done": "The accounts are merged.",
-  "merge_rejected_done": "The request is rejected."
+  "merge_rejected_done": "The request is rejected.",
+  "give_vpn": "Give VPN",
+  "give_vpn_hint": "Creates the person's VPN profile; its servers and term are set on it.",
+  "merge_asked": "Asked",
+  "merge_choose_vpn": "VPN to choose"
 }

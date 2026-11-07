@@ -3,6 +3,7 @@
      its passkeys and Workstations away or give it a sign-in link; owners
      assign roles. Each change names the revision it was made on. -->
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -93,6 +94,15 @@
     }, 'people.invite_made');
   }
 
+  // A VPN profile of the person's own, without servers yet: they are given on it.
+  async function giveVpn() {
+    if (!person) return;
+    const name = personName(person);
+    const done = await run(() => call(api.POST('/api/v1/profiles', { params: { header: { 'Idempotency-Key': key() } },
+      body: { display_name: name, owner_account_id: id, grants: [] } })).then(() => undefined), 'people.give_vpn_hint');
+    if (done) await goto('/admin/users/' + id + '/vpn');
+  }
+
   function toggleRole(role: Role) {
     if (!roles) return;
     roles = roles.includes(role) ? roles.filter((item) => item !== role) : [...roles, role];
@@ -140,8 +150,12 @@
           </dd></div>
           <div><dt>{t('people.language')}</dt><dd>{person.locale ?? person.language_code ?? '—'}</dd></div>
           <div><dt>{t('people.vpn')}</dt><dd>
-            {#if person.profile_id}<a href={'/admin/profiles/' + person.profile_id}>{t('people.open_profile')}</a>
-            {:else}{t('people.no_profile')}{/if}
+            {#if person.profile_id}<a href={'/admin/users/' + person.id + '/vpn'}>{t('people.open_profile')}</a>
+            {:else}{t('people.no_profile')}
+              {#if account.may('profiles.manage') && !person.deleted}
+                <button class="bare link" disabled={busy} onclick={giveVpn}>{t('people.give_vpn')}</button>
+              {/if}
+            {/if}
           </dd></div>
         </dl>
       </section>

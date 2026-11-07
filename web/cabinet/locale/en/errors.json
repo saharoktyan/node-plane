@@ -64,5 +64,8 @@
   "renewal_decided": "The renewal is already decided.",
   "renewal_days_required": "Set the number of days: the profile has no tariff term.",
   "profile_deleting": "The profile is being deleted.",
-  "tariff_not_found": "No such tariff."
+  "tariff_not_found": "No such tariff.",
+  "quota_not_set": "The quota has no period yet.",
+  "invalid_policy_value": "A limit's value is out of range.",
+  "account_profile_exists": "This account already has a VPN profile."
 }

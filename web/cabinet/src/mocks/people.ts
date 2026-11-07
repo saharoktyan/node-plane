@@ -177,6 +177,8 @@ export const peopleHandlers = [
   })),
 
   http.get('/api/v1/merge-requests', guarded(() => ({ items: store().merges }))),
+  http.get('/api/v1/merge-requests/:id', guarded((_, { id }) =>
+    store().merges.find((item) => item.id === id) ?? error(404, 'resource_not_found'))),
   http.post('/api/v1/merge-requests/:id/decision', guarded(async (request, { id }) => {
     const merge = store().merges.find((item) => item.id === id);
     if (!merge) return error(404, 'resource_not_found');

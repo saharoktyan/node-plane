@@ -1,14 +1,16 @@
-<!-- A VPN profile's card for staff: whose it is, its term and tariff, which
-     servers it reaches, its devices, limits and quota, its traffic and how
-     far the nodes have applied it. A staff member's own VPN never expires,
-     so its term, freezing and deletion are not offered. -->
+<!-- A person's VPN profile, opened from their card: its term and tariff,
+     which servers it reaches, its devices, limits and quota, its traffic and
+     how far the nodes have applied it. A staff member's own VPN never
+     expires, so its term, freezing and deletion are not offered. -->
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { personName } from '$lib/admin/people';
+  import Policies from '$lib/admin/Policies.svelte';
   import Access from '$lib/admin/profile/Access.svelte';
+  import Quota from '$lib/admin/profile/Quota.svelte';
   import Term from '$lib/admin/profile/Term.svelte';
   import { t } from '$lib/i18n/index.svelte';
   import Devices from '$lib/services/vpn/Devices.svelte';
@@ -17,7 +19,8 @@
   import { bytes, date, key } from '$lib/ui/format';
 
   type Profile = Schemas['ProfileOutput'];
-  const id = $derived(page.params.id as string);
+  const accountId = $derived(page.params.id as string);
+  let id = $state('');
   let profile = $state<Profile | null>(null);
   let summary = $state<Schemas['MemberProfileSummary'] | null>(null);
   let operation = $state<Schemas['OperationOutput'] | null>(null);
@@ -35,6 +38,13 @@
   async function load() {
     failure = '';
     try {
+      owner = await call(api.GET('/api/v1/accounts/{account_id}', { params: { path: { account_id: accountId } } }));
+      if (!owner.profile_id) {
+        profile = null;
+        failure = t('people.no_profile');
+        return;
+      }
+      id = owner.profile_id;
       profile = await call(api.GET('/api/v1/profiles/{profile_id}', { params: path() }));
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -48,14 +58,10 @@
     summary = loadedSummary;
     operation = loadedOperation ?? null;
     devices = loadedDevices;
-    owner = profile.owner_account_id && account.may('accounts.manage')
-      ? await call(api.GET('/api/v1/accounts/{account_id}', { params: { path: { account_id: profile.owner_account_id } } }))
-        .catch(() => null)
-      : null;
   }
 
   $effect(() => {
-    void id;
+    void accountId;
     load();
   });
 
@@ -76,7 +82,7 @@
     try {
       if (action === 'delete') {
         await call(api.DELETE('/api/v1/profiles/{profile_id}', { params: { ...path(), header: headers } }));
-        await goto('/admin/profiles');
+        await goto('/admin/users/' + accountId);
         return;
       }
       await call(api.PATCH('/api/v1/profiles/{profile_id}', { params: { ...path(), header: headers },
@@ -98,12 +104,13 @@
     .filter((row) => row.total > 0).sort((a, b) => b.total - a.total));
 </script>
 
-<nav class="crumbs"><a href="/admin/profiles">{t('profiles.title')}</a></nav>
+<nav class="crumbs"><a href="/admin/users">{t('admin.users')}</a> /
+  <a href={'/admin/users/' + accountId}>{owner ? personName(owner) : '…'}</a></nav>
 {#if failure && !profile}<p class="error">{failure}</p>
 {:else if !profile}<p class="muted">{t('common.loading')}</p>
 {:else}
   <div class="page-head">
-    <h1>{profile.display_name}</h1>
+    <h1>{t('profiles.title')}</h1>
     <div class="actions">
       {#if profile.deleting}<span class="badge warn">{t('profiles.deleting')}</span>
       {:else if profile.frozen}<span class="badge warn">{t('profiles.frozen')}</span>
@@ -119,12 +126,8 @@
       <section class="block">
         <h2>{t('profiles.summary')}</h2>
         <dl class="facts">
-          <div><dt>{t('profiles.owner')}</dt><dd>
-            {#if profile.owner_account_id}
-              <a href={'/admin/users/' + profile.owner_account_id}>{owner ? personName(owner) : t('profiles.open_owner')}</a>
-              {#if permanent}<span class="muted">· {t('profiles.staff')}</span>{/if}
-            {:else}{t('profiles.no_owner')}{/if}
-          </dd></div>
+          <div><dt>{t('profiles.name')}</dt><dd>{profile.display_name}
+            {#if permanent}<span class="muted">· {t('profiles.staff')}</span>{/if}</dd></div>
           <div><dt>{t('profiles.servers')}</dt><dd>{summary?.node_count ?? '—'}</dd></div>
           <div><dt>{t('profiles.devices')}</dt><dd>{devices ? devices.items.filter((item) => item.status === 'active').length : '—'}</dd></div>
           <div><dt>{t('profiles.configs')}</dt><dd>{summary ? t('profiles.configs_value', { count: summary.issued_count,
@@ -148,7 +151,12 @@
       {/if}
 
       {#if devices && !profile.deleting}
-        <Devices profileId={profile.id} list={devices} onchange={load} />
+        <Devices profileId={profile.id} list={devices} onchange={load} limits />
+      {/if}
+
+      {#if !profile.deleting}
+        <Policies subject={{ kind: 'profile', profileId: profile.id }} onchange={load} />
+        <Quota profileId={profile.id} revision={profile.desired_revision} onchange={load} />
       {/if}
 
       {#if used.length}
