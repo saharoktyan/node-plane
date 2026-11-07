@@ -12,7 +12,8 @@ const shots = process.env.SMOKE_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 
 const server = spawn('npx', ['vite', 'dev', '--mode', 'mock', '--port', String(port), '--strictPort', '--host', '127.0.0.1'],
-  { stdio: ['ignore', 'pipe', 'inherit'] });
+  // Its own process group: npx starts vite as a child, and both must go.
+  { stdio: ['ignore', 'pipe', 'inherit'], detached: true });
 await new Promise((resolve, reject) => {
   server.stdout.on('data', (chunk) => String(chunk).includes('Local') && resolve());
   server.on('exit', reject);
@@ -76,7 +77,7 @@ try {
   }
 } finally {
   await browser.close();
-  server.kill();
+  process.kill(-server.pid);
 }
 if (failures.length) {
   console.error(failures.join('\n'));
