@@ -12,7 +12,7 @@
 
   type Overview = { enabled: boolean; interval_minutes: number; repeat_minutes: number; notify_resolved: boolean;
     active_count: number; unacknowledged_count: number; active: Alert[];
-    last_scan: { at?: string } | null; last_cpu_scan: { at?: string } | null };
+    last_scan: { at?: string } | null; last_cpu_scan: { at?: string } | null; cpu_check_seconds: number; cpu_window_seconds: number };
   let overview = $state<Overview | null>(null);
   let failure = $state('');
   let busy = $state(false);
@@ -87,7 +87,7 @@
   </section>
 
   <div class="setting appear">
-    <div><h2>{t('alerts.sending')}</h2><p class="muted">{t('alerts.sending_hint', { minutes: overview.interval_minutes })}</p></div>
+    <div><h2>{t('alerts.sending')}</h2><p class="muted">{t('alerts.sending_hint', { seconds: overview.cpu_check_seconds, window: overview.cpu_window_seconds })}</p></div>
     <div class="controls">
       <label class="check"><input type="checkbox" checked={overview.enabled} disabled={busy}
         onchange={(event) => prefer({ enabled: event.currentTarget.checked })} /> {t('alerts.enabled')}</label>

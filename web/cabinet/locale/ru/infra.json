@@ -84,5 +84,6 @@
   "cabinet_url_invalid": "Укажите адрес, начинающийся с https:// или http://.",
   "relay_domain_invalid": "Укажите домен вроде cab.example.com.",
   "relay_port_invalid": "Укажите порт от 1 до 65535.",
-  "relay_contact_invalid": "Укажите почту или оставьте поле пустым."
+  "relay_contact_invalid": "Укажите почту или оставьте поле пустым.",
+  "served_controller_choice": "контроллер, на своём адресе"
 }

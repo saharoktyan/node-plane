@@ -14,7 +14,7 @@
   type Envelope = { cabinet: Cabinet | null; available: boolean; relay_node_key: string | null };
   let { onrelay }: { onrelay: () => void } = $props();
   let value = $state<Envelope | null>(null);
-  let draft = $state<{ listen: string; public_url: string } | null>(null);
+  let draft = $state<{ mode: 'relay' | 'local'; listen: string; public_url: string } | null>(null);
   let stopping = $state(false);
   let failure = $state('');
   let busy = $state(false);
@@ -51,12 +51,13 @@
     'infra.cabinet_saved');
   function save() {
     if (!draft) return;
+    if (draft.mode === 'relay') return serve({ mode: 'relay' });
     const result = cabinetBody(draft.listen, draft.public_url);
     if ('error' in result) failure = t('infra.' + result.error);
     else serve(result.body);
   }
   const stop = () => (stopping ? run(() => call(api.DELETE('/api/v1/web-cabinet')), 'infra.cabinet_stopping') : (stopping = true));
-  const edit = (cabinet: Cabinet | null) => (draft = { listen: cabinet?.mode === 'local' && cabinet.listen ? cabinet.listen : DEFAULT_LISTEN,
+  const edit = (cabinet: Cabinet | null, mode: 'relay' | 'local' = cabinet?.mode ?? 'local') => (draft = { mode, listen: cabinet?.mode === 'local' && cabinet.listen ? cabinet.listen : DEFAULT_LISTEN,
     public_url: cabinet?.mode === 'local' ? (cabinet.public_url ?? '') : '' });
   const tone = (status: string) => (status === 'active' ? 'ok' : status === 'failed' ? 'danger' : 'warn');
 </script>
@@ -66,10 +67,18 @@
 {#if value && !value.available}<p class="status warn">{t('infra.cabinet_unavailable')}</p>{/if}
 {#if draft}
   <form class="fields" onsubmit={(event) => { event.preventDefault(); save(); }}>
-    <p class="muted small">{t('infra.cabinet_local_hint')}</p>
-    <label>{t('infra.cabinet_listen')}<input bind:value={draft.listen} /></label>
-    <label>{t('infra.cabinet_url')}<input bind:value={draft.public_url} placeholder="https://panel.example.com" autocapitalize="off" /></label>
-    <p class="status warn small">{t('infra.cabinet_warning')}</p>
+    <fieldset>
+      <legend>{t('infra.served_by')}</legend>
+      <label class="check"><input type="radio" value="relay" bind:group={draft.mode} disabled={!value?.relay_node_key} />
+        {t('infra.served_relay')}</label>
+      <label class="check"><input type="radio" value="local" bind:group={draft.mode} /> {t('infra.served_controller_choice')}</label>
+    </fieldset>
+    {#if draft.mode === 'local'}
+      <p class="muted small">{t('infra.cabinet_local_hint')}</p>
+      <label>{t('infra.cabinet_listen')}<input bind:value={draft.listen} /></label>
+      <label>{t('infra.cabinet_url')}<input bind:value={draft.public_url} placeholder="https://panel.example.com" autocapitalize="off" /></label>
+      <p class="status warn small">{t('infra.cabinet_warning')}</p>
+    {/if}
     <div class="row">
       <button class="primary" disabled={busy}>{t('people.save')}</button>
       <button type="button" onclick={() => { draft = null; failure = ''; }}>{t('common.cancel')}</button>
@@ -102,7 +111,7 @@
   {#if cabinet.mode === 'local'}<p class="status warn small">{t('infra.cabinet_warning')}</p>{/if}
   {#if cabinet.status !== 'removing'}
     <div class="row actions">
-      {#if cabinet.mode === 'local'}<button onclick={() => edit(cabinet)}>{t('infra.change')}</button>{/if}
+      <button onclick={() => edit(cabinet)}>{t('infra.change')}</button>
       <button class:armed={stopping} class:danger={stopping} disabled={busy} onclick={stop}>{t('infra.cabinet_stop')}</button>
       {#if stopping}<Confirm text={t('infra.cabinet_stop_confirm')} action={t('infra.cabinet_stop')}
         cancel={() => (stopping = false)} />{/if}
@@ -119,6 +128,13 @@
     gap: 0.9rem;
     max-width: 34rem;
     margin-top: 1rem;
+  }
+  fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.4rem;
   }
   .fields p {
     margin: 0;

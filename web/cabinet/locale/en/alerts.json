@@ -9,7 +9,7 @@
   "never": "not yet",
   "checks": "Full check: {full} · CPU check: {cpu}.",
   "sending": "Sending to the bot",
-  "sending_hint": "The bot writes to staff when something is wrong with a server. Servers are checked every {minutes} min.",
+  "sending_hint": "The bot writes to staff when something is wrong with a server. Servers are checked every {seconds} s; an outage or a recovery counts only once it lasts as long. CPU is judged by its average over {window} s.",
   "enabled": "Send alerts",
   "repeat": "Remind until it passes",
   "repeat_0": "do not remind",

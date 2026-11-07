@@ -71,7 +71,7 @@ export const systemHandlers = [
     return { ...store().alerts, active: items, active_count: items.length,
       unacknowledged_count: items.filter((item) => !item.dismissed).length,
       last_scan: { at: ago(3) }, last_cpu_scan: { at: ago(1) }, cpu_sample_seconds: 5, cpu_window_seconds: 60,
-      cpu_check_seconds: 60, delivery_counts: counts(9) };
+      cpu_check_seconds: 30, delivery_counts: counts(9) };
   })),
   http.patch('/api/v1/system/alerts/preferences', guarded(async (request) => {
     Object.assign(store().alerts, await request.json());

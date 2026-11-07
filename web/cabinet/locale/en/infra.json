@@ -84,5 +84,6 @@
   "cabinet_url_invalid": "Enter an address starting with https:// or http://.",
   "relay_domain_invalid": "Enter a domain such as cab.example.com.",
   "relay_port_invalid": "Enter a port from 1 to 65535.",
-  "relay_contact_invalid": "Enter an email address, or leave it empty."
+  "relay_contact_invalid": "Enter an email address, or leave it empty.",
+  "served_controller_choice": "the controller, at its own address"
 }
