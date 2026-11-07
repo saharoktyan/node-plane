@@ -433,6 +433,9 @@ async def render_wizard_step(chat_id: int, bot: Bot, state: FSMContext,
     if step == 'flag':
         navigation.append(InlineKeyboardButton(text=tr(locale, 'node.wizard.skip'),
             callback_data='wizard_skip_flag', style='primary'))
+    if step == 'target':
+        navigation.append(InlineKeyboardButton(text=tr(locale, 'node.wizard.skip'),
+            callback_data='wizard_skip_target', style='primary'))
     rows = [navigation]
     await render(bot, chat_id, Screen(tr(locale, f'node.wizard.{step}.title'),
                                        tuple(lines), embedded_buttons=True, navigation=True), rows, state, message_id)
@@ -536,6 +539,16 @@ async def wizard_skip_flag_cb(query: CallbackQuery, bot: Bot, state: FSMContext)
     w['flag'] = ''
     await state.update_data(wizard_data=w)
     await render_wizard_address(query.message.chat.id, bot, state, query.message.message_id)
+
+@router.callback_query(F.data == "wizard_skip_target")
+async def wizard_skip_target_cb(query: CallbackQuery, bot: Bot, state: FSMContext):
+    """Without an SSH address the agent installs from a one-time command."""
+    await query.answer()
+    data = await state.get_data()
+    w = dict(data.get('wizard_data', {}))
+    w['ssh_target'] = None
+    await state.update_data(wizard_data=w)
+    await render_wizard_step(query.message.chat.id, bot, state, 'public_host', query.message.message_id)
 
 @router.message(NodeDraftState.waiting_for_flag, F.text)
 async def process_wizard_flag(message: Message, bot: Bot, state: FSMContext):
@@ -860,8 +873,7 @@ async def wizard_save_cb(query: CallbackQuery, bot: Bot, backend: BackendClient,
     w = data.get('wizard_data', {})
     locale = normalize_locale(data.get('locale'))
     required = {'key', 'title', 'region', 'flag', 'transport', 'public_host', 'protocols'}
-    if not required.issubset(w) or (
-            w['transport'] == 'remote' and not w.get('ssh_target')):
+    if not required.issubset(w):
         await render(bot, query.message.chat.id,
             Screen(tr(locale, 'node.wizard.summary.title'),
                 (tr(locale, 'node.wizard.incomplete'),), embedded_buttons=True, navigation=True),

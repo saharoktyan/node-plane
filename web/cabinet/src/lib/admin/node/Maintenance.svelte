@@ -7,7 +7,6 @@
   import Diagnostics from './Diagnostics.svelte';
   import Removal from './Removal.svelte';
   import { t } from '$lib/i18n/index.svelte';
-  import { fade } from 'svelte/transition';
 
   let { node, services, busy, onchange }: {
     node: Node; services: Services | null; busy: boolean; onchange: () => Promise<void>;
@@ -31,7 +30,6 @@
       {/each}
     </div>
   {/if}
-  {#key tab}<div in:fade={{ duration: 200 }}>
   {#if tab === 'diagnostics'}
     <Diagnostics node={node.key} />
   {:else if tab === 'actions'}
@@ -39,5 +37,4 @@
   {:else if tab === 'removal'}
     <Removal {node} />
   {/if}
-  </div>{/key}
 </div>

@@ -7,6 +7,9 @@ const still = () => typeof matchMedia === 'function' && matchMedia('(prefers-red
 
 export function unfold(node: Element, { duration = 300 }: { duration?: number } = {}): TransitionConfig {
   if (still()) return { duration: 120, css: (t) => `opacity: ${t}` };
+  // Its children's margins stay inside it, clipped or not, so the height
+  // it eases to is the height it keeps: the end does not jump.
+  if (getComputedStyle(node).display === 'block') (node as HTMLElement).style.display = 'flow-root';
   const style = getComputedStyle(node);
   const height = parseFloat(style.height);
   const [top, bottom] = [parseFloat(style.paddingTop), parseFloat(style.paddingBottom)];

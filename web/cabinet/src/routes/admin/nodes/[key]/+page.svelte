@@ -9,8 +9,6 @@
   import Install from '$lib/admin/node/Install.svelte';
   import Maintenance from '$lib/admin/node/Maintenance.svelte';
   import Temporary from '$lib/admin/Temporary.svelte';
-  import Grow from '$lib/ui/Grow.svelte';
-  import { fade } from 'svelte/transition';
   import Settings from '$lib/admin/node/Settings.svelte';
   import { agentOf, installed, needsSetup, pendingSettings, protocolName, protocolStatus, stateKey,
     type Agent, type Node, type Overview, type Services } from '$lib/admin/nodes';
@@ -31,13 +29,18 @@
   let enrollment = $state<Enrollment | null>(null);
   let failure = $state('');
   type Panel = 'settings' | 'limits' | 'temporary' | 'maintenance';
-  let panel = $state<Panel | null>(null);
-  // What the panel area shows: the open one, or the last while it folds away.
-  let shown = $state<Panel | null>(null);
+  let panel = $state<Panel>('settings');
+  // A cancelled or saved edit starts the settings again from the server.
+  let reset = $state(0);
+  // Only the page's first section comes in softly, as the page does.
+  let first = $state(true);
+  // The sections this server has now; one gone falls back to its settings.
+  const panels = $derived(node ? (['settings', 'limits', 'temporary', 'maintenance'] as Panel[]).filter((name) =>
+    name === 'limits' ? node!.protocols.length > 0
+      : name === 'temporary' ? installed(node!) && node!.applied_revision > 0 && node!.protocols.length > 0 : true) : []);
   $effect(() => {
-    if (panel) shown = panel;
+    if (panels.length && !panels.includes(panel)) panel = 'settings';
   });
-  const toggle = (name: Panel) => (panel = panel === name ? null : name);
   let busy = $state(false);
 
   const path = () => ({ path: { node_key: nodeKey } });
@@ -196,53 +199,37 @@
         </section>
       {/if}
 
-      <!-- Under the traffic, so opening one moves nothing above it. Its
-           title stands at once; what is under it unfolds, changes height
-           and folds away, and the title goes once it has. -->
-      {#if panel ?? shown}
-        <section class="block">
-          <div class="block-head"><h2>{t('nodes.' + (panel ?? shown))}</h2>
-            {#if panel}<button onclick={() => (panel = null)}>{t('common.close')}</button>{/if}</div>
-          <Grow open={panel !== null} key={shown} onclosed={() => (shown = null)}>
-            {#key shown}
-              <div in:fade={{ duration: 250 }}>
-                {#if shown === 'settings'}
-                  <Settings {node} oncancel={() => (panel = null)} onsaved={async () => { panel = null; toast(t('nodes.saved')); await load(); }} />
-                {:else if shown === 'limits'}
-                  <p class="muted small">{t('nodes.limits_hint')}</p>
-                  <Policies subject={{ kind: 'installation', node: node.key, xray: node.protocols.includes('xray') }} bare />
-                {:else if shown === 'temporary'}
-                  <Temporary server={node} />
-                {:else if shown === 'maintenance'}
-                  <Maintenance {node} {services} busy={operation != null && ACTIVE.includes(operation[1].status)} onchange={load} />
-                {/if}
-              </div>
-            {/key}
-          </Grow>
-        </section>
-      {/if}
-    </div>
-
-    <aside>
+      <!-- Under the traffic, so switching moves nothing above it: the
+           sections are tabs on one heading, the chosen one underlined in
+           the accent. -->
       {#if account.may('nodes.manage')}
         <section class="block">
-          <h2>{t('nodes.manage')}</h2>
-          <div class="actions-list">
-            <button class:current={panel === 'settings'} aria-pressed={panel === 'settings'} onclick={() => toggle('settings')}>{t('nodes.settings')}</button>
-            {#if node.protocols.length}
-              <button class:current={panel === 'limits'} aria-pressed={panel === 'limits'} onclick={() => toggle('limits')}>{t('nodes.limits')}</button>
-            {/if}
-            {#if installed(node) && node.applied_revision > 0 && node.protocols.length}
-              <button class:current={panel === 'temporary'} aria-pressed={panel === 'temporary'} onclick={() => toggle('temporary')}>{t('nodes.temporary')}</button>
-            {/if}
-            <button class:current={panel === 'maintenance'} aria-pressed={panel === 'maintenance'} onclick={() => toggle('maintenance')}>{t('nodes.maintenance')}</button>
+          <div class="block-head">
+            <div class="sections" role="tablist" aria-label={t('nodes.manage')}>
+              {#each panels as name (name)}
+                <button role="tab" aria-selected={panel === name} class:current={panel === name}
+                  onclick={() => { panel = name; first = false; }}>{t('nodes.' + name)}</button>
+              {/each}
+            </div>
             {#if pendingSettings(node) && !(operation && ACTIVE.includes(operation[1].status))}
               <button class="primary" disabled={busy} onclick={apply}>{t('nodes.apply')}</button>
             {/if}
           </div>
+          {#key panel + reset}
+            {#if panel === 'settings'}
+              <Settings {node} appear={first} oncancel={() => (reset += 1)} onsaved={async () => { reset += 1; toast(t('nodes.saved')); await load(); }} />
+            {:else if panel === 'limits'}
+              <p class="muted small">{t('nodes.limits_hint')}</p>
+              <Policies subject={{ kind: 'installation', node: node.key, xray: node.protocols.includes('xray') }} bare />
+            {:else if panel === 'temporary'}
+              <Temporary server={node} />
+            {:else if panel === 'maintenance'}
+              <Maintenance {node} {services} busy={operation != null && ACTIVE.includes(operation[1].status)} onchange={load} />
+            {/if}
+          {/key}
         </section>
       {/if}
-    </aside>
+    </div>
   </div>
 {/if}
 
@@ -272,15 +259,38 @@
     margin-right: 1rem;
     font-size: 13px;
   }
-  .actions-list .current {
-    color: var(--accent);
-    font-weight: 600;
-    text-decoration-color: var(--accent);
-    text-decoration-thickness: 2px;
+  .columns > .main {
+    max-width: 56rem;
   }
-  .actions-list {
-    display: grid;
-    justify-items: start;
-    gap: 0.35rem;
+  .sections {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.5rem;
+  }
+  /* The sections read as the heading they replace. */
+  .sections button {
+    font-family: var(--serif);
+    font-size: 1.4rem;
+    font-weight: 500;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 0 0 0.2rem;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .sections button:hover {
+    color: var(--text);
+  }
+  .sections button.current {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  @media (max-width: 640px) {
+    .sections {
+      gap: 0.25rem 1rem;
+    }
+    .sections button {
+      font-size: 1.1rem;
+    }
   }
 </style>

@@ -86,7 +86,7 @@ export function check(key: FieldKey, input: string): string | null {
   const limit = key === 'title' || key === 'region' ? 128 : key === 'flag' ? 16 : key === 'notes' ? 2000
     : key === 'awg_parameters' ? 16384 : 255;
   if ([...value].length > limit) return 'too_long';
-  if (key === 'flag' || key === 'notes') return null;
+  if (key === 'flag' || key === 'notes' || (key === 'ssh_target' && !value)) return null;
   if (!value) return 'required';
   if (key === 'awg_parameters') {
     try {
@@ -101,7 +101,7 @@ export function check(key: FieldKey, input: string): string | null {
     if (!validHost(value)) return 'host';
     if (key === 'xray_sni' && (!value.includes('.') || IPV4.test(value))) return 'sni';
   } else if (key === 'ssh_target') {
-    if (!validTarget(value)) return 'target';
+    if (value && !validTarget(value)) return 'target';
   } else if (key === 'xray_xhttp_path') {
     if (!/^\/[A-Za-z0-9/_~.%+-]*$/.test(value)) return 'path';
   } else if (key === 'awg_interface') {
@@ -172,8 +172,9 @@ export function draft(state: Editor): { body: Record<string, unknown> } | { erro
       settings[key] = key === 'awg_parameters' ? parseAwg(input) : key.endsWith('_port') ? Number(input.trim()) : input.trim();
       changed = true;
     } else {
-      if (['title', 'region', 'ssh_target'].includes(key) && !value.trim()) return { error: 'required', field: key };
-      body[key] = value.trim();
+      if (['title', 'region'].includes(key) && !value.trim()) return { error: 'required', field: key };
+      // An SSH address may go: the agent then installs from a command.
+      body[key] = key === 'ssh_target' && !value.trim() ? null : value.trim();
     }
   }
   if (changed) {

@@ -93,7 +93,7 @@ impl Wizard {
             Step::Title => "Server name",
             Step::Region | Step::CustomRegion => "Region",
             Step::Flag => "Flag (optional)",
-            Step::Target => "SSH address",
+            Step::Target => "SSH address (optional)",
             Step::Host => "Public address for VPN clients",
             Step::Protocols => "VPN protocols",
             Step::Review => "Review new node",
@@ -295,9 +295,10 @@ impl Wizard {
                     .trim()
                     .strip_suffix(":22")
                     .unwrap_or(self.target.trim());
+                // Optional: without it the agent installs from a one-time command.
                 ensure!(
-                    valid_target(target),
-                    "Enter user@hostname or user@IP (SSH port 22)"
+                    target.is_empty() || valid_target(target),
+                    "Enter user@hostname or user@IP (SSH port 22), or leave it empty"
                 );
                 self.target = target.into();
                 self.set_step(Step::Host);
@@ -352,7 +353,7 @@ impl Wizard {
         let mut settings = self.settings.clone();
         settings["public_host"] = json!(self.host);
         let mut body = json!({"key":self.key, "title":self.title, "region":self.region, "flag":self.flag,
-            "transport":self.transport, "ssh_target":if self.transport == "remote" { Some(&self.target) } else { None },
+            "transport":self.transport, "ssh_target":if self.transport == "remote" && !self.target.is_empty() { Some(&self.target) } else { None },
             "protocols":self.protocols,"xray_transports":if self.protocols.iter().any(|p| p == "xray") { if self.transports.is_empty() { vec!["tcp".into(), "xhttp".into()] } else { self.transports.clone() } } else { vec![] }, "settings":settings});
         if let Some(index) = self.template {
             body["template"] = json!(self.options.templates[index].code);
@@ -375,7 +376,7 @@ impl Wizard {
                 ""
             },
             self.transport,
-            if self.transport == "remote" {
+            if self.transport == "remote" && !self.target.is_empty() {
                 &self.target
             } else {
                 "—"

@@ -66,11 +66,12 @@
   const node = $derived(nodes.find((item) => item.key === draft.node));
   // Each protocol's transports on the chosen node, as protocol:transport.
   const transports = $derived(node ? [
-    ...(node.protocols.includes('awg') ? ['awg:vpn', 'awg:conf'] : []),
+    // One AWG config carries both files, AmneziaVPN's and the .conf.
+    ...(node.protocols.includes('awg') ? ['awg:vpn'] : []),
     ...(node.protocols.includes('xray') ? (node.xray_transports ?? ['tcp']).map((item) => 'xray:' + item) : [])
   ] : []);
   const label = (protocol: string, transport: string) =>
-    protocol === 'awg' ? 'AWG · ' + (transport === 'vpn' ? 'AmneziaVPN' : '.conf') : 'VLESS · ' + transport.toUpperCase();
+    protocol === 'awg' ? 'AWG' : 'VLESS · ' + transport.toUpperCase();
 
   async function create(event: SubmitEvent) {
     event.preventDefault();
@@ -140,7 +141,7 @@
 </script>
 
 {#if failure}<p class="error">{failure}</p>{/if}
-{#if !creating}<div class="row start"><button class="primary" onclick={open}>{t('temporary.create')}</button></div>{/if}
+{#if !creating}<div class="row start" transition:unfold><button class="primary" onclick={open}>{t('temporary.create')}</button></div>{/if}
 
 {#if creating}
   <section class="block" transition:unfold>

@@ -1256,7 +1256,7 @@ pub(in crate::tui) fn draw_node_wizard(
         Step::Transport => "Local runs beside the controller. SSH uses a separate VPS.",
         Step::Template => "Presets fill the name, region, flag and next available server code.",
         Step::Target => {
-            "Root access or passwordless sudo is required. Example: root@node.example.com"
+            "Optional: lets the controller install the agent over SSH itself; leave it empty to get a command for the server. Example: root@node.example.com"
         }
         Step::Host if wizard.transport == "local" => {
             "VPN address: domain or IP. Enter . to use this controller profile’s address."

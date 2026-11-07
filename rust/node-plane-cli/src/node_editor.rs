@@ -296,14 +296,19 @@ impl Editor {
                 settings.insert(field.key.into(), value);
                 settings_changed = true;
             } else {
-                if matches!(field.key, "title" | "region" | "ssh_target") {
+                if matches!(field.key, "title" | "region") {
                     ensure!(
                         !field.value.trim().is_empty(),
                         "{} is required",
                         field.label
                     );
                 }
-                body[field.key] = json!(field.value.trim());
+                // An SSH address may go: the agent then installs from a command.
+                body[field.key] = if field.key == "ssh_target" && field.value.trim().is_empty() {
+                    Value::Null
+                } else {
+                    json!(field.value.trim())
+                };
             }
         }
         if settings_changed {
@@ -403,7 +408,7 @@ impl Field {
             "{} is too long (maximum {limit} characters)",
             field.label
         );
-        if matches!(field.key, "flag" | "notes") {
+        if matches!(field.key, "flag" | "notes") || field.key == "ssh_target" && value.is_empty() {
             return Ok(());
         }
         ensure!(!value.is_empty(), "{} is required", field.label);
@@ -432,7 +437,7 @@ impl Field {
             }
         } else if field.key == "ssh_target" {
             ensure!(
-                crate::node_wizard::valid_target(value),
+                value.is_empty() || crate::node_wizard::valid_target(value),
                 "Enter user@hostname or user@IP"
             );
         } else if field.key == "xray_xhttp_path" {

@@ -3,16 +3,18 @@
      number of profiles affected; once saved, a server with VPN applies the
      settings at once. -->
 <script lang="ts">
-  import { fade } from 'svelte/transition';
   import { api, call, ApiError } from '$lib/api/client';
-  import { pendingSettings, type Node } from '$lib/admin/nodes';
+  import { installed, pendingSettings, type Node } from '$lib/admin/nodes';
   import { t } from '$lib/i18n/index.svelte';
   import Confirm from '$lib/ui/Confirm.svelte';
   import { errorText } from '$lib/ui/errors';
   import { key } from '$lib/ui/format';
   import { CHOICES, check, dirty, draft, editor, fieldsOf, toggle, type Editor, type FieldKey, type Tab } from './editor';
 
-  let { node, onsaved, oncancel }: { node: Node; onsaved: (node: Node) => Promise<void>; oncancel: () => void } = $props();
+  // `appear`: the page's first section comes in softly once it has loaded, as the page does.
+  let { node, appear = false, onsaved, oncancel }: {
+    node: Node; appear?: boolean; onsaved: (node: Node) => Promise<void>; oncancel: () => void;
+  } = $props();
 
   let form = $state<Editor | null>(null);
   let tab = $state<Tab>('general');
@@ -27,7 +29,8 @@
       const [source, defaults, services] = await Promise.all([
         call(api.GET('/api/v1/nodes/{node_key}', { params: { path: { node_key: node.key } } })),
         call(api.GET('/api/v1/system/installation-defaults')).catch(() => ({ settings: {} })),
-        call(api.GET('/api/v1/nodes/{node_key}/services', { params: { path: { node_key: node.key } } })).catch(() => null)
+        // An invitation has no agent to ask yet.
+        installed(node) ? call(api.GET('/api/v1/nodes/{node_key}/services', { params: { path: { node_key: node.key } } })).catch(() => null) : null
       ]);
       const settings = { ...((defaults as { settings?: Record<string, unknown> }).settings ?? {}) };
       const found = (services as { awg_parameters?: Record<string, string> } | null)?.awg_parameters;
@@ -84,7 +87,7 @@
 
 <div>
   {#if failure}<p class="error">{failure}</p>{/if}
-  {#if form}
+  {#if form}<div class:appear>
     <div class="tabs" role="tablist" aria-label={t('nodes.settings')}>
       {#each tabs as item (item)}
         <button role="tab" aria-selected={tab === item} class:active={tab === item} onclick={() => (tab = item)}>
@@ -92,7 +95,7 @@
       {/each}
     </div>
     <form class="fields" onsubmit={(event) => { event.preventDefault(); save(review !== null); }}>
-      {#key tab}<div class="fields" in:fade={{ duration: 200 }}>
+      <div class="fields">
       {#if tab === 'protocols'}
         <fieldset>
           <legend>{t('nodes.protocols')}</legend>
@@ -129,7 +132,7 @@
           </label>
         {/each}
       {/if}
-      </div>{/key}
+      </div>
       <div class="row">
         <button class="primary" class:armed={review !== null} disabled={busy || !dirty(form)}>{t('people.save')}</button>
         <button type="button" onclick={oncancel}>{t('common.cancel')}</button>
@@ -138,7 +141,7 @@
         <Confirm text={t('nodes.region_confirm', { count: review.affected })} action={t('people.save')} cancel={() => (review = null)} />
       {/if}
     </form>
-  {/if}
+  </div>{/if}
 </div>
 
 <style>

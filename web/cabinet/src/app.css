@@ -636,3 +636,24 @@ dl.facts dd {
   color: var(--text);
   text-decoration-color: var(--accent);
 }
+
+/* Something that comes in once its data has loaded, as a page does. */
+.appear {
+  animation: appear 0.35s ease both;
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appear {
+    animation: appear-still 0.15s ease both;
+  }
+  @keyframes appear-still {
+    from {
+      opacity: 0;
+    }
+  }
+}

@@ -146,5 +146,8 @@
     .checks .muted {
       padding-left: 0;
     }
+    .checks .status {
+      min-width: 0;
+    }
   }
 </style>

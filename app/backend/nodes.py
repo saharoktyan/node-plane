@@ -141,7 +141,9 @@ def _validate(values, *, create):
             or len(values['ssh_target']) > 255
             or not _SSH_TARGET.fullmatch(values['ssh_target'])):
         raise AccessDenied('invalid_input', 422)
-    if create and (values.get('transport') == 'remote') != bool(values.get('ssh_target')):
+    # A remote server's SSH address is optional: its agent installs from a
+    # one-time command; the address only lets the controller run it itself.
+    if create and values.get('transport') == 'local' and values.get('ssh_target'):
         raise AccessDenied('invalid_input', 422)
     return values
 
@@ -497,7 +499,7 @@ class NodeService:
                     next_values['xray_transports'] = ['tcp', 'xhttp']
                 if 'protocols' in values and 'xray_transports' not in values and 'xray' not in values['protocols']:
                     next_values['xray_transports'] = []
-                if (next_values['transport'] == 'remote') != bool(next_values['ssh_target']):
+                if next_values['transport'] == 'local' and next_values['ssh_target']:
                     raise AccessDenied('invalid_input', 422)
                 if 'xray' not in next_values['protocols'] and next_values['xray_transports']:
                     raise AccessDenied('invalid_input', 422)
