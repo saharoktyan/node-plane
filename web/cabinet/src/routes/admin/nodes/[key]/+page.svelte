@@ -203,7 +203,7 @@
         <section class="block">
           <div class="block-head"><h2>{t('nodes.' + (panel ?? shown))}</h2>
             {#if panel}<button onclick={() => (panel = null)}>{t('common.close')}</button>{/if}</div>
-          <Grow open={panel !== null} onclosed={() => (shown = null)}>
+          <Grow open={panel !== null} key={shown} onclosed={() => (shown = null)}>
             {#key shown}
               <div in:fade={{ duration: 250 }}>
                 {#if shown === 'settings'}

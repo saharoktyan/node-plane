@@ -1,28 +1,48 @@
 <!-- A place whose height follows what is in it: it opens from nothing,
      eases to each new height as its content changes, and folds away; only
-     then is `onclosed` called, so the content can stay while it folds. -->
+     then is `onclosed` called, so the content can stay while it folds.
+     When `key` changes the content is replaced: the height holds until the
+     new content has loaded (changed once after it is drawn), so it eases
+     from the old height straight to the new one. -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  let { open, onclosed, children }: { open: boolean; onclosed?: () => void; children: Snippet } = $props();
+  let { open, key = null, onclosed, children }: {
+    open: boolean; key?: unknown; onclosed?: () => void; children: Snippet;
+  } = $props();
   let inner = $state<HTMLDivElement>();
   let height = $state(0);
+  // After a replacement: the first size is the new content still loading.
+  let swapped = false;
+  let first = false;
+  let release: ReturnType<typeof setTimeout> | undefined;
+
+  $effect.pre(() => {
+    void key;
+    swapped = first = true;
+    clearTimeout(release);
+    release = setTimeout(() => {
+      swapped = false;
+      if (inner) height = inner.offsetHeight;
+    }, 1500);
+  });
 
   $effect(() => {
     if (!inner) return;
-    // Growing follows at once; shrinking waits a moment, so content that
-    // is replaced and still loading eases from the old height straight to
-    // the new one instead of dipping to nothing first.
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const observer = new ResizeObserver(() => {
       const next = inner!.offsetHeight;
-      clearTimeout(timer);
-      if (next >= height) height = next;
-      else timer = setTimeout(() => (height = inner!.offsetHeight), 250);
+      if (swapped && first) {
+        first = false;
+        if (next > height) height = next;
+        return;
+      }
+      swapped = false;
+      clearTimeout(release);
+      height = next;
     });
     observer.observe(inner);
     return () => {
-      clearTimeout(timer);
+      clearTimeout(release);
       observer.disconnect();
     };
   });
