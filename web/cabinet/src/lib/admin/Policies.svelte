@@ -4,13 +4,12 @@
      installation, as the controller resolves it. -->
 <script lang="ts">
   import { toast } from '$lib/ui/toast.svelte';
-  import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
   import { errorText } from '$lib/ui/errors';
   import { bytes, key } from '$lib/ui/format';
-  import { FIELDS, GROUPS, NODE_KEYS, fromInput, shown, toInput, type Field, type PolicyKey, type PolicyValue } from './policies';
+  import { FIELDS, NODE_KEYS, fromInput, shown, toInput, type Field, type PolicyKey, type PolicyValue } from './policies';
 
   // The installation's values, or with `node` its values for that node only.
   type Subject = { kind: 'installation'; node?: string; xray?: boolean } | { kind: 'profile'; profileId: string }
@@ -21,6 +20,7 @@
   let draft = $state<Record<string, { own: boolean; input: string }> | null>(null);
   let failure = $state('');
   let busy = $state(false);
+  const formId = 'policies-' + Math.random().toString(36).slice(2);
 
   const permission = $derived(subject.kind === 'installation' ? 'settings.manage' : 'profiles.manage');
   const installation = $derived(subject.kind === 'installation' && !subject.node);
@@ -150,66 +150,69 @@
 
 {#snippet body()}
   {#if failure}<p class="error">{failure}</p>{/if}
-  {#if keys && draft}
-    <form onsubmit={save} transition:unfold>
-      {#each GROUPS as group (group)}
-        {#if fields.some((field) => field.group === group)}
-          <h3>{t('policies.group_' + group)}</h3>
-          {#each fields.filter((field) => field.group === group && shown(field, values)) as field (field.key)}
-            {@const entry = draft[field.key]}
-            <div class="field">
-              <span class="name">{t('policies.' + slug(field.key))}</span>
+  <!-- One table: editing opens each row in place to overwrite its value. -->
+  <form id={formId} onsubmit={save}>
+    <dl class="facts" class:editing={draft}>
+      {#each fields.filter((field) => shown(field, values)) as field (field.key)}
+        {@const item = byKey[field.key]}
+        {@const entry = draft?.[field.key]}
+        <div><dt>{t('policies.' + slug(field.key))}</dt>
+          <!-- Overwritten, the value itself turns into its input. -->
+          <dd>
+            {#if entry?.own}
+              {#if field.type === 'choice'}
+                <select bind:value={entry.input} aria-label={t('policies.' + slug(field.key))}>
+                  {#each field.values as value (value)}<option {value}>{t(`policies.${slug(field.key)}_${value}`)}</option>{/each}
+                </select>
+              {:else}
+                <span class="input">
+                  <input inputmode={field.type === 'text' ? 'text' : 'decimal'} bind:value={entry.input}
+                    aria-label={t('policies.' + slug(field.key))} />
+                  {#if field.type !== 'text' && !(field.type === 'number' && field.unit === 'count')}
+                    <span class="muted">{t('policies.unit_' + (field.type === 'number' ? field.unit : field.type))}</span>
+                  {/if}
+                </span>
+              {/if}
+            {:else}
+              {show(field, entry ? values[field.key] : item.effective)}
+              {#if !entry}<span class="muted small">· {source(item)}</span>{/if}
+            {/if}
+          </dd>
+          {#if entry}
+            <div class="edit">
               <label class="check"><input type="checkbox" checked={entry.own}
                 onchange={(event) => own(field, event.currentTarget.checked)} />
                 {t(installation ? 'policies.set' : 'policies.own')}</label>
-              {#if entry.own}
-                {#if field.type === 'choice'}
-                  <select bind:value={entry.input} aria-label={t('policies.' + slug(field.key))}>
-                    {#each field.values as value (value)}<option {value}>{t(`policies.${slug(field.key)}_${value}`)}</option>{/each}
-                  </select>
-                {:else}
-                  <span class="input">
-                    <input inputmode={field.type === 'text' ? 'text' : 'decimal'} bind:value={entry.input}
-                      aria-label={t('policies.' + slug(field.key))} />
-                    {#if field.type !== 'text' && !(field.type === 'number' && field.unit === 'count')}
-                      <span class="muted">{t('policies.unit_' + (field.type === 'number' ? field.unit : field.type))}</span>
-                    {/if}
-                  </span>
-                {/if}
-              {:else}
-                <span class="muted">{show(field, fallback(byKey[field.key]))}</span>
-              {/if}
+              {#if !entry.own}<span class="muted small">{source(item)}</span>{/if}
+              {#if entry.own && field.hint}<p class="muted small hint">{t('policies.' + slug(field.key) + '_hint')}</p>{/if}
             </div>
-            {#if entry.own && field.hint}
-              <p class="muted small hint">{t('policies.' + slug(field.key) + '_hint')}</p>
-            {/if}
-          {/each}
-        {/if}
-      {/each}
-      <div class="row actions">
-        <button class="primary" disabled={busy}>{t('people.save')}</button>
-        <button type="button" onclick={() => (draft = null)}>{t('common.cancel')}</button>
-      </div>
-    </form>
-  {:else}
-    <dl class="facts">
-      {#each fields.filter((field) => shown(field, values)) as field (field.key)}
-        {@const item = byKey[field.key]}
-        <div><dt>{t('policies.' + slug(field.key))}</dt>
-          <dd>{show(field, item.effective)} <span class="muted small">· {source(item)}</span></dd></div>
+          {/if}
+        </div>
       {/each}
     </dl>
+  </form>
+{/snippet}
+
+<!-- Change, then save or cancel in the same place, so the table stays put. -->
+{#snippet actions()}
+  {#if keys && account.may(permission)}
+    <span class="row">
+      {#if draft}
+        <button class="primary" form={formId} disabled={busy}>{t('people.save')}</button>
+        <button type="button" onclick={() => (draft = null)}>{t('common.cancel')}</button>
+      {:else}
+        <button onclick={edit}>{t('people.change')}</button>
+      {/if}
+    </span>
   {/if}
 {/snippet}
 
 {#if bare}
-  {#if keys && !draft && account.may(permission)}<p><button onclick={edit}>{t('people.change')}</button></p>{/if}
+  <p>{@render actions()}</p>
   {@render body()}
 {:else}
   <section class="block">
-    <div class="block-head"><h2>{t('policies.title')}</h2>
-      {#if keys && !draft && account.may(permission)}<button onclick={edit}>{t('people.change')}</button>{/if}
-    </div>
+    <div class="block-head"><h2>{t('policies.title')}</h2>{@render actions()}</div>
     {@render body()}
   </section>
 {/if}
@@ -218,24 +221,24 @@
   .small {
     font-size: 13px;
   }
-  h3 {
-    margin: 1rem 0 0.25rem;
-    font-size: 1rem;
+  /* Editing, a row keeps its name and value and opens a line under them. */
+  dl.editing > div {
+    flex-wrap: wrap;
   }
-  .field {
-    display: grid;
-    grid-template-columns: minmax(10rem, 1fr) auto minmax(8rem, 14rem);
+  .edit {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
-    gap: 0.5rem 1rem;
-    padding: 0.35rem 0;
-    border-bottom: 1px solid var(--line);
+    gap: 0.4rem 1rem;
   }
-  .field .check {
-    white-space: nowrap;
+  dd select {
+    width: auto;
+    max-width: 100%;
   }
-  .field select {
-    width: 100%;
-    min-width: 0;
+  dd .input {
+    justify-content: flex-end;
   }
   .input {
     display: flex;
@@ -246,20 +249,8 @@
     width: 6rem;
   }
   .hint {
-    margin: 0.25rem 0 0;
-  }
-  .actions {
-    margin-top: 1rem;
-  }
-  @media (max-width: 640px) {
-    .field {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-    .field > :last-child {
-      justify-self: end;
-    }
-    .field .name {
-      grid-column: 1 / -1;
-    }
+    flex-basis: 100%;
+    text-align: right;
+    margin: 0;
   }
 </style>
