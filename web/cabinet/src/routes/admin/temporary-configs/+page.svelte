@@ -179,11 +179,9 @@
 {/if}
 
 
-{#if items === null}
-  {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
-{:else if !items.length}
+{#if items !== null && !items.length}
   <p class="muted">{t('temporary.empty')}</p>
-{:else}
+{:else if items}
   <section class="block">
     <div class="rows">
       {#each items as item (item.id)}

@@ -99,8 +99,7 @@
     {/each}
   </tbody>
 </table></div>
-{#if loading}<p class="muted">{t('common.loading')}</p>
-{:else if cursor}<p><button onclick={() => load(true)}>{t('people.more')}</button></p>{/if}
+{#if !loading && cursor}<p><button onclick={() => load(true)}>{t('people.more')}</button></p>{/if}
 
 <style>
   .name {

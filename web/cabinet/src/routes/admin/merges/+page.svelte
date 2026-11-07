@@ -27,11 +27,9 @@
 
 <div class="page-head"><h1>{t('people.merges')}</h1></div>
 {#if failure}<p class="error">{failure}</p>{/if}
-{#if items === null}
-  {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
-{:else if !items.length}
+{#if items !== null && !items.length}
   <p class="muted">{t('people.no_merges')}</p>
-{:else}
+{:else if items}
   <div class="table"><table>
     <thead><tr><th>{t('people.merge_main')}</th><th>{t('people.merge_other')}</th><th>{t('people.merge_asked')}</th>
       <th>{t('admin.state')}</th></tr></thead>

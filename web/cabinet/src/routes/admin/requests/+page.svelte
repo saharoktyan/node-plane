@@ -114,9 +114,7 @@
   </div>
 {/if}
 {#if tab === 'renewal'}
-  {#if renewals === null}
-    {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
-  {:else}
+  {#if renewals !== null}
     <section class="block">
       {#if !renewals.length}<p class="muted">{t('people.no_renewals')}</p>{/if}
       <div class="rows">
@@ -140,9 +138,7 @@
       </div>
     </section>
   {/if}
-{:else if items === null}
-  {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
-{:else}
+{:else if items !== null}
   <section class="block">
     {#if !items.length}<p class="muted">{t('people.no_requests')}</p>{/if}
     <div class="rows">

@@ -184,7 +184,7 @@
       <button onclick={() => (draft = null)}>{t('common.cancel')}</button>
     </div>
     </div>
-  {:else if !failure}<p class="muted">{t('common.loading')}</p>{/if}
+  {/if}
 </section>
 
 <style>

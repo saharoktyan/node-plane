@@ -250,8 +250,9 @@
   main {
     padding: 1.5rem 2.5rem 3rem;
   }
-  /* What a page shows comes in softly, also once its data has loaded. */
-  main > :global(*) {
+  /* What a page shows comes in softly, also once its data has loaded; its
+     title and breadcrumbs stand at once. */
+  main > :global(*:not(.page-head, .crumbs)) {
     animation: appear 0.35s ease both;
   }
   @keyframes appear {
@@ -261,7 +262,7 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    main > :global(*) {
+    main > :global(*:not(.page-head, .crumbs)) {
       animation-duration: 0.15s;
     }
     @keyframes appear {

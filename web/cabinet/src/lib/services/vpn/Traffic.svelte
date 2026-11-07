@@ -91,8 +91,6 @@
         {/if}
       </div>
     </div>
-  {:else}
-    <p class="muted">{t('common.loading')}</p>
   {/if}
 </section>
 

@@ -136,8 +136,6 @@
             <VpnActivity {activity} />
           {:else if activityFailed}
             <p class="error">{t('common.error')}</p>
-          {:else}
-            <p class="muted">{t('common.loading')}</p>
           {/if}
         </div>
         {@render aside(items.filter((item) => item.href === '/admin/users'))}

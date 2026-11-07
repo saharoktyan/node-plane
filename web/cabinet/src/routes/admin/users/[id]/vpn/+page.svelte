@@ -107,8 +107,7 @@
 <nav class="crumbs"><a href="/admin/users">{t('admin.users')}</a> /
   <a href={'/admin/users/' + accountId}>{owner ? personName(owner) : '…'}</a></nav>
 {#if failure && !profile}<p class="error">{failure}</p>
-{:else if !profile}<p class="muted">{t('common.loading')}</p>
-{:else}
+{:else if profile}
   <div class="page-head">
     <h1>{t('profiles.title')}</h1>
     <div class="actions">

@@ -112,8 +112,7 @@
 
 <nav class="crumbs"><a href="/admin/users">{t('admin.users')}</a></nav>
 {#if failure && !person}<p class="error">{failure}</p>
-{:else if !person}<p class="muted">{t('common.loading')}</p>
-{:else}
+{:else if person}
   <div class="page-head">
     <h1>{personName(person)}</h1>
     <div class="actions">

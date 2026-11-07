@@ -64,8 +64,7 @@
 
 <nav class="crumbs"><a href="/admin/merges">{t('people.merges')}</a></nav>
 {#if failure && !item}<p class="error">{failure}</p>
-{:else if !item}<p class="muted">{t('common.loading')}</p>
-{:else}
+{:else if item}
   <div class="page-head">
     <h1>{seen ? personName(seen.main) + ' ← ' + personName(seen.other) : item.id.slice(0, 8)}</h1>
     <div class="actions"><span class="badge">{t('people.merge_' + item.status)}</span></div>

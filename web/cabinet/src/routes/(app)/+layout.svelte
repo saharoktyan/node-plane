@@ -6,7 +6,8 @@
   import Shell from '$lib/ui/Shell.svelte';
 
   let { children: content }: { children: Snippet } = $props();
-  const load = account.require();
+  // The account at hand draws the cabinet at once; otherwise it loads first.
+  const load = account.me ?? account.require();
 </script>
 
 <Async {load}>

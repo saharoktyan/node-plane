@@ -39,7 +39,8 @@
   let attention = $state<{ update_available?: boolean } | null>(null);
   // Requests waiting for a decision: a count on Requests.
   let pending = $state(0);
-  const load = account.require().then(async (me) => {
+  // The account at hand draws the administration at once; the counts follow.
+  const ready = account.require().then(async (me) => {
     if (me && me.role !== 'admin') await goto('/');
     if (me?.role === 'admin' && account.may('settings.manage'))
       call(api.GET('/api/v1/system/attention')).then((value) => (attention = value as typeof attention)).catch(() => {});
@@ -51,6 +52,7 @@
         .then((value) => (pending += (value as { total?: number }).total ?? 0)).catch(() => {});
     return me;
   });
+  const load = account.me ?? ready;
 </script>
 
 <Async {load}>

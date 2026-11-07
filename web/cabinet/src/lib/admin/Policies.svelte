@@ -152,9 +152,7 @@
 {#snippet body()}
   {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
-  {#if !keys}
-    {#if !failure}<p class="muted">{t('common.loading')}</p>{/if}
-  {:else if draft}
+  {#if keys && draft}
     <form onsubmit={save} transition:unfold>
       {#each GROUPS as group (group)}
         {#if fields.some((field) => field.group === group)}

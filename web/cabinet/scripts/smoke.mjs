@@ -47,7 +47,6 @@ try {
     for (const path of pages) {
       await page.goto(base + path);
       await page.waitForLoadState('networkidle');
-      await page.waitForFunction(() => !document.body.innerText.includes('Загрузка…') && !document.body.innerText.includes('Loading…'));
       const text = await page.innerText('main');
       if (!text.trim()) failures.push(`${scenario}/${role} ${path}: empty page`);
       if (scenario === 'errors' && path !== '/settings' && !/unavailable|недоступ/i.test(text))
