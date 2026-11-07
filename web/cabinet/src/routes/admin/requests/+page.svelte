@@ -3,6 +3,7 @@
      the profile by its tariff's days, or by the days staff name. Below,
      whether new people may ask at all. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { personName } from '$lib/admin/people';
@@ -21,7 +22,6 @@
   let days = $state<Record<string, number>>({});
   let policy = $state<Schemas['AccessRequestPolicyOutput'] | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let confirming = $state<{ id: string; decision: 'approve' | 'reject'; key: string } | null>(null);
 
@@ -42,11 +42,11 @@
     if (!confirming) return;
     const { id, decision, key: commandKey } = confirming;
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await call(api.POST('/api/v1/access-requests/{request_id}/decision', { params: { path: { request_id: id },
         header: { 'Idempotency-Key': commandKey } }, body: { decision } }));
-      notice = t(decision === 'approve' ? 'people.request_approved' : 'people.request_rejected');
+      toast(t(decision === 'approve' ? 'people.request_approved' : 'people.request_rejected'));
       confirming = null;
       await load();
     } catch (error) {
@@ -69,7 +69,7 @@
 
   async function renew(item: Renewal, decision: 'approve' | 'reject') {
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       const path = { path: { request_id: item.id } };
       if (decision === 'approve') {
@@ -79,7 +79,7 @@
       } else {
         await call(api.POST('/api/v1/renewal-requests/{request_id}/reject', { params: path }));
       }
-      notice = t(decision === 'approve' ? 'profiles.renewal_approved' : 'profiles.renewal_rejected');
+      toast(t(decision === 'approve' ? 'profiles.renewal_approved' : 'profiles.renewal_rejected'));
       await load();
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -102,7 +102,6 @@
 </script>
 
 <div class="page-head"><h1>{t('people.requests')}</h1></div>
-{#if notice}<p class="muted">{notice}</p>{/if}
 {#if failure}<p class="error">{failure}</p>{/if}
 {#if items !== null && renewals !== null}
   <div class="tabs" role="tablist" aria-label={t('people.requests')}>

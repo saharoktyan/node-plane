@@ -1,6 +1,7 @@
 <!-- One merge request: both accounts and what joining them does; when both
      have VPN, one profile is kept. The other account is deleted. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { page } from '$app/state';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { personName } from '$lib/admin/people';
@@ -19,7 +20,6 @@
   const id = $derived(page.params.id as string);
   let item = $state<Merge | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let confirming = $state<'approve' | 'reject' | null>(null);
   let keep = $state<'main' | 'other' | null>(null);
@@ -42,11 +42,11 @@
   async function decide() {
     if (!confirming || !item) return;
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await call(api.POST('/api/v1/merge-requests/{request_id}/decision', { params: { path: { request_id: item.id } },
         body: { decision: confirming, keep_profile: confirming === 'approve' ? keep : null } }));
-      notice = t(confirming === 'approve' ? 'people.merge_done' : 'people.merge_rejected_done');
+      toast(t(confirming === 'approve' ? 'people.merge_done' : 'people.merge_rejected_done'));
       confirming = null;
       await load();
     } catch (error) {
@@ -69,7 +69,6 @@
     <h1>{seen ? personName(seen.main) + ' ← ' + personName(seen.other) : item.id.slice(0, 8)}</h1>
     <div class="actions"><span class="badge">{t('people.merge_' + item.status)}</span></div>
   </div>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
   <section class="block">
     <p class="muted small">{dateTime(item.created_at)}</p>

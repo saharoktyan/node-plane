@@ -3,6 +3,7 @@
      its passkeys and Workstations away or give it a sign-in link; owners
      assign roles. Each change names the revision it was made on. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -19,7 +20,6 @@
   const id = $derived(page.params.id as string);
   let person = $state<Account | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let confirming = $state<{ action: Action; key: string } | null>(null);
   let login = $state<string | null>(null);
@@ -43,12 +43,12 @@
 
   async function run(work: () => Promise<Account | void>, done: string) {
     busy = true;
-    notice = failure = '';
+    failure = '';
     try {
       const result = await work();
       if (result) person = result;
       else await load();
-      notice = t(done);
+      toast(t(done));
       return true;
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -100,7 +100,7 @@
     if (!person) return;
     const name = personName(person);
     const done = await run(() => call(api.POST('/api/v1/profiles', { params: { header: { 'Idempotency-Key': key() } },
-      body: { display_name: name, owner_account_id: id, grants: [] } })).then(() => undefined), 'people.give_vpn_hint');
+      body: { display_name: name, owner_account_id: id, grants: [] } })).then(() => undefined), 'people.give_vpn_done');
     if (done) await goto('/admin/users/' + id + '/vpn');
   }
 
@@ -120,7 +120,6 @@
       {#if person.deleted}<span class="badge warn">{t('people.deleting')}</span>{/if}
     </div>
   </div>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
 
   <div class="columns">

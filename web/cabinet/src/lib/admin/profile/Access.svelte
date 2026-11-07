@@ -3,6 +3,7 @@
      given or taken by hand. The draft is saved at once, on the revision it
      was read on. A staff member's VPN reaches everything and is not edited. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -25,7 +26,6 @@
   let nodes = $state<AccessNode[]>([]);
   let regions = $state<Region[]>([]);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
 
   const label = (protocol: string) => (protocol === 'awg' ? 'AWG' : 'VLESS');
@@ -86,18 +86,17 @@
   function edit() {
     if (!saved) return;
     draft = { explicit_grants: [...saved.explicit_grants], rules: [...saved.rules], exclusions: [...saved.exclusions] };
-    notice = '';
   }
 
   async function save() {
     if (!draft || !saved) return;
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await call(api.PUT('/api/v1/profiles/{profile_id}/access-policy', { params: { path: { profile_id: profile.id },
         header: { 'Idempotency-Key': key(), 'If-Match': `"${saved.revision}"` } }, body: draft }));
       draft = null;
-      notice = t('profiles.access_saved');
+      toast(t('profiles.access_saved'));
       await onchange();
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -114,7 +113,6 @@
       <button onclick={edit}>{t('people.change')}</button>
     {/if}
   </div>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
 
   {#if permanent}

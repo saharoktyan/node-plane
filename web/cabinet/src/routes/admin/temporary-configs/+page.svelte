@@ -3,6 +3,7 @@
      background; once active it is shown as a link, a QR code and files, and
      can be revoked before it expires. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
   import { t } from '$lib/i18n/index.svelte';
@@ -23,7 +24,6 @@
   let items = $state<Temporary[] | null>(null);
   let nodes = $state<Node[]>([]);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let creating = $state(false);
   let draft = $state({ node: '', transport: '', duration: 86_400 });
@@ -52,7 +52,6 @@
 
   async function open() {
     creating = true;
-    notice = '';
     if (!nodes.length) {
       const page = await call(api.GET('/api/v1/nodes', { params: { query: { stage: 'node', limit: 100 } } })).catch(() => null);
       nodes = ((page?.items ?? []) as unknown as Node[]).filter((node) => node.enabled);
@@ -73,13 +72,13 @@
     const [protocol, transport] = draft.transport.split(':');
     if (!draft.node || !protocol) return;
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await call(api.POST('/api/v1/system/temporary-configs', { params: { header: { 'Idempotency-Key': key() } },
         body: { node_key: draft.node, protocol, transport, duration_seconds: draft.duration } }));
       creating = false;
       draft = { node: '', transport: '', duration: 86_400 };
-      notice = t('temporary.created');
+      toast(t('temporary.created'));
       await load();
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -140,7 +139,6 @@
   {#if !creating}<div class="actions"><button class="primary" onclick={open}>{t('temporary.create')}</button></div>{/if}
 </div>
 <p class="muted small lead">{t('temporary.lead')}</p>
-{#if notice}<p class="muted">{notice}</p>{/if}
 {#if failure}<p class="error">{failure}</p>{/if}
 
 {#if creating}

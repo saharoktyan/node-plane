@@ -3,6 +3,7 @@
      how far the nodes have applied it. A staff member's own VPN never
      expires, so its term, freezing and deletion are not offered. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { account } from '$lib/account.svelte';
@@ -27,7 +28,6 @@
   let owner = $state<Schemas['AdminAccountOutput'] | null>(null);
   let devices = $state<Schemas['DeviceList'] | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let confirming = $state<{ action: 'freeze' | 'unfreeze' | 'delete'; key: string } | null>(null);
 
@@ -77,7 +77,7 @@
     if (!confirming || !profile) return;
     const { action, key: commandKey } = confirming;
     busy = true;
-    failure = notice = '';
+    failure = '';
     const headers = { 'Idempotency-Key': commandKey, 'If-Match': `"${profile.desired_revision}"` };
     try {
       if (action === 'delete') {
@@ -87,7 +87,7 @@
       }
       await call(api.PATCH('/api/v1/profiles/{profile_id}', { params: { ...path(), header: headers },
         body: { frozen: action === 'freeze' } }));
-      notice = t('profiles.done_' + action);
+      toast(t('profiles.done_' + action));
       confirming = null;
       await load();
     } catch (error) {
@@ -117,7 +117,6 @@
       {:else}<span class="badge ok">{t('profiles.active')}</span>{/if}
     </div>
   </div>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
 
   <div class="columns">

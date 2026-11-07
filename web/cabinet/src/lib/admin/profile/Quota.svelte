@@ -2,6 +2,7 @@
      whether it is stopped or slowed, the past periods, a reset now and,
      for a monthly reset from a chosen day, that day. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -14,7 +15,6 @@
 
   let quota = $state<Schemas['QuotaOutput'] | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let resetting = $state<string | null>(null);
   let day = $state<string | null>(null);
@@ -38,10 +38,10 @@
 
   async function run(work: () => Promise<Schemas['QuotaOutput']>, done: string) {
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       quota = await work();
-      notice = t(done);
+      toast(t(done));
       return true;
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -75,7 +75,6 @@
 
 <section class="block">
   <h2>{t('quota.title')}</h2>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
   {#if quota}
     {#if quota.limit_bytes == null}

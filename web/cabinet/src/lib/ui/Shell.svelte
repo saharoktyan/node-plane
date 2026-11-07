@@ -10,6 +10,7 @@
 </script>
 
 <script lang="ts">
+  import Toasts from './Toasts.svelte';
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import { account } from '$lib/account.svelte';
@@ -113,6 +114,7 @@
     <main>{@render children()}</main>
   </div>
 </div>
+<Toasts />
 
 <style>
   .frame {

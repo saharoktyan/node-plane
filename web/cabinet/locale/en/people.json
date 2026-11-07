@@ -9,7 +9,7 @@
   "more": "Show more",
   "blocked": "blocked",
   "deleting": "being deleted",
-  "who": "Who",
+  "who": "About",
   "change": "Change",
   "save": "Save",
   "saved": "Saved.",
@@ -130,11 +130,11 @@
   "merge_done": "The accounts are merged.",
   "merge_rejected_done": "The request is rejected.",
   "give_vpn": "Give VPN",
-  "give_vpn_hint": "Creates the person's VPN profile; its servers and term are set on it.",
   "merge_asked": "Asked",
   "merge_choose_vpn": "VPN to choose",
   "requests_access": "Access",
   "requests_renewal": "Renewal",
   "no_renewals": "No renewals asked for.",
-  "renewal_line": "until {until} · {tariff}"
+  "renewal_line": "until {until} · {tariff}",
+  "give_vpn_done": "The VPN profile is created."
 }

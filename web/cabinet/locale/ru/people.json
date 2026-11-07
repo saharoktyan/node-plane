@@ -9,7 +9,7 @@
   "more": "Показать ещё",
   "blocked": "заблокирован",
   "deleting": "удаляется",
-  "who": "Кто это",
+  "who": "О пользователе",
   "change": "Изменить",
   "save": "Сохранить",
   "saved": "Сохранено.",
@@ -130,11 +130,11 @@
   "merge_done": "Аккаунты объединены.",
   "merge_rejected_done": "Заявка отклонена.",
   "give_vpn": "Дать VPN",
-  "give_vpn_hint": "Создаёт VPN-профиль человека; серверы и срок задаются в нём.",
   "merge_asked": "Создана",
   "merge_choose_vpn": "нужно выбрать VPN",
   "requests_access": "Доступ",
   "requests_renewal": "Продление",
   "no_renewals": "Продлений никто не просил.",
-  "renewal_line": "до {until} · {tariff}"
+  "renewal_line": "до {until} · {tariff}",
+  "give_vpn_done": "VPN-профиль создан."
 }

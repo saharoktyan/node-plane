@@ -2,6 +2,7 @@
      makes a new account, with VPN and a tariff or without access; its link
      is shown once. Registration lets anyone make an account with a login. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -16,7 +17,6 @@
   let bot = $state<Schemas['TelegramBotUsername'] | null>(null);
   let registration = $state<Schemas['RegistrationSettings'] | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
   let creating = $state(false);
   let draft = $state({ vpn: true, tariff: '', days: 7, note: '' });
@@ -44,10 +44,10 @@
 
   async function run(work: () => Promise<unknown>, done = '') {
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await work();
-      if (done) notice = t(done);
+      if (done) toast(t(done));
       return true;
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -99,7 +99,6 @@
     <div class="actions"><button class="primary" onclick={() => { creating = true; created = null; }}>{t('people.invite_new')}</button></div>
   {/if}
 </div>
-{#if notice}<p class="muted">{notice}</p>{/if}
 {#if failure}<p class="error">{failure}</p>{/if}
 
 {#if creating}

@@ -2,6 +2,7 @@
      days more, or forever), the tariff it is on and how assigning one moves
      the term, and a renewal the person asked for. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError, type Schemas } from '$lib/api/client';
@@ -28,18 +29,17 @@
   let renewDays = $state(30);
   let busy = $state(false);
   let failure = $state('');
-  let notice = $state('');
 
   const path = () => ({ path: { profile_id: profile.id } });
   const headers = () => ({ 'Idempotency-Key': key(), 'If-Match': `"${profile.desired_revision}"` });
 
   async function run(work: () => Promise<unknown>, done: string) {
     busy = true;
-    failure = notice = '';
+    failure = '';
     try {
       await work();
       editing = null;
-      notice = t(done);
+      toast(t(done));
       await onchange();
     } catch (error) {
       failure = error instanceof ApiError ? errorText(error) : t('common.error');
@@ -83,7 +83,6 @@
 
 <section class="block">
   <h2>{t('profiles.term')}</h2>
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
   <div class="rows">
     <div>

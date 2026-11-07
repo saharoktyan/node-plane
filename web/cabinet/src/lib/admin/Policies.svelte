@@ -3,6 +3,7 @@
      removed value falls back to the tariff, the profile or the
      installation, as the controller resolves it. -->
 <script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
   import { unfold } from '$lib/ui/motion';
   import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
@@ -19,7 +20,6 @@
   let keys = $state<PolicyKey[] | null>(null);
   let draft = $state<Record<string, { own: boolean; input: string }> | null>(null);
   let failure = $state('');
-  let notice = $state('');
   let busy = $state(false);
 
   const permission = $derived(subject.kind === 'installation' ? 'settings.manage' : 'profiles.manage');
@@ -106,7 +106,6 @@
       const item = byKey[field.key];
       return [field.key, { own: item.value != null, input: toInput(field, item.value ?? item.effective) }];
     }));
-    notice = '';
   }
 
   function own(field: Field, on: boolean) {
@@ -118,7 +117,7 @@
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (!draft) return;
-    failure = notice = '';
+    failure = '';
     const changes = [];
     for (const field of fields) {
       const item = byKey[field.key];
@@ -138,7 +137,7 @@
     try {
       await write(changes);
       draft = null;
-      notice = t('policies.saved');
+      toast(t('policies.saved'));
       await load();
       await onchange?.();
     } catch (error) {
@@ -150,7 +149,6 @@
 </script>
 
 {#snippet body()}
-  {#if notice}<p class="muted">{notice}</p>{/if}
   {#if failure}<p class="error">{failure}</p>{/if}
   {#if keys && draft}
     <form onsubmit={save} transition:unfold>
