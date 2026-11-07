@@ -701,6 +701,7 @@ chmod +x /usr/local/bin/systemctl
         host = InstallationMaintenance(staging_root=stage, units_root=units)
         for unit in UNITS:
             text = ('Unit=node-plane-backend-worker.service\n' if unit.endswith('.timer') else
+                    'ExecStart=/usr/local/bin/node-plane-driver cabinet-local\n' if unit == 'node-plane-cabinet.service' else
                     f'ExecStart={base}/current/bin\nEnvironmentFile={base}/shared/.env\n')
             (units / unit).write_text(text)
             docker('exec', '-i', container, 'sh', '-c', 'cat > "$1"', 'fixture',

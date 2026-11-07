@@ -69,7 +69,7 @@ check "awg phone new download" "$(awg_rate 10.8.1.2 -R)" 2 3.2
 check "awg tablet upload" "$(awg_rate 10.8.1.3)" 2 3.2
 check "awg tablet download" "$(awg_rate 10.8.1.3 -R)" 0.5 1.1
 # An eviction rule added after the rate rule must still block alice.
-/state/agent-cli add-rule --rule-tag=np-evict-1 --outbound=node-plane-blocked --user=alice --source=127.0.0.1 >/dev/null
+/state/agent-cli add-rule --rule-tag=np-evict-1 --outbound=node-plane-blocked --user=alice.reality-tcp --source=127.0.0.1 >/dev/null
 check "eviction appended last" "$(rules | jq -c 'map(select(. != "static"))')" '["np-rate-1","np-evict-1"]'
 pass 3 "$CHANGED" >/dev/null
 check "rate rule moved behind it" "$(rules | jq -c 'map(select(. != "static"))')" '["np-evict-1","np-rate-1"]'
