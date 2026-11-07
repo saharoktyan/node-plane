@@ -7,9 +7,10 @@
   import Diagnostics from './Diagnostics.svelte';
   import Removal from './Removal.svelte';
   import { t } from '$lib/i18n/index.svelte';
+  import { fade } from 'svelte/transition';
 
-  let { node, services, busy, onchange, onclose }: {
-    node: Node; services: Services | null; busy: boolean; onchange: () => Promise<void>; onclose: () => void;
+  let { node, services, busy, onchange }: {
+    node: Node; services: Services | null; busy: boolean; onchange: () => Promise<void>;
   } = $props();
 
   const tabs = $derived([
@@ -21,9 +22,7 @@
   const tab = $derived(chosen && tabs.includes(chosen) ? chosen : tabs[0]);
 </script>
 
-<section class="block">
-  <div class="block-head"><h2>{t('nodes.maintenance')}</h2>
-    <button onclick={onclose}>{t('common.close')}</button></div>
+<div>
   {#if tabs.length > 1}
     <div class="tabs" role="tablist" aria-label={t('nodes.maintenance')}>
       {#each tabs as name (name)}
@@ -32,6 +31,7 @@
       {/each}
     </div>
   {/if}
+  {#key tab}<div in:fade={{ duration: 200 }}>
   {#if tab === 'diagnostics'}
     <Diagnostics node={node.key} />
   {:else if tab === 'actions'}
@@ -39,4 +39,5 @@
   {:else if tab === 'removal'}
     <Removal {node} />
   {/if}
-</section>
+  </div>{/key}
+</div>

@@ -1,0 +1,270 @@
+<!-- Temporary configurations, all of them or one server's: a new one is
+     made on the node in the background; once active it unfolds as a link,
+     a QR code and files under its row, and can be revoked before it ends. -->
+<script lang="ts">
+  import { toast } from '$lib/ui/toast.svelte';
+  import { unfold } from '$lib/ui/motion';
+  import { api, call, ApiError, type Schemas } from '$lib/api/client';
+  import { t } from '$lib/i18n/index.svelte';
+  import Config from '$lib/services/vpn/Config.svelte';
+  import Confirm from '$lib/ui/Confirm.svelte';
+  import { errorText } from '$lib/ui/errors';
+  import { dateTime, key } from '$lib/ui/format';
+
+  type Temporary = { id: string; node_key: string; node_title?: string; protocol: 'awg' | 'xray'; transport: string;
+    duration_seconds: number; status: string; created_at: string; expires_at: string | null; error_code: string | null;
+    revocation_mode: string; artifact_available?: boolean; unavailable_reason?: string };
+  type Node = { key: string; title: string; flag: string; enabled: boolean; protocols: string[]; xray_transports?: string[] };
+  type Artifact = { content: string; files: { filename: string; content: string }[]; expires_at: string };
+
+  const DURATIONS = [43_200, 86_400, 259_200];
+  const WORKING = ['queued', 'issuing', 'revoking', 'expiry_pending'];
+
+  // On a server's card only its own, made there without choosing it.
+  let { server = null }: { server?: Node | null } = $props();
+  let items = $state<Temporary[] | null>(null);
+  // svelte-ignore state_referenced_locally
+  let nodes = $state<Node[]>(server ? [server] : []);
+  let failure = $state('');
+  let busy = $state(false);
+  let creating = $state(false);
+  // svelte-ignore state_referenced_locally
+  let draft = $state({ node: server?.key ?? '', transport: '', duration: 86_400 });
+  let revoking = $state<string | null>(null);
+  // Configurations read from the node, kept after closing so the panel folds with its content.
+  let kept = $state<Record<string, Artifact>>({});
+  let opened = $state<string | null>(null);
+
+  async function load() {
+    try {
+      const all = ((await call(api.GET('/api/v1/system/temporary-configs', { params: { query: { page_size: 100 } } }))) as unknown as
+        { items: Temporary[] }).items;
+      items = server ? all.filter((item) => item.node_key === server.key) : all;
+    } catch (error) {
+      failure = error instanceof ApiError ? errorText(error) : t('common.error');
+    }
+  }
+  load();
+
+  // A node makes or removes one in the background: look again until it is done.
+  const working = $derived(items?.some((item) => WORKING.includes(item.status)) ?? false);
+  $effect(() => {
+    if (!working) return;
+    const timer = setTimeout(load, 3000);
+    return () => clearTimeout(timer);
+  });
+
+  async function open() {
+    creating = true;
+    if (server) draft.transport ||= transports[0] ?? '';
+    if (!nodes.length) {
+      const page = await call(api.GET('/api/v1/nodes', { params: { query: { stage: 'node', limit: 100 } } })).catch(() => null);
+      nodes = ((page?.items ?? []) as unknown as Node[]).filter((node) => node.enabled);
+    }
+  }
+
+  const node = $derived(nodes.find((item) => item.key === draft.node));
+  // Each protocol's transports on the chosen node, as protocol:transport.
+  const transports = $derived(node ? [
+    ...(node.protocols.includes('awg') ? ['awg:vpn', 'awg:conf'] : []),
+    ...(node.protocols.includes('xray') ? (node.xray_transports ?? ['tcp']).map((item) => 'xray:' + item) : [])
+  ] : []);
+  const label = (protocol: string, transport: string) =>
+    protocol === 'awg' ? 'AWG · ' + (transport === 'vpn' ? 'AmneziaVPN' : '.conf') : 'VLESS · ' + transport.toUpperCase();
+
+  async function create(event: SubmitEvent) {
+    event.preventDefault();
+    const [protocol, transport] = draft.transport.split(':');
+    if (!draft.node || !protocol) return;
+    busy = true;
+    failure = '';
+    try {
+      await call(api.POST('/api/v1/system/temporary-configs', { params: { header: { 'Idempotency-Key': key() } },
+        body: { node_key: draft.node, protocol, transport, duration_seconds: draft.duration } }));
+      creating = false;
+      draft = { node: server?.key ?? '', transport: '', duration: 86_400 };
+      toast(t('temporary.created'));
+      await load();
+    } catch (error) {
+      failure = error instanceof ApiError ? errorText(error) : t('common.error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function show(item: Temporary) {
+    if (opened === item.id) {
+      opened = null;
+      return;
+    }
+    busy = true;
+    failure = '';
+    try {
+      const artifact = (await call(api.GET('/api/v1/system/temporary-configs/{config_id}/artifact',
+        { params: { path: { config_id: item.id } } }))) as unknown as Artifact;
+      kept[item.id] = artifact;
+      opened = item.id;
+    } catch (error) {
+      failure = error instanceof ApiError ? errorText(error) : t('common.error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function revoke() {
+    if (!revoking) return;
+    busy = true;
+    failure = '';
+    try {
+      await call(api.POST('/api/v1/system/temporary-configs/{config_id}/revoke', { params: { path: { config_id: revoking } } }));
+      if (opened === revoking) opened = null;
+      revoking = null;
+      await load();
+    } catch (error) {
+      failure = error instanceof ApiError ? errorText(error) : t('common.error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  // The panel members see takes an issuance and its artifact; a temporary one reads as both.
+  // AWG shows its AmneziaVPN key as the link and QR, with both files, whichever file was asked for.
+  const issuance = (item: Temporary) => ({ id: item.id, node_key: item.node_key, protocol: item.protocol,
+    transport: item.protocol === 'awg' ? 'vpn' : item.transport, status: 'ready', expires_at: item.expires_at ?? '', profile_id: '' }) as Schemas['ConfigIssuanceOutput'];
+  const artifact = (item: Temporary, value: Artifact): Schemas['ConfigArtifactOutput'] => ({ content: item.protocol === 'awg'
+      ? (value.files.find((file) => file.filename.endsWith('.vpn'))?.content ?? value.content) : value.content,
+    files: value.files, filename: value.files[0]?.filename ?? null, media_type: 'text/plain',
+    display_name: (item.node_title ?? item.node_key) + ' · ' + label(item.protocol, item.transport) + ' · Temp' });
+
+  const tone = (status: string) => (status === 'active' ? 'ok' : status.includes('blocked') ? 'danger' : 'warn');
+</script>
+
+{#if failure}<p class="error">{failure}</p>{/if}
+{#if !creating}<div class="row start"><button class="primary" onclick={open}>{t('temporary.create')}</button></div>{/if}
+
+{#if creating}
+  <section class="block" transition:unfold>
+    {#if server}<h3>{t('temporary.create')}</h3>{:else}<h2>{t('temporary.create')}</h2>{/if}
+    <form class="form" onsubmit={create}>
+      {#if !server}<label>{t('temporary.server')}
+        <select bind:value={draft.node} onchange={() => (draft.transport = transports[0] ?? '')}>
+          <option value="" disabled>—</option>
+          {#each nodes as item (item.key)}<option value={item.key}>{item.flag} {item.title}</option>{/each}
+        </select>
+      </label>{/if}
+      {#if node}
+        <label>{t('temporary.protocol')}
+          <select bind:value={draft.transport}>
+            {#each transports as item (item)}<option value={item}>{label(item.split(':')[0], item.split(':')[1])}</option>{/each}
+          </select>
+        </label>
+      {/if}
+      <fieldset>
+        <legend>{t('temporary.duration')}</legend>
+        <div class="row">
+          {#each DURATIONS as seconds (seconds)}
+            <label class="check"><input type="radio" name="duration" value={seconds} bind:group={draft.duration} />
+              {t('temporary.hours', { n: seconds / 3600 })}</label>
+          {/each}
+        </div>
+      </fieldset>
+      {#if draft.transport.startsWith('xray')}<p class="muted small">{t('temporary.vless_notice')}</p>{/if}
+      <div class="row">
+        <button class="primary" disabled={busy || !draft.node || !draft.transport}>{t('temporary.create')}</button>
+        <button type="button" onclick={() => (creating = false)}>{t('common.cancel')}</button>
+      </div>
+    </form>
+  </section>
+{/if}
+
+
+{#if items !== null && !items.length}
+  <p class="muted">{t('temporary.empty')}</p>
+{:else if items}
+  <section class="block">
+    <div class="rows">
+      {#each items as item (item.id)}
+        <div>
+          <span class="grow">{#if !server}<strong>{item.node_title ?? item.node_key}</strong> · {/if}{label(item.protocol, item.transport)}
+            <span class="sub muted small">{item.expires_at ? t('temporary.until_value', { time: dateTime(item.expires_at) }) : ''}
+              <span class="badge {tone(item.status)}">{t('temporary.status_' + item.status)}</span>
+              {#if item.unavailable_reason} · {t('temporary.unavailable_' + item.unavailable_reason)}{/if}</span></span>
+          {#if item.status === 'active' && item.artifact_available !== false}
+            <button disabled={busy} aria-expanded={opened === item.id} onclick={() => show(item)}>
+              {t(opened === item.id ? 'temporary.hide' : 'temporary.show')}</button>
+          {/if}
+          {#if !['revoking', 'expired', 'revoked', 'cancelled'].includes(item.status)}
+            <button class="danger" class:armed={revoking === item.id} disabled={busy}
+              onclick={() => (revoking === item.id ? revoke() : (revoking = item.id))}>{t('temporary.revoke')}</button>
+          {/if}
+        </div>
+        <!-- The configuration slides open under its row, as a member's does. -->
+        <!-- Not a div: the list's row style is for the rows only. -->
+        <section class="fold" class:open={opened === item.id} inert={opened !== item.id}>
+          <div>
+            {#if kept[item.id]}
+              <div class="panel"><Config issuance={issuance(item)} artifact={artifact(item, kept[item.id])} onclose={() => (opened = null)} /></div>
+            {/if}
+          </div>
+        </section>
+        {#if revoking === item.id}
+          <Confirm text={t(item.protocol === 'xray' && item.revocation_mode !== 'connections_closed'
+            ? 'temporary.revoke_confirm_vless' : 'temporary.revoke_confirm')} action={t('temporary.revoke')} cancel={() => (revoking = null)} />
+        {/if}
+      {/each}
+    </div>
+  </section>
+{/if}
+
+<style>
+  .small {
+    font-size: 13px;
+  }
+  .start {
+    margin-bottom: 0.75rem;
+  }
+  /* A panel folds to nothing; a grid row eases between none and its height. */
+  .fold {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows 0.4s ease, opacity 0.25s ease;
+  }
+  .fold.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .fold > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .panel {
+    padding: 0.5rem 0 0.75rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fold {
+      transition: opacity 0.15s;
+    }
+  }
+  .form {
+    display: grid;
+    gap: 0.75rem;
+    max-width: 30rem;
+  }
+  fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+  legend {
+    margin-bottom: 0.25rem;
+  }
+  .rows > div {
+    padding: 0.45rem 0;
+    flex-wrap: wrap;
+  }
+  .sub {
+    display: block;
+    margin-top: 0.15rem;
+  }
+</style>

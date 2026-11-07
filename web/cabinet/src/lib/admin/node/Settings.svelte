@@ -3,7 +3,7 @@
      number of profiles affected; once saved, a server with VPN applies the
      settings at once. -->
 <script lang="ts">
-  import { unfold } from '$lib/ui/motion';
+  import { fade } from 'svelte/transition';
   import { api, call, ApiError } from '$lib/api/client';
   import { pendingSettings, type Node } from '$lib/admin/nodes';
   import { t } from '$lib/i18n/index.svelte';
@@ -82,8 +82,7 @@
   const multiline = (field: FieldKey) => field === 'notes' || field === 'awg_parameters';
 </script>
 
-<section class="block" transition:unfold>
-  <h2>{t('nodes.settings')}</h2>
+<div>
   {#if failure}<p class="error">{failure}</p>{/if}
   {#if form}
     <div class="tabs" role="tablist" aria-label={t('nodes.settings')}>
@@ -93,6 +92,7 @@
       {/each}
     </div>
     <form class="fields" onsubmit={(event) => { event.preventDefault(); save(review !== null); }}>
+      {#key tab}<div class="fields" in:fade={{ duration: 200 }}>
       {#if tab === 'protocols'}
         <fieldset>
           <legend>{t('nodes.protocols')}</legend>
@@ -129,6 +129,7 @@
           </label>
         {/each}
       {/if}
+      </div>{/key}
       <div class="row">
         <button class="primary" class:armed={review !== null} disabled={busy || !dirty(form)}>{t('people.save')}</button>
         <button type="button" onclick={oncancel}>{t('common.cancel')}</button>
@@ -138,7 +139,7 @@
       {/if}
     </form>
   {/if}
-</section>
+</div>
 
 <style>
   .fields {

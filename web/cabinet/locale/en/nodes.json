@@ -4,8 +4,8 @@
   "access_pending": "{count} in progress",
   "access_value": "{ready} of {total} in sync",
   "agent": "Agent",
-  "agent_hint": "The agent is not installed yet. Run a one-time command on the server as root — the controller needs no SSH access or sudo.",
-  "agent_hint_ssh": "The agent is not installed yet. Run a one-time command on the server as root — the controller needs no SSH access or sudo. Or let the controller run it once over its own SSH access.",
+  "agent_hint": "The agent is not installed yet. Run a one-time command on the server as root.",
+  "agent_hint_ssh": "The agent is not installed yet. Run a one-time command on the server as root. Or let the controller run it once over its own SSH access.",
   "agent_identity_mismatch": "node key mismatch",
   "agent_inspection_failed": "inspection failed",
   "agent_missing": "not installed",
@@ -370,5 +370,6 @@
   "port_state_free": "free",
   "port_state_listening": "a listener exists (possibly this node’s container)",
   "port_state_closed": "closed",
-  "port_state_open": "open"
+  "port_state_open": "open",
+  "temporary": "Temporary config"
 }

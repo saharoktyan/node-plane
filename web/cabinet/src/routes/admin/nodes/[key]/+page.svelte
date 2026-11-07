@@ -8,6 +8,9 @@
   import Policies from '$lib/admin/Policies.svelte';
   import Install from '$lib/admin/node/Install.svelte';
   import Maintenance from '$lib/admin/node/Maintenance.svelte';
+  import Temporary from '$lib/admin/Temporary.svelte';
+  import Grow from '$lib/ui/Grow.svelte';
+  import { fade } from 'svelte/transition';
   import Settings from '$lib/admin/node/Settings.svelte';
   import { agentOf, installed, needsSetup, pendingSettings, protocolName, protocolStatus, stateKey,
     type Agent, type Node, type Overview, type Services } from '$lib/admin/nodes';
@@ -27,7 +30,14 @@
   let agent = $state<Agent>('unknown');
   let enrollment = $state<Enrollment | null>(null);
   let failure = $state('');
-  let panel = $state<'settings' | 'limits' | 'maintenance' | null>(null);
+  type Panel = 'settings' | 'limits' | 'temporary' | 'maintenance';
+  let panel = $state<Panel | null>(null);
+  // What the panel area shows: the open one, or the last while it folds away.
+  let shown = $state<Panel | null>(null);
+  $effect(() => {
+    if (panel) shown = panel;
+  });
+  const toggle = (name: Panel) => (panel = panel === name ? null : name);
   let busy = $state(false);
 
   const path = () => ({ path: { node_key: nodeKey } });
@@ -168,20 +178,6 @@
         <Install {node} {overview} {agent} {enrollment} onchange={load} onsettings={() => (panel = 'settings')} />
       {/if}
 
-      {#if panel === 'settings'}
-        <Settings {node} oncancel={() => (panel = null)} onsaved={async () => { panel = null; toast(t('nodes.saved')); await load(); }} />
-      {:else if panel === 'limits'}
-        <section class="block">
-          <div class="block-head"><h2>{t('nodes.limits')}</h2>
-            <button onclick={() => (panel = null)}>{t('common.close')}</button></div>
-          <p class="muted small">{t('nodes.limits_hint')}</p>
-          <Policies subject={{ kind: 'installation', node: node.key, xray: node.protocols.includes('xray') }} bare />
-        </section>
-      {:else if panel === 'maintenance'}
-        <Maintenance {node} {services} busy={operation != null && ACTIVE.includes(operation[1].status)} onchange={load}
-          onclose={() => (panel = null)} />
-      {/if}
-
       {#if traffic}
         <section class="block">
           <h2>{t('nodes.traffic')} <small>{traffic.month} · UTC</small></h2>
@@ -199,6 +195,32 @@
           {#if traffic.status === 'unknown'}<p class="muted small">{t('nodes.traffic_partial')}</p>{/if}
         </section>
       {/if}
+
+      <!-- Under the traffic, so opening one moves nothing above it. Its
+           title stands at once; what is under it unfolds, changes height
+           and folds away, and the title goes once it has. -->
+      {#if panel ?? shown}
+        <section class="block">
+          <div class="block-head"><h2>{t('nodes.' + (panel ?? shown))}</h2>
+            {#if panel}<button onclick={() => (panel = null)}>{t('common.close')}</button>{/if}</div>
+          <Grow open={panel !== null} onclosed={() => (shown = null)}>
+            {#key shown}
+              <div in:fade={{ duration: 250 }}>
+                {#if shown === 'settings'}
+                  <Settings {node} oncancel={() => (panel = null)} onsaved={async () => { panel = null; toast(t('nodes.saved')); await load(); }} />
+                {:else if shown === 'limits'}
+                  <p class="muted small">{t('nodes.limits_hint')}</p>
+                  <Policies subject={{ kind: 'installation', node: node.key, xray: node.protocols.includes('xray') }} bare />
+                {:else if shown === 'temporary'}
+                  <Temporary server={node} />
+                {:else if shown === 'maintenance'}
+                  <Maintenance {node} {services} busy={operation != null && ACTIVE.includes(operation[1].status)} onchange={load} />
+                {/if}
+              </div>
+            {/key}
+          </Grow>
+        </section>
+      {/if}
     </div>
 
     <aside>
@@ -206,17 +228,17 @@
         <section class="block">
           <h2>{t('nodes.manage')}</h2>
           <div class="actions-list">
-            <button onclick={() => (panel = panel === 'settings' ? null : 'settings')}>{t('nodes.settings')}</button>
+            <button class:current={panel === 'settings'} aria-pressed={panel === 'settings'} onclick={() => toggle('settings')}>{t('nodes.settings')}</button>
             {#if node.protocols.length}
-              <button onclick={() => (panel = panel === 'limits' ? null : 'limits')}>{t('nodes.limits')}</button>
+              <button class:current={panel === 'limits'} aria-pressed={panel === 'limits'} onclick={() => toggle('limits')}>{t('nodes.limits')}</button>
             {/if}
+            {#if installed(node) && node.applied_revision > 0 && node.protocols.length}
+              <button class:current={panel === 'temporary'} aria-pressed={panel === 'temporary'} onclick={() => toggle('temporary')}>{t('nodes.temporary')}</button>
+            {/if}
+            <button class:current={panel === 'maintenance'} aria-pressed={panel === 'maintenance'} onclick={() => toggle('maintenance')}>{t('nodes.maintenance')}</button>
             {#if pendingSettings(node) && !(operation && ACTIVE.includes(operation[1].status))}
               <button class="primary" disabled={busy} onclick={apply}>{t('nodes.apply')}</button>
             {/if}
-            {#if installed(node) && node.applied_revision > 0 && node.protocols.length}
-              <a class="button" href="/admin/temporary-configs">{t('temporary.title')}</a>
-            {/if}
-            <button onclick={() => (panel = panel === 'maintenance' ? null : 'maintenance')}>{t('nodes.maintenance')}</button>
           </div>
         </section>
       {/if}
@@ -249,6 +271,12 @@
   .split {
     margin-right: 1rem;
     font-size: 13px;
+  }
+  .actions-list .current {
+    color: var(--accent);
+    font-weight: 600;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 2px;
   }
   .actions-list {
     display: grid;
