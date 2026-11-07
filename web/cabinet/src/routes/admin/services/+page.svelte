@@ -8,6 +8,10 @@
 
   const load = call(api.GET('/api/v1/services'));
   const kinds = ['system', 'builtin', 'user'] as const;
+  // Services with settings of their own.
+  const PAGES: Record<string, string> = { vpn: '/admin/services/vpn', relay: '/admin/services/relay',
+    web_cabinet: '/admin/services/cabinet',
+    telegram_bot: '/admin/services/telegram' };
 </script>
 
 <div class="page-head"><h1>{t('admin.services')}</h1></div>
@@ -25,7 +29,7 @@
           <tbody>
             {#each items as item (item.service)}
               <tr>
-                <td>{#if item.service === 'vpn'}<a href="/admin/services/vpn">{serviceName(item.service)}</a>{:else}{serviceName(item.service)}{/if}</td>
+                <td>{#if PAGES[item.service]}<a href={PAGES[item.service]}>{serviceName(item.service)}</a>{:else}{serviceName(item.service)}{/if}</td>
                 <td>{item.state ? t('admin.state_' + item.state) : '—'}</td>
                 <td>{item.instances ?? '—'}</td>
               </tr>

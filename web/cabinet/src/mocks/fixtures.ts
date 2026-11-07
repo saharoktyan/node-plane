@@ -68,6 +68,8 @@ export function catalog(role: Role, scenario: Scenario): Schemas['ServiceOutput'
     items.push(
       { service: 'relay', kind: 'system', profiles: false, instance_types: ['relay'], access: null, state: 'active',
         instances: 1 },
+      { service: 'web_cabinet', kind: 'system', profiles: false, instance_types: [], access: null, state: 'active',
+        instances: null },
       { service: 'telegram_bot', kind: 'system', profiles: false, instance_types: [], access: null, state: 'active',
         instances: null }
     );
