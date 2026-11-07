@@ -8,5 +8,6 @@
   "collapse": "Collapse the panel",
   "menu": "Menu",
   "actions": "Actions",
-  "attention": "Needs attention"
+  "attention": "Needs attention",
+  "cancel": "Cancel"
 }

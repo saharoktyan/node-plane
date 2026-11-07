@@ -3,6 +3,7 @@
 import { http, HttpResponse, delay } from 'msw';
 import type { Schemas } from '$lib/api/client';
 import * as fixtures from './fixtures';
+import { peopleAccounts, peopleHandlers } from './people';
 import { choice } from './scenario';
 
 const ACCESS = 'mock-access';
@@ -113,8 +114,8 @@ export const handlers = [
   http.get('/api/v1/me/profiles/:id/history', guarded(() => fixtures.trafficHistory(choice().scenario))),
   http.get('/api/v1/system/attention', guarded(() => ({ unacknowledged_alerts: 0,
     update_available: choice().scenario !== 'empty' }))),
+  ...peopleHandlers,
   http.get('/api/v1/accounts', guarded(({ url }) => ({
-    items: fixtures.accounts(choice().scenario, new URL(url).searchParams.get('access') ?? 'with'),
-    next_cursor: null }))),
+    items: peopleAccounts(new URL(url).searchParams.get('access') ?? 'with'), next_cursor: null }))),
   http.get('/api/v1/nodes', guarded(() => ({ items: fixtures.nodes(choice().scenario), next_cursor: null })))
 ];

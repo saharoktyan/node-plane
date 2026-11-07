@@ -217,6 +217,32 @@ label > input,
 label > select {
   color: var(--text);
 }
+/* A checkbox or a choice with its words beside it. */
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  flex: none;
+  border: none;
+  box-shadow: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+}
+label.check:has(input:disabled) {
+  color: var(--muted);
+  cursor: default;
+}
 
 /* Tables: small-caps heads, hairline rows. */
 table {

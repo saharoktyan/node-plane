@@ -16,6 +16,12 @@
       { href: '/admin', label: t('admin.overview'), icon: 'overview', allowed: true },
       { href: '/admin/users', label: t('admin.users'), icon: 'users', group: t('admin.group_people'),
         allowed: account.may('accounts.manage') || account.may('access_requests.manage') || account.may('profiles.manage') },
+      { href: '/admin/requests', label: t('people.requests'), icon: 'requests', group: t('admin.group_people'),
+        allowed: account.may('access_requests.manage'), count: pending || undefined },
+      { href: '/admin/invites', label: t('people.invites'), icon: 'invites', group: t('admin.group_people'),
+        allowed: account.may('accounts.manage') },
+      { href: '/admin/merges', label: t('people.merges'), icon: 'merges', group: t('admin.group_people'),
+        allowed: account.may('accounts.manage') && account.may('profiles.manage') },
       { href: '/admin/nodes', label: t('admin.nodes'), icon: 'nodes', group: t('admin.group_infrastructure'), allowed: account.may('nodes.inspect') },
       { href: '/admin/services', label: t('admin.services'), icon: 'catalog', group: t('admin.group_infrastructure'), allowed: true },
       { href: '/admin/announcements', label: t('admin.announcements'), icon: 'announcements', group: t('admin.group_system'), allowed: account.may('settings.manage') },
@@ -29,10 +35,15 @@
 
   // Whether an update waits: a dot on Updates.
   let attention = $state<{ update_available?: boolean } | null>(null);
+  // Requests waiting for a decision: a count on Requests.
+  let pending = $state(0);
   const load = account.require().then(async (me) => {
     if (me && me.role !== 'admin') await goto('/');
     if (me?.role === 'admin' && account.may('settings.manage'))
       call(api.GET('/api/v1/system/attention')).then((value) => (attention = value as typeof attention)).catch(() => {});
+    if (me?.role === 'admin' && account.may('access_requests.manage'))
+      call(api.GET('/api/v1/access-requests', { params: { query: { limit: 1 } } }))
+        .then((value) => (pending = value.pending_total ?? 0)).catch(() => {});
     return me;
   });
 </script>
