@@ -2,6 +2,7 @@
      for one, found by name, region or code, each opening its card. -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { account } from '$lib/account.svelte';
   import { api, call, ApiError } from '$lib/api/client';
   import { stateKey, type Node } from '$lib/admin/nodes';
   import { t } from '$lib/i18n/index.svelte';
@@ -43,6 +44,7 @@
 
 <div class="page-head">
   <h1>{t('admin.nodes')}</h1>
+  {#if account.may('nodes.manage')}<div class="actions"><a class="button primary" href="/admin/nodes/new">{t('nodes.new')}</a></div>{/if}
 </div>
 <div class="row search">
   <input type="search" placeholder={t('nodes.search')} aria-label={t('nodes.search')} bind:value={search} />

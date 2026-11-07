@@ -43,7 +43,42 @@ function work(key: string, kind: string, finish: () => void) {
   return operation;
 }
 
+const TEMPLATES = [['de', 'Frankfurt', 'Europe', '🇩🇪'], ['nl', 'Amsterdam', 'Europe', '🇳🇱'], ['fi', 'Helsinki', 'Europe', '🇫🇮'],
+  ['us', 'New York', 'North America', '🇺🇸'], ['sg', 'Singapore', 'Asia', '🇸🇬']];
+
+/** The next free number after a location's code, as the controller picks it. */
+function nextKey(prefix: string) {
+  for (let number = 1; ; number += 1) if (!find(prefix + number)) return prefix + number;
+}
+
 export const nodeHandlers = [
+  http.get('/api/v1/nodes/creation-options', guarded(() => ({ local_available: true,
+    defaults: { protocols: ['awg', 'xray'], xray_transports: ['tcp', 'xhttp'],
+      settings: { awg_port: 443, awg_port_mode: 'auto', awg_i1_preset: 'quic', xray_sni: 'www.cloudflare.com' } },
+    ssh_preparation_required: false,
+    templates: TEMPLATES.map(([code, title, region, flag]) => ({ code, title, region, flag,
+      draft: { key: nextKey(code), title } })) }))),
+  http.get('/api/v1/nodes/key-availability', guarded((request) => {
+    const key = new URL(request.url).searchParams.get('key') ?? '';
+    const prefix = key.replace(/\d+$/, '');
+    return find(key) ? { key, available: false, reason: 'node_key_conflict', suggestion: nextKey(prefix) }
+      : key === 'ru1' ? { key, available: false, reason: 'node_key_retired', suggestion: nextKey('ru') }
+      : { key, available: true, reason: null, suggestion: null };
+  })),
+  http.post('/api/v1/nodes', guarded(async (request) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const template = TEMPLATES.find(([code]) => code === body.template);
+    const key = template ? nextKey(template[0]) : String(body.key);
+    if (find(key)) return error(409, 'node_key_conflict');
+    const node = { key, title: body.title, flag: body.flag, region: body.region, region_id: String(body.region).toLowerCase(),
+      enabled: true, protocols: body.protocols, xray_transports: body.xray_transports, desired_revision: 1, applied_revision: 0,
+      notes: '', policy_eligible: false, settings_apply_pending: false, setup_attempted: false, stage: 'invitation',
+      transport: body.transport, ssh_target: body.ssh_target ?? null, agent: null, service_instances: [],
+      settings: body.settings } as unknown as Node;
+    store().nodes.push(node);
+    store().extra[key] = { agent: 'missing', enrollment: null, operation: null };
+    return HttpResponse.json(node, { status: 201 });
+  })),
   http.get('/api/v1/nodes', guarded((request) => {
     const stage = new URL(request.url).searchParams.get('stage');
     return { items: store().nodes.filter((node) => !stage || node.stage === stage), next_cursor: null };
